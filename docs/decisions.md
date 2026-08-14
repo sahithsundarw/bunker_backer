@@ -343,6 +343,114 @@ so V23 sits at the end of the Tier 0 table out of numeric sequence. That is inte
   so it can be measured and reported on CPU and arguably never needs a skip. Removing that
   entry would be a strengthening, but only the human may make it. Not changed here.
 
+## D10 — Further contract amendment: V39 may not SKIP (HUMAN-ISSUED, 2026-08-15)
+
+The SKIP whitelist entry `V39, V40 (partial) — No CUDA device available` is reduced to
+`V40 (partial)`. **V39 can no longer skip.**
+
+**Rationale.** The revised V39 (D6) has no threshold, so end-to-end wall-clock is measurable
+on any device. Absence of CUDA no longer prevents the check from running — it only changes
+the number. V39 must therefore be measured on whatever device is present and **labelled with
+that device name** in `results/runtime_report.md`.
+
+Unambiguously a **strengthening**: a check that could previously be skipped now always runs.
+Human-issued. `docs/VERIFIER_SHA256` re-pinned.
+
+## D11 — DIV2K crop-match: DENIED PERMANENTLY
+
+**Decision: the crop-match test against downloaded DIV2K will not be run. Not now, not in
+Round 2, not conditionally.** Closed. D8's "if it matters later, the decisive test is…"
+sentence is hereby withdrawn.
+
+**Rationale (human-issued):**
+
+1. **Identifying the source is the precondition for obtaining hidden labels.** The only thing
+   standing between this repo and the test ground truth is not knowing which public corpus
+   the test inputs came from. Confirming it removes that barrier.
+2. **A confirmed match would sit in the repo as a pointer to the labels.** Even with no intent
+   to use them, a committed artifact saying "test input `000123.npy` is DIV2K val image
+   `0847`, crop (x,y)" *is* a map to the hidden ground truth. Its existence is the problem,
+   independent of anyone's intentions.
+3. **It has no decision value.** Strategy is identical whether the source is DIV2K, Flickr2K
+   or something else: train on the provided pairs, optimise for degradation robustness, do
+   not use external data (D9). No modelling decision turns on the answer.
+4. **Asymmetric payoff.** Zero upside, and the downside is a scored-integrity failure.
+
+**Standing rule.** Do not download DIV2K, Flickr2K, BSD or any candidate corpus for the
+purpose of matching against the provided data. Do not compute crop correspondences against
+any external image set. Do not record a suspected source-image identity for any provided
+file. `docs/decisions.md` D8 remains the final word on provenance: **source not identified,
+and deliberately left unidentified.**
+
+This entry belongs in `docs/STATE.md` under "Do NOT retry" and is listed there.
+
+## D12 — Degradation simulator built to measurements, not to SPEC §6.4
+
+**Decision (human-issued): `src/degrade.py` implements the *measured* degradation, not
+SPEC §6.4's reference speckle model.** Binding specification:
+
+| element | value | source |
+|---|---|---|
+| **Downsample, primary** | the **recovered 4×4 kernel** as a fixed conv (weights in D1) | D1 least-squares recovery, 3.125 M equations |
+| **Downsample, alternative** | `bicubic (antialias OFF)` in a **minority** of samples, for randomisation diversity per SPEC §6.3 | D1 — within 1.22e−05 of optimal |
+| **Noise model** | three-parameter `var = σ² + a·x + v·x²`, applied **AFTER** downsampling | D2 autocorrelation ⇒ noise added post-decimation |
+| **Shot / linear term** | `a = 0.011253`, randomised **±30%** ⇒ `U(0.00788, 0.01463)` | D2 three-parameter global fit |
+| **Speckle / quadratic term** | `v = 0.015745`, randomised **±30%** ⇒ `U(0.01102, 0.02047)` | D2 three-parameter global fit |
+| **Additive Gaussian σ** | randomise over **`U(0, 0.02)` including zero** | see below |
+| **Clipping** | **do NOT clip synthetic LR to [0,1]** | SPEC F5, §6.3; measured range [−0.28, 2.16] |
+
+**On the Gaussian σ hedge.** The measurement is unambiguous: the additive floor fits to
+**exactly zero** (D2), so a strict reading says omit the term. It is retained anyway,
+randomised over `[0, 0.02]` *including* zero, because SPEC F3 names additive Gaussian as one
+of the two benchmark degradations and F7 warns that test noise *levels* may vary. Sampling
+from zero upward costs nothing when the true value is zero and hedges the case where the
+hidden test set carries an additive component the released proxy does not. This is a
+deliberate, cheap insurance policy against a stated-but-unmeasured degradation — not a
+contradiction of the measurement.
+
+**Do not use SPEC §6.4's `add_speckle` alone.** It implements only the `v·x²` term and would
+under-noise mid-tones while over-noising darks by up to 12.5× (D2).
+
+## D13 — Pretrained initialisation: confirmed from scratch (HUMAN-ACCEPTED)
+
+D9's recommendation is accepted. Phase 1 trains **from scratch**. No external datasets, no
+pretrained weights. The deck and README state verbatim:
+
+> **No external datasets or pretrained weights used.**
+
+**Round 2 experiment, logged and deferred:** initialise from EDSR-baseline ×2 (Apache-2.0,
+≈1.37 M params), adapt the 3→1 channel stem by averaging RGB conv weights and the head to
+C→1, fine-tune on the measured degradation, and compare against the from-scratch model **at
+equal wall-clock**. Report the delta on PSNR/SSIM/LPIPS plus throughput. Licence must be
+re-verified from the `LICENSE` file at the exact commit used before anything is downloaded.
+
+## D14 — Verifier changes made during BOOTSTRAP (hash-pin audit trail)
+
+`docs/VERIFIER_SHA256` pins `scripts/verify_all.py` and V00 fails on an undocumented change.
+This entry is the required documentation for every edit made after the first pin.
+
+### Edit 1 — V14 local-module false positive (correctness fix)
+
+V14 asserts every top-level import resolves to a pinned distribution. It flagged
+`fit-degradation` as an uncovered dependency. That is wrong: `scripts/renorm_experiment.py`
+does `from fit_degradation import weight_matrix`, a **local sibling module**, not a
+third-party package. Demanding it in `requirements.txt` is impossible to satisfy.
+
+Fix: exclude module names that resolve to a `.py` file or a package `__init__.py` inside the
+repo. V14's intent — third-party imports must be pinned — is unchanged; the fix removes a
+check that could never pass. It is neither a loosening of intent nor a tolerance widening: no
+real dependency is now permitted to go unpinned. `torch` is still correctly flagged.
+
+**Hash after this edit is recorded in `docs/VERIFIER_SHA256`.** No other behaviour changed.
+
+### Note on V41/V42 passing at iteration 0
+
+Both pass on a stub (`torch.compile not used at all`, `TTA is flag-gated and off by default`).
+These are *absence* checks — they assert a bad default is not present, which is genuinely
+true of a stub. They are not silent passes for unimplemented code and will stay meaningful
+once compile and TTA exist. Flagged here so a reviewer does not mistake them for the
+"not implemented yet" class.
+
 ## D7 — Startup cost is the throughput score
 
 Measured, and the reason V23 was promoted.

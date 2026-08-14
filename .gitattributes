@@ -1,0 +1,18 @@
+# Normalise line endings to LF in the repository AND in the working tree.
+#
+# Without this, git converts LF->CRLF on checkout on Windows, which makes the sha256 pins in
+# docs/VERIFIER_SHA256 fail in a fresh clone for reasons unrelated to tampering. V00 would
+# then fail in every clean-room run. See docs/BLOCKERS.md B3.
+#
+# `eol=lf` forces LF in the working copy too, so the hash is stable across platforms.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.npy binary
+*.npz binary
+*.pt  binary
+*.pth binary
+*.zip binary
+*.pdf binary

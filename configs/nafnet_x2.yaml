@@ -1,0 +1,40 @@
+# Final config for the submitted checkpoint (SPEC 9).
+# Owner: model-core (model block) / trainer (optim, train blocks).
+model:
+  name: NAFSR
+  width: 48
+  num_blocks: 16
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+data:
+  lr_patch: 64            # -> 128 GT patch
+  batch_size: 32
+  synth_ratio: 0.5        # fraction generated on the fly from GT (SPEC F15)
+  # Degradation params are MEASURED, not from SPEC 6.4. See docs/decisions.md D12.
+  degrade:
+    kernel: recovered_4x4       # bicubic_aa_off used for a minority of samples
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253                 # shot / linear term
+    v: 0.015745                 # speckle / quadratic term
+    randomise_frac: 0.30        # +/-30% on a and v
+    gauss_sigma_range: [0.0, 0.02]   # includes zero; hedge for SPEC F3
+    clip_lr: false              # SPEC F5 -- never clip synthetic LR
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]       # NAFNet beta2=0.9, not 0.999
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 500
+  total_iters: 20000      # compressed for a 1-day budget
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 1000
+  save_best_on: psnr

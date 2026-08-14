@@ -1,0 +1,7 @@
+# Committed validation file list (SPEC 6.1, V29).
+# NEVER regenerate this at runtime -- that is leakage.
+# Filenames are relative to <data_root>/train/ and name the GT/NoisyLR pair.
+# NOTE: test_NoisyLR reuses these same filenames for DIFFERENT images. This list refers
+# ONLY to train/. See docs/SPEC_ADDENDUM.md section 6.
+# TODO(data-pipeline): populate. Placeholder retains the last 200 pairs used for the
+# bicubic baseline in docs/decisions.md D3 (003000.npy - 003199.npy).

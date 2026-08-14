@@ -2,30 +2,24 @@
 #
 # Per CLAUDE.md Prime Directive 1, scripts/verify_all.py is hash-pinned here. Any change
 # to a pinned file without a corresponding docs/decisions.md entry explaining the
-# STRENGTHENING is a failed iteration and must be reverted.
+# STRENGTHENING is a failed iteration and must be reverted. V00 enforces this.
 #
 # Hashes are sha256 over the working-tree bytes, LF line endings, as produced by:
 #   (Get-FileHash <path> -Algorithm SHA256).Hash.ToLower()
 #   sha256sum <path>
 #
-# NOTE ON LINE ENDINGS: this repo is on Windows and git is configured to convert LF->CRLF
-# in the working copy on checkout. Verify these hashes against an LF-normalised copy, e.g.
-#   git show HEAD:docs/VERIFICATION_CONTRACT.md | sha256sum
-# A CRLF working copy will NOT match. This is a checkout artifact, not tampering.
+# NOTE ON LINE ENDINGS: this repo is on Windows and git may convert LF->CRLF in the
+# working copy on checkout. Verify against an LF-normalised copy, e.g.
+#   git show HEAD:scripts/verify_all.py | sha256sum
+# A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
+# See docs/BLOCKERS.md B3.
 
-# --- pinned: the contract itself ---
-# 12903 bytes, LF, 114 lines
-c1beee3d17edc08ccdc5eca57266f022bd3b7a24b3694869d1d54f05dcf77624  docs/VERIFICATION_CONTRACT.md
-
-# --- pending: the verifier implementation ---
-# scripts/verify_all.py DOES NOT EXIST YET. It is created during BOOTSTRAP, which has not
-# been authorised. Its pin goes here the moment it exists, and CLAUDE.md Prime Directive 1
-# applies to it from that point forward. Do not treat the absence of this line as a passing
-# integrity check -- it is an unbuilt file, not a verified one.
-# <sha256>  scripts/verify_all.py
+d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13  scripts/verify_all.py
+6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
-# 2026-08-15  initial pin. Contract hash recorded AFTER the two human-authorised edits of
-#             the same date (V39 replaced, V23 moved Tier 1 -> Tier 0). See decisions.md D6.
-#             No pre-edit hash exists because this file was created after the edits; the
-#             pre-edit contract is recoverable from git as commit 5e9b5c6.
+# 2026-08-15  contract pinned after the two human-authorised edits (V39 replaced,
+#             V23 moved Tier 1 -> Tier 0). See docs/decisions.md D6.
+# 2026-08-15  V39 SKIP allowance removed from the whitelist. See docs/decisions.md D10.
+# 2026-08-15  scripts/verify_all.py created during BOOTSTRAP and pinned for the first time.
+# 2026-08-15  V14 local-module false-positive fix. See docs/decisions.md D14.

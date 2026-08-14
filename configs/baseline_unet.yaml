@@ -1,0 +1,39 @@
+# Plain U-Net learned baseline (SPEC 10 baseline 3, V28).
+# Same training budget as the final model so the comparison is fair.
+model:
+  name: UNetBaseline
+  width: 32
+  levels: 4
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+data:
+  lr_patch: 64
+  batch_size: 32
+  synth_ratio: 0.5
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 0.30
+    gauss_sigma_range: [0.0, 0.02]
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 500
+  total_iters: 20000
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 1000
+  save_best_on: psnr

@@ -349,6 +349,54 @@ of actual compute. **Startup is on the order of 85–95% of the measured wall-cl
    That requirement is doing more work than it appears to; an internal timer around the
    forward pass would report ~0.4 s and hide 90% of the real cost.
 
+## 12. F3 REVISED — no additive Gaussian floor; variance is linear, not quadratic
+
+**SPEC F3 states:** *"Two noise types: **speckle noise** (multiplicative, signal-dependent,
+grainy) and **additive Gaussian noise**."* SPEC §5.2 accordingly prescribes fitting
+`var(residual | x) = σ² + v·x²` and reading σ² off as the additive intercept.
+
+**Measured, n=200 pairs, 3,125,000 pixels:**
+
+1. **There is no additive Gaussian floor.** The prescribed two-parameter fit returns
+   σ = 0.036991, but it **overshoots the darkest intensity bin by 12.5×** (observed
+   1.102e−04 at x=0.0157 against a predicted 1.375e−03). Refitting with a free linear term
+   drives the additive component to **exactly σ = 0.000000**.
+2. **The variance curve has a substantial linear component**, not a pure quadratic:
+
+   | model | mean abs rel err | R² |
+   |---|---|---|
+   | σ² + v·x² (as SPEC §5.2 prescribes) | 0.8688 | 0.984080 |
+   | σ² + a·x + v·x² | **0.3356** | **0.990052** |
+
+   Three-parameter fit: **σ = 0.000000, a = 0.011253, v = 0.015745.**
+3. The R² of 0.984 for the two-parameter form is flattering — it is dominated by
+   high-intensity bins where the absolute variance is large. Relative error tells the truth.
+
+**SPEC §6.4 anticipated this case explicitly:**
+
+> *"If §5.2 shows the variance-vs-intensity curve is **linear** rather than **quadratic** in
+> `x`, the underlying model is **Poisson/shot noise** rather than multiplicative speckle —
+> adapt accordingly and document it. Note this possibility; do not assume."*
+
+This is that case. The dominant mechanism at low and mid intensity is **shot/Poisson noise**
+(`a·x`), with multiplicative speckle (`v·x²`) taking over at high intensity. Documented here
+as §6.4 requires.
+
+**Consequences.**
+
+- `src/degrade.py` implements the three-parameter model — see `docs/decisions.md` D12 for the
+  binding parameterisation.
+- SPEC §6.4's reference `add_speckle` (`y = x + n·x`, `n ~ N(0, var)`) implements only the
+  `v·x²` term. **Using it alone is wrong here**: it under-noises mid-tones and over-noises
+  darks by up to 12.5×, which would teach the model to over-smooth precisely where the real
+  data is cleanest.
+- An additive Gaussian term is nonetheless **retained as a hedge**, randomised over
+  `U(0, 0.02)` *including zero*, because F3 names it as a benchmark degradation and F7 warns
+  that test noise levels may vary. Sampling from zero upward is free when the true value is
+  zero. This hedges F3 without contradicting the measurement.
+- Headline σ = 0.036991 / v = 0.026781 remain the correct answer to SPEC §5.2 *as literally
+  posed*. They must not be used to **simulate** the degradation.
+
 ## 11. Deck language — state the proxy relationship honestly
 
 SPEC §14 slide 3 is "Idea Description — dataset analysis". SPEC §15 requires an honest

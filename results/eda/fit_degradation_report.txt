@@ -1,4 +1,4 @@
-﻿loaded 200 GT/LR pairs from C:\kla-data
+loaded 200 GT/LR pairs from C:\kla-data
 GT (256, 256) -> LR (128, 128)   (scale x2)
 
 ======================================================================================

@@ -108,7 +108,13 @@ A check may report SKIP **only** if listed here with a reason. The agent may app
 
 | Check | Permitted skip reason |
 |---|---|
-| V39, V40 (partial) | No CUDA device available in the dev environment. Must still pass static-scan portions. |
+| V40 (partial) | No CUDA device available in the dev environment. Must still pass static-scan portions. |
 | V06 (remote branch) | No git remote configured yet — permitted only before first push. |
+
+> **V39 may no longer SKIP** (human-authorised strengthening, 2026-08-15). The revised V39 has
+> no threshold, so end-to-end wall-clock is measurable on any device. It must be measured on
+> whatever device is present and **labelled with that device name** in
+> `results/runtime_report.md`. Absence of CUDA is not an excuse to skip it. See
+> `docs/decisions.md` D10.
 
 _Anything else that cannot be run is a FAIL, not a SKIP._

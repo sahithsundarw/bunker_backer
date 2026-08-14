@@ -1,0 +1,25 @@
+# Pinned dependencies (SPEC F12; V14 asserts every line carries an == pin and that every
+# top-level import in the repo resolves to a listed distribution).
+#
+# SCAFFOLD: this is NOT yet a complete `pip freeze`. torch is deliberately absent because it
+# has not been installed or version-selected yet. V14 will keep failing until this file is
+# regenerated from a real environment with `pip freeze`.
+# Owner: docs-scribe.
+#
+# Note: a cp314 Windows wheel exists for torch 2.13.0, so Python 3.14 is supported; the
+# project targets 3.12 for wider vision-stack wheel coverage (docs/ENVIRONMENT.md).
+
+numpy==2.5.2
+scipy==1.18.0
+matplotlib==3.11.1
+
+# --- pending, added when installed and version-locked ---
+# torch==
+# scikit-image==
+# lpips==
+# pyyaml==
+# pytorch-msssim==
+
+# NOT a dependency of inference.py. The inference path is .npy end to end and imports only
+# argparse os sys time pathlib concurrent.futures numpy torch (CLAUDE.md STYLE, V23 Tier 0).
+# opencv-python and tifffile were removed deliberately -- see docs/SPEC_ADDENDUM.md section 5.

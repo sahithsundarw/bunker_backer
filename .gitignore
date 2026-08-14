@@ -57,6 +57,9 @@ __MACOSX/
 .DS_Store
 ._*
 
+# --- Verifier fixtures: generated at runtime by scripts/verify_all.py, never committed ---
+tests/fixtures/
+
 # --- Local env / editor ---
 .env
 .env.local
