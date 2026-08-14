@@ -32,6 +32,14 @@
 | **V12** | Input is NOT clipped. | Instrumented check: feed an input containing values `< 0` and `> 1`; assert the tensor entering the model still contains them. (SPEC F5 — out-of-range values are intentional and informative.) |
 | **V13** | Public repo & required contents. | `README.md`, `inference.py`, `train.py`, `requirements.txt`, weights, `results/restored_test_outputs/` (non-empty) all present. `git remote -v` resolves and an unauthenticated `git clone` of the remote succeeds. |
 | **V14** | `requirements.txt` is complete and pinned. | Every top-level import across the repo resolves to a listed distribution; every line has an `==` pin; the fresh-venv install (V04) succeeds. |
+| **V23** | No module-level heavy imports in `inference.py`. | Static AST scan of module-level imports against the allowlist in CLAUDE.md §STYLE. `python -X importtime inference.py --help` total import time < 3.0 s. |
+
+> **V23 was moved from Tier 1 to Tier 0** on 2026-08-15 by human authorisation. Rationale: the
+> test set is 400 files totalling 25.05 MB and the forward pass is sub-millisecond per image,
+> so fixed startup cost is ~85–95% of the scored wall-clock. A stray module-level import is a
+> submission-blocking throughput failure here, not a hygiene nit. See `docs/decisions.md` D6
+> and `docs/SPEC_ADDENDUM.md` §9. The ID is deliberately **not** renumbered — check IDs are
+> stable identifiers referenced by `results/verification_report.json` and `docs/STATE.md`.
 
 ## TIER 1 — ROBUSTNESS (silent scoring killers)
 
@@ -45,8 +53,9 @@
 | **V20** | Corrupt-file resilience. | A truncated/unreadable file in the input dir does not abort the run; it is logged and the remaining N-1 images are still produced. |
 | **V21** | Idempotence. | Running twice into the same output dir produces byte-identical outputs (no accumulation, no random state leaking into inference). |
 | **V22** | Precision equivalence. | Outputs under `--precision bf16` and `--precision fp32` agree to within a documented tolerance (default: mean abs diff < 1e-3, max abs diff < 1e-2). Guards against a silently broken AMP path. |
-| **V23** | No module-level heavy imports in `inference.py`. | Static AST scan of module-level imports against the allowlist in CLAUDE.md §STYLE. `python -X importtime inference.py --help` total import time < 3.0 s. |
 | **V24** | Determinism of inference. | Two runs in the same process and two runs in separate processes give identical outputs. No dropout/noise active in eval mode. |
+
+> **V23 has moved to Tier 0.** See the Tier 0 table above. Not deleted, not loosened.
 
 ## TIER 2 — CORRECTNESS OF THE ML (does the thing actually work)
 
@@ -71,7 +80,7 @@
 |---|---|---|
 | **V37** | End-to-end timing is measured and reported. | `scripts/benchmark_runtime.py` reports total wall-clock **including process start**, image count, img/s, batch size, precision, GPU name, driver, CUDA and torch versions, and the timing method. Written to `results/runtime_report.md`. |
 | **V38** | Timing covers the full pipeline. | The measured window includes disk read, preprocess, H2D, forward, D2H, postprocess and save — asserted by timing the subprocess externally (`time python inference.py ...`), not by an internal timer around the forward pass only. |
-| **V39** | Throughput floor. | ≥ 20 images/second on the dev GPU at 128→256 with default settings, or a documented justification in `docs/decisions.md` if the chosen architecture cannot reach it. Tighten this number once measured. |
+| **V39** | End-to-end wall-clock, measured and reported. | Total end-to-end wall-clock for the full 400-image test set, measured externally around the process (not an internal timer), reported in `results/runtime_report.md` with a startup-vs-compute breakdown. PASS = measured and reported. No threshold — F9 prescribes none. |
 | **V40** | Optimizations are on by default where free. | `channels_last`, `inference_mode`, TF32, cuDNN benchmark, AMP enabled by default; threaded writes present; shape-grouped batching present. Asserted by static scan. |
 | **V41** | `torch.compile` is OFF by default. | Compilation cost sits inside KLA's measured window. Must be opt-in via `--compile`, with the measured crossover documented. |
 | **V42** | Self-ensemble / TTA is OFF by default. | If implemented, it must be flag-gated, with both timing numbers reported. |

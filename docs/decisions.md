@@ -300,6 +300,79 @@ negative — renorm is not merely worse on average, it is worse nearly everywher
 
 ---
 
+## D6 — Contract amendments (HUMAN-ISSUED, 2026-08-15)
+
+**Both edits below were authorised by the human.** `docs/VERIFICATION_CONTRACT.md` is
+immutable to the agent (Prime Directive 1); the agent did not originate, and may not
+originate, either change. Recorded here because PD1 requires a `decisions.md` entry
+explaining any modification to a pinned file.
+
+### Amendment 1 — V39 replaced
+
+| | text |
+|---|---|
+| **Was** | *Throughput floor.* ≥ 20 images/second on the dev GPU at 128→256 with default settings, or a documented justification in `docs/decisions.md` if the chosen architecture cannot reach it. Tighten this number once measured. |
+| **Now** | *End-to-end wall-clock, measured and reported.* Total end-to-end wall-clock for the full 400-image test set, measured externally around the process (not an internal timer), reported in `results/runtime_report.md` with a startup-vs-compute breakdown. PASS = measured and reported. No threshold — F9 prescribes none. |
+
+**Rationale.** The old threshold was invented by the contract, not derived from SPEC. F9
+states plainly: *"No target score or latency threshold prescribed."* A fabricated 20 img/s
+floor could have failed a submission that KLA would have scored fine, or — worse — driven
+architecture choices to clear a number nobody asked for.
+
+**Is this a loosening?** It removes a numeric gate, so on its face yes. Reading it as a
+strengthening is defensible and is the intent: the new check demands a *startup-vs-compute
+breakdown measured externally around the process*, which the old one did not, and which is
+the number that actually matters here (see D7). It replaces an arbitrary threshold with a
+mandatory measurement. Either way the change is human-issued, which is the only thing PD1
+requires.
+
+### Amendment 2 — V23 moved Tier 1 → Tier 0
+
+Unambiguously a **strengthening**: V23 now blocks submission rather than being a robustness
+concern. The check text is unchanged. The ID is deliberately **not** renumbered — check IDs
+are stable identifiers referenced by `results/verification_report.json` and `docs/STATE.md`,
+so V23 sits at the end of the Tier 0 table out of numeric sequence. That is intended.
+
+### Consequences
+
+- `docs/VERIFIER_SHA256` created and now pins `docs/VERIFICATION_CONTRACT.md` at
+  `c1beee3d…f77624` (12,903 bytes, LF). `scripts/verify_all.py` does not exist yet, so its
+  pin is a documented placeholder, not a passing check.
+- **Left untouched, flagged for the human:** the SKIP whitelist still reads
+  *"V39, V40 (partial) — No CUDA device available."* Under the new V39 there is no threshold,
+  so it can be measured and reported on CPU and arguably never needs a skip. Removing that
+  entry would be a strengthening, but only the human may make it. Not changed here.
+
+## D7 — Startup cost is the throughput score
+
+Measured, and the reason V23 was promoted.
+
+| quantity | value |
+|---|---|
+| test files | 400 |
+| bytes per file | 65,664 (65,536 data + 128-byte `.npy` header) |
+| total input volume | **25.05 MB** |
+| forward pass | sub-millisecond per image on H100 bf16 (SPEC §7.1) ⇒ **~0.4 s** total |
+| bare interpreter start | **55–91 ms** (5 runs, Python 3.12) |
+| interpreter + `import numpy` | **214–240 ms**; numpy alone 172.6 ms cumulative (`-X importtime`) |
+| `import torch` + CUDA init | **not measured** — torch deliberately not installed. Typically 1–3 s each; treat as estimate, replace under V37/V39 |
+
+Fixed startup ≈ **3–6 s** against ≈ **0.4 s** of real work: **85–95% of the scored
+wall-clock is startup.**
+
+Follows from this:
+
+1. Import hygiene (V23) is the highest-leverage throughput lever available, by an order of
+   magnitude over anything in SPEC's §11.2 table.
+2. Most of the §11.2 optimisation table is near-irrelevant at this scale — 30% off 0.4 s is
+   0.12 s. Keep the free levers, do not spend time tuning them.
+3. `torch.compile` never reaches SPEC's stated ~2000-image crossover; the test set is 5×
+   smaller. Stays off (V41).
+4. **Do not build an 8-worker DataLoader for 400 files**, contrary to §11.2's recommendation.
+   Spawning workers costs more than reading 25 MB. Eager-load; it fits trivially in RAM.
+5. V38/V39's requirement to time externally around the process is doing real work — an
+   internal timer around the forward pass would report ~0.4 s and hide 90% of the cost.
+
 ## D4 — The imagery is natural photographs, not semiconductor content
 
 **Decision.** Treat the released data as **grayscale natural images**, most likely
@@ -332,6 +405,144 @@ inspection imagery is dominated by a few discrete grey levels and would be far m
 
 **Would overturn this:** an official statement that the released set is a stand-in, or a
 Round-2 release containing actual SEM data.
+
+## D8 — Source dataset: NOT confidently identified (DIV2K is the leading hypothesis)
+
+**Decision: do not assert a source dataset anywhere.** Time-boxed investigation
+(`scripts/source_id.py`) produced strong circumstantial evidence for DIV2K but nothing
+conclusive. Record it as a hypothesis, not a fact.
+
+### Evidence FOR DIV2K
+
+**The arithmetic fits exactly.** DIV2K ships 800 training and 100 validation images:
+
+```
+3200 train pairs = 800 x 4      400 test inputs = 100 x 4
+```
+
+Four 256×256 crops per source photograph accounts for both counts with no remainder.
+Flickr2K (2650) and DF2K (3450) give no integer fit. BSD500 also fits (400×8, 100×4) but
+less naturally.
+
+**Consecutive-crop grouping is present in train.** If crops from one photo are laid out
+consecutively, runs of K should be more self-similar than chance. Ratio of mean within-group
+to mean between-group descriptor distance, first 480 train GT:
+
+| K | 2 | 3 | 4 | 5 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|---|
+| ratio | 0.554 | 0.647 | 0.563 | 0.777 | 0.809 | 0.826 | 0.889 |
+
+K=2 and K=4 are both strong while K=3 is weaker — the signature of a true group size of 4
+(K=2 scores well only because 2 divides 4, so every pair still falls inside one true group).
+Confirmed by offsets within aligned blocks of 4, first 800 images:
+
+```
+offset 1 within block : 1.5535     across block boundary : 1.7625
+offset 2 within block : 1.5750     random different-block: 1.6773
+offset 3 within block : 1.5956
+```
+
+All three within-block offsets sit below the random baseline, including offset 3 (first vs
+last of a block). Consistent with 4 crops per source image.
+
+**Content type matches.** High-quality diverse photography — landmarks, wildlife, botanical
+close-ups, architecture — is what DIV2K is.
+
+### Evidence AGAINST a confident call
+
+1. **No identifying metadata survives.** `.npy` headers carry only
+   `{'descr': '<f4', 'fortran_order': False, 'shape': (256, 256)}`. No EXIF, no author, no
+   original filename. Filenames are bare sequential `000000.npy`.
+2. **Test shows no grouping at all** — every K from 2 to 12 gives a ratio of 0.98–1.02. If
+   test were 100 photos × 4 consecutive crops, K=4 should have stood out. It does not. That
+   requires an extra assumption (the test crops were shuffled), which is plausible but
+   unverified.
+3. **The within-block effect is modest** — 1.55–1.60 vs a 1.68 baseline is real but not
+   overwhelming, and the across-boundary figure (1.7625) sitting *above* the random baseline
+   is unexplained.
+4. **Natural-photo corpora are visually interchangeable.** DIV2K, Flickr2K, BSD and Waterloo
+   would all look like this in grayscale at 256×256. Content alone cannot separate them.
+5. **No direct comparison was made.** Confirming this properly means downloading DIV2K and
+   matching crops against it. Not authorised, and not done.
+
+**Verdict: NOT IDENTIFIED.** DIV2K is the leading hypothesis and the arithmetic is
+suggestive, but the evidence is circumstantial. Do not state a source dataset in the deck,
+the README, or `docs/dataset_findings.md`. If it matters later, the decisive test is a direct
+crop match against downloaded DIV2K — cheap, but it needs authorisation.
+
+### ⚠ Integrity flag, independent of the identification
+
+**If** the test inputs derive from a public corpus, then their ground truth is publicly
+downloadable. Obtaining it would be equivalent to obtaining the hidden test labels.
+
+**That is prohibited, and remains prohibited whether or not the source is ever confirmed.**
+It would violate the spirit of F17 and the substance of SPEC §15's no-leakage requirements,
+and it would invalidate every reported number. Score only against the held-out split of
+`train/`, never against a reconstructed test GT. This is recorded so the idea is explicitly
+closed off rather than left as an unexamined temptation.
+
+## D9 — Pretrained initialisation: from scratch for Phase 1
+
+**Decision: train from scratch.** Revisit pretrained initialisation in Round 2 as a measured
+experiment, not an assumption. Nothing has been downloaded.
+
+### Candidate ×2 SR checkpoints
+
+| Model | Licence | Competition use | Notes |
+|---|---|---|---|
+| **SwinIR** (JingyunLiang/SwinIR) | **Apache-2.0** | Permitted — permissive, needs attribution + NOTICE | Classical/lightweight ×2 checkpoints exist. SwinIR-light ≈900 K params. SPEC §7.2: wins Axis 1, loses Axis 2 |
+| **EDSR / RCAN via BasicSR** (XPixelGroup/BasicSR) | **Apache-2.0** (toolbox) | Permitted, **with a caveat** | BasicSR keeps a `LICENSE/` folder documenting per-model terms; reproduced weights may carry the original authors' conditions. Verify per checkpoint, not just the repo root. EDSR-baseline ×2 ≈1.37 M params — the right size |
+| **NAFNet** (megvii-research/NAFNet) | Reported **MIT** | Permitted if MIT confirmed | SPEC §7.1's recommended architecture. Checkpoints are denoise/deblur, **not ×2 SR** — so this is architecture reuse, not a usable SR initialisation |
+
+**Licences must be re-verified at source before any use.** The table reflects search results
+and secondary sources, not the `LICENSE` files themselves. F14 requires disclosing name,
+link, licence and paper/model card, and getting a licence wrong is a disqualification risk,
+not a footnote. Read the actual `LICENSE` file in the actual commit being used.
+
+### Adaptation cost
+
+1. **Single-channel stem (cheap).** Every candidate is 3-channel RGB. Adapting means summing
+   or averaging the input conv weights across the RGB axis (1→C instead of 3→C) and reducing
+   the output conv to C→1. Standard, ~20 lines, largely lossless for the first layer.
+2. **Degradation mismatch (expensive — the decisive factor).** Every classical ×2 SR
+   checkpoint is trained on **clean bicubic downsampling with no noise**. Our inputs carry
+   signal-dependent noise with residual std **0.092** and ~3% of pixels outside [0,1]. SR
+   networks are trained to *sharpen*; applied to noisy input they amplify noise. The
+   pretrained prior is not merely unhelpful here, it is pointed the wrong way, and undoing it
+   costs fine-tuning that approaches from-scratch training.
+3. **Colour-tuned interior.** Interior features are tuned to RGB statistics; grayscale is a
+   distribution shift on top of the degradation shift.
+4. **Architecture pull.** Adopting a checkpoint means adopting its architecture, which
+   competes with SPEC §7.1's ~1–3 M-param throughput target and with D7's finding that
+   startup dominates.
+
+### Why from scratch wins here
+
+- **Data is abundant and matched.** 3200 real pairs plus unlimited synthetic re-degradation
+  from GT (F15). Pretraining pays when data is scarce; it is not.
+- **The model is small.** 1–3 M params at 128→256 trains fast from scratch on the local
+  RTX 4060 (8 GB). This is not a regime needing a warm start.
+- **The transferable part is the degradation, not the content** — and no public checkpoint
+  has our degradation. What pretraining offers (natural-image content priors) is the part
+  least likely to survive if the hidden test set is SEM imagery.
+- **Budget.** SPEC §16 is a one-day plan; integration, stem surgery and licence diligence
+  cost hours that are better spent on the matched-degradation model and on `inference.py`,
+  which PD4 calls the highest-value file.
+- **Disclosure overhead.** F14 requires full disclosure per resource. SPEC §6.5's own
+  judgement — skip external resources for Phase 1 — applies with equal force here.
+- **A subtle leakage risk.** If the released data really is DIV2K, then most public SR
+  checkpoints were trained on DIV2K too. A checkpoint trained on DF2K or on DIV2K including
+  its validation split may have seen the very photographs behind our test inputs. Unresolved,
+  and unresolvable while the source is unidentified (D8) — another reason to avoid the
+  question entirely for Phase 1.
+
+**Per SPEC §6.5, say so explicitly in the deck:** "No external datasets or pretrained weights
+used." An honest empty disclosure scores better than a vague one.
+
+**Round 2 experiment worth running:** initialise from EDSR-baseline ×2 (Apache-2.0, 1.37 M
+params, right size), adapt the stem, fine-tune on our degradation, and compare against the
+from-scratch model at equal wall-clock. Report the delta. That is a measurement, not the
+assumption being rejected here.
 
 ## D5 — Train/test content shift is mild; the honest failure case is broadband texture
 

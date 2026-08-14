@@ -17,6 +17,37 @@ The SPEC→V-check requirement extraction lives in `docs/SPEC_VCHECK_MAP.md`.
 
 ---
 
+> # ⚠ HEADLINE FINDING — READ BEFORE ANY MODELLING DECISION
+>
+> **The problem is semiconductor inspection. The provided data is natural photographs.**
+> Both statements are true and both must be held at once.
+>
+> - **The problem framing is genuine.** KLA's task is restoring degraded semiconductor
+>   inspection images. SPEC §1, F7 and F8 describe that domain accurately. The motivation —
+>   a lost detail can hide a defect and cost a die — is real.
+> - **The released dataset is not that.** All 3600 released images (3200 train pairs +
+>   400 test inputs) are ordinary grayscale **natural photographs**: the Eiffel Tower, a
+>   bear's face, a butterfly, mountains, fruit, foliage, building facades, cobblestones,
+>   a bicycle wheel, a statue. Verified over 96 samples spanning both splits.
+>   Evidence: `results/eda/content_train_gt.png`, `results/eda/content_test_inputs.png`.
+>
+> **The released data is therefore a PROXY for the target domain, not the target domain.**
+>
+> This changes strategy — see §7 for the full argument and `docs/decisions.md` D4, D5, D8, D9:
+>
+> 1. Optimise for **degradation robustness**, not content priors. The degradation is the
+>    part that transfers to semiconductor imagery; the content is not.
+> 2. SPEC §6.1's "hold out one entire structure family" proxy-OOD split **cannot be done as
+>    written** — no semiconductor structure families exist in this data.
+> 3. If the hidden test set is genuine SEM imagery, the content gap is the dominant risk and
+>    argues hard for §6.3 degradation randomisation over any natural-image tuning.
+> 4. **The deck must state the proxy relationship plainly** rather than paper over it —
+>    see §11.
+
+---
+
+---
+
 ## 1. F2 sizes — only one of the two stated regimes exists
 
 **SPEC F2** states: *"Degradation is exactly 2× downsampling: 512×512 → 256×256, and
@@ -317,6 +348,38 @@ of actual compute. **Startup is on the order of 85–95% of the measured wall-cl
    the contract already requires (`time python inference.py ...`, not an internal timer).
    That requirement is doing more work than it appears to; an internal timer around the
    forward pass would report ~0.4 s and hide 90% of the real cost.
+
+## 11. Deck language — state the proxy relationship honestly
+
+SPEC §14 slide 3 is "Idea Description — dataset analysis". SPEC §15 requires an honest
+failure case and honest limitations, and §4 notes that "training & compute hygiene" is a
+scored axis fully within our control. Misdescribing the data is the opposite of hygiene.
+
+**Required wording discipline for the deck, README and any write-up:**
+
+| Do NOT write | Write instead |
+|---|---|
+| "our semiconductor dataset" | "the provided dataset" / "the released proxy dataset" |
+| "3200 semiconductor image pairs" | "3200 provided image pairs (natural grayscale photographs)" |
+| "structure families present in the data" | "content families present in the data" |
+| "trained on semiconductor inspection imagery" | "trained on the provided imagery, which is natural photographs" |
+
+**Say explicitly, once, on slide 3:**
+
+> The released dataset is 3200 training pairs and 400 test inputs of grayscale **natural
+> photographs**, not semiconductor imagery. We treat it as a proxy: the *degradation* —
+> ×2 decimation plus signal-dependent noise — is what transfers to inspection imagery, so we
+> characterised the degradation empirically and optimised for degradation robustness rather
+> than fitting content-specific priors.
+
+This converts an awkward discrepancy into evidence of exactly the forensic rigour §5 asks
+for. Most entrants will not notice the data is not semiconductor; saying so, with the
+variance-vs-intensity figure and the content contact sheets beside it, demonstrates that the
+dataset was actually examined rather than assumed.
+
+**Do not overclaim in the other direction either.** We do not know why the released data is
+natural imagery. It may be a deliberate proxy, a placeholder, or a packaging error. State
+what was measured; do not speculate about intent.
 
 ## 10. Note on F17 wording
 

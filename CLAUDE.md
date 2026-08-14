@@ -3,6 +3,13 @@
 Project: **KLA PS01 — AI-Based Restoration of Degraded Images for Semiconductor Inspection**
 (SEMICON India Hackathon 2026, Track 1)
 
+> ⚠ **The problem is semiconductor inspection; the released data is natural photographs.**
+> All 3600 provided images are ordinary grayscale photos (architecture, animals, foliage,
+> landmarks), not SEM or inspection imagery. Treat the released set as a **proxy**: optimise
+> for degradation robustness, not content priors. Never describe the provided imagery as
+> semiconductor in code comments, docs, README or the deck.
+> See `docs/SPEC_ADDENDUM.md` (headline finding, §7, §11) and `docs/decisions.md` D4/D5.
+
 ## Canonical documents
 
 | File | Role | Mutable? |
