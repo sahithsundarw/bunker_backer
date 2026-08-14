@@ -1,0 +1,154 @@
+﻿loaded 200 GT/LR pairs from C:\kla-data
+GT (256, 256) -> LR (128, 128)   (scale x2)
+
+======================================================================================
+5.2  DOWNSAMPLE KERNEL FIT  (n=200 pairs, ALL candidates reported)
+======================================================================================
+
+residual = LR_actual - kernel(GT).  Lower residual std = better kernel.
+The true kernel bottoms out at the noise floor; the rest add structure error.
+
+candidate                                resid_std     std_min     std_max   mean_bias corr(r2,LR^)
+----------------------------------------------------------------------------------------------------
+bicubic (antialias OFF)                   0.085780    0.018071    0.198664   -7.28e-06      0.3155
+box_2x2_avgpool (antialias)               0.086503    0.018222    0.205449   -7.28e-06      0.3127
+bilinear (antialias OFF)                  0.086503    0.018222    0.205449   -7.28e-06      0.3127
+gaussian s=0.5 + stride2 (offset .5)      0.086706    0.018281    0.207132   -7.28e-06      0.3120
+gaussian s=0.7 + stride2 (offset .5)      0.088160    0.018735    0.218057   -7.27e-06      0.3067
+bicubic (antialias ON)                    0.088554    0.018733    0.226515   -8.14e-06      0.3073
+gaussian s=0.9 + stride2 (offset .5)      0.090607    0.019590    0.232777   -7.16e-06      0.2974
+bilinear (antialias ON)                   0.090748    0.019588    0.235138   -7.28e-06      0.2971
+gaussian s=0.7 + stride2 (offset 0)       0.094200    0.019163    0.242187    4.47e-06      0.2785
+gaussian s=0.9 + stride2 (offset 0)       0.095046    0.019885    0.245443    5.59e-06      0.2772
+gaussian s=0.5 + stride2 (offset 0)       0.095105    0.018979    0.259754    2.70e-06      0.2711
+gaussian s=1.1 + stride2 (offset 0)       0.096426    0.020809    0.250519    6.16e-06      0.2729
+gaussian s=1.5 + stride2 (offset .5)      0.097639    0.022779    0.256109   -5.66e-06      0.2701
+gaussian s=1.3 + stride2 (offset 0)       0.097983    0.021830    0.254855    6.76e-06      0.2674
+nearest                                   0.099039    0.020039    0.322678    2.46e-06      0.2576
+gaussian s=1.5 + stride2 (offset 0)       0.099557    0.022890    0.258209    7.53e-06      0.2619
+
+corr(residual^2, LR_hat) is the SPEC 5.2 speckle signature: strongly positive
+means residual power grows with intensity, i.e. signal-dependent noise.
+
+best analytic candidate : bicubic (antialias OFF)   resid_std = 0.085780
+runner up               : box_2x2_avgpool (antialias)   resid_std = 0.086503  (1.0084x)
+
+!! Separation is under 2%. Ranking alone does NOT settle the kernel.
+!! Adjudicating by direct least-squares kernel recovery below.
+
+======================================================================================
+5.2b  DIRECT LEAST-SQUARES KERNEL RECOVERY  (decisive test)
+======================================================================================
+
+Fit w in  LR[i,j] = sum_ab w[a,b] * GT[2i+a, 2j+b]  over all interior pixels.
+No candidate list. If w is a 2x2 block of 0.25, the kernel is a box filter.
+
+recovered 4x4 kernel (rows/cols are GT offsets [-1, 0, 1, 2] from 2i, 3125000 equations):
+
+                -1        +0        +1        +2
+    -1    0.014066 -0.038645 -0.045098  0.007462
+    +0   -0.045368  0.327878  0.318776 -0.033904
+    +1   -0.048204  0.321710  0.312729 -0.039037
+    +2    0.017182 -0.039238 -0.039416  0.008900
+
+  sum of all weights        = 0.99979320   (1.0 => flux preserving)
+  sum of centre 2x2 block   = 1.28109266
+  centre 2x2 mean weight    = 0.32027316   (0.25 => box)
+  max |weight| outside 2x2  = 0.04820392
+  max |centre - 0.25|       = 0.07787773
+  ||w - box||_inf           = 0.07787773
+
+  residual std on identical interior pixels:
+    recovered LS kernel   = 0.08526269
+    exact box (0.25 x4)   = 0.08603516   (+7.725e-04 vs recovered)
+    bicubic (antialias OF = 0.08527491   (+1.222e-05 vs recovered)
+
+  support check, K=6 recovery: max |weight| in outermost ring = 0.01355318
+  -> support beyond 4x4 is NOT negligible
+
+VERDICT: REFUTED: the kernel is NOT a 2x2 box. The recovered kernel has centre weights of 0.3203 (vs 0.25 for a box) surrounded by negative lobes of about -0.0454 -- a sharpening kernel. Exact box costs +7.72e-04 residual std versus the optimal linear kernel, while bicubic(antialias OFF) costs only +1.22e-05, i.e. bicubic-AA-off is statistically indistinguishable from optimal.
+
+Using the RECOVERED least-squares kernel for the noise fit below
+(it is the best available estimate of the true generative kernel;
+ OLS stays consistent under the heteroscedastic noise found in 5.3).
+
+======================================================================================
+5.3  NOISE MODEL   var(residual | x) = sigma^2 + v * x^2
+======================================================================================
+
+x = predicted clean LR intensity (winning kernel applied to GT).
+
+GLOBAL FIT (all 3125000 pixels pooled)
+  sigma (Gaussian, additive) = 0.036991
+  v     (speckle, multiplic) = 0.026781   -> speckle sd at x=1 is 0.163649
+  residual overall std       = 0.091946
+  residual overall mean      = 8.186e-05
+
+PER-IMAGE FITS (n=200 images)
+  sigma : mean=0.031594  sd=0.032526  min=0.000000  max=0.182546  p5=0.000000  p95=0.085970
+  v     : mean=0.028180  sd=0.010641  min=-0.017926  max=0.073702  p5=0.015350  p95=0.043383
+
+  identifiability caveats:
+    images fitting sigma == 0 exactly : 35 / 200  (17.5%)
+    images fitting v < 0 (unphysical) : 3 / 200  (1.5%)
+    -> sigma and v trade off per image; the GLOBAL fit is the reliable estimate.
+
+  model R^2 on binned variances = 0.984080
+
+--------------------------------------------------------------------------------------
+5.3b  MODEL ADEQUACY -- does sigma^2 + v x^2 actually fit at LOW intensity?
+--------------------------------------------------------------------------------------
+
+       x   var_observed  var_fit(2par)      ratio
+  0.0157      1.102e-04      1.375e-03      12.47
+  0.0390      1.882e-04      1.409e-03       7.49
+  0.0568      2.790e-04      1.455e-03       5.21
+  0.0730      3.569e-04      1.511e-03       4.23
+  0.0883      4.802e-04      1.577e-03       3.28
+  0.1049      6.271e-04      1.663e-03       2.65
+  0.4144      6.837e-03      5.966e-03       0.87
+  0.9725      2.701e-02      2.670e-02       0.99
+
+  The 2-parameter fit OVERSHOOTS badly at low x: the additive floor sigma^2=1.368e-03
+  is far above the observed variance in the darkest bins (1.102e-04 at x=0.0157).
+  So sigma=0.036991 is an UPPER BOUND on any additive Gaussian term, not a
+  measurement of one. Refitting with more flexible / better-weighted models:
+
+  model                                      mean|rel err|          R^2
+  sigma^2+v x^2   (abs-weighted)                   0.8688     0.984080
+  sigma^2+v x^2   (rel-weighted)                   0.2263     0.968464
+  sigma^2+a x+v x^2 (abs-weighted)                 0.3356     0.990052
+
+  rel-weighted 2-par : sigma=0.017708  v=0.030090
+  3-par              : sigma=0.000000  a=0.011253  v=0.015745
+
+  Reported headline values (abs-weighted 2-par, as requested):
+    sigma = 0.036991   v = 0.026781
+  Use the rel-weighted / 3-par numbers if you ever SIMULATE this degradation,
+  because the 2-par fit misstates the dark end by the ratio shown above.
+
+======================================================================================
+DEGRADATION ORDER  -- residual autocorrelation
+======================================================================================
+
+White residual (all lags ~0) => noise was added AFTER downsampling.
+Positive correlation => noise was added BEFORE downsampling, then smeared by the kernel.
+
+  --- residual under the RECOVERED (optimal) kernel ---
+  lag (0, 1)  : mean=-0.04130  sd=0.04199  min=-0.12317  max=+0.18059
+  lag (1, 0)  : mean=-0.05659  sd=0.03339  min=-0.15700  max=+0.05898
+  lag (1, 1)  : mean=+0.00213  sd=0.02292  min=-0.09142  max=+0.09797
+
+  --- same residual under an exact BOX kernel, for contrast ---
+  lag (0, 1)  : mean=-0.04483  sd=0.04378
+  lag (1, 0)  : mean=-0.06113  sd=0.03656
+  lag (1, 1)  : mean=+0.00177  sd=0.02460
+
+  Box leaves markedly more structure in the residual, which is independent
+  confirmation that box is not the true kernel.
+
+
+CONCLUSION: Residual is WHITE (mean |autocorr| = 0.03334 < 0.05). Noise added AFTER downsampling.
+
+saved C:\Users\sahit\OneDrive\Desktop\semi\results\eda\noise_variance_vs_intensity.png
+saved C:\Users\sahit\OneDrive\Desktop\semi\results\eda\degradation_fit.json

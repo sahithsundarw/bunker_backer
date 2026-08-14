@@ -13,12 +13,13 @@ __pycache__/
 .ruff_cache/
 
 # --- Outputs / artifacts ---
-results/eda/
 logs/
 reviews/
 runs/
 wandb/
 outputs/
+
+results/*
 
 # --- Archives & model weights (never commit) ---
 *.zip
@@ -40,6 +41,10 @@ train/
 test_NoisyLR/
 **/GT/
 **/NoisyLR/
+# NOTE: *.npy is ignored, but SPEC F12 requires results/restored_test_outputs/ to
+# contain real model outputs -- which are .npy. 400 x 256x256 float32 is ~105 MB,
+# over GitHub's limit, so that folder needs Git LFS or a hosted link + sha256.
+# Decide before submission; see docs/decisions.md.
 *.npy
 *.npz
 *.tif
@@ -58,3 +63,15 @@ __MACOSX/
 .vscode/
 .idea/
 Thumbs.db
+
+# --- Exceptions (MUST stay last: later rules override earlier ones) ---
+# results/eda/ was in the original ignore list, but SPEC 12 lists it as a required
+# repo item and SPEC 14 makes results/eda/noise_variance_vs_intensity.png mandatory
+# Slide 3 content. The figures total well under 1 MB, so they are tracked.
+# To revert: delete this whole block and add "results/eda/" above.
+!results/eda/
+!results/eda/*.png
+!results/eda/*.json
+!results/eda/*.txt
+!results/restored_test_outputs/
+!results/restored_test_outputs/.gitkeep

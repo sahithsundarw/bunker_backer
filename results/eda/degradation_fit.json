@@ -1,0 +1,191 @@
+{
+  "n_pairs": 200,
+  "gt_shape": [
+    256,
+    256
+  ],
+  "lr_shape": [
+    128,
+    128
+  ],
+  "kernel_results": {
+    "box_2x2_avgpool (antialias)": {
+      "resid_std_mean": 0.08650289380787711,
+      "resid_std_min": 0.01822248948351914,
+      "resid_std_max": 0.2054488455109759,
+      "resid_bias_mean": -7.282758035061397e-06,
+      "speckle_corr_r2_vs_lrhat": 0.3127019697183617
+    },
+    "bicubic (antialias ON)": {
+      "resid_std_mean": 0.08855378089825795,
+      "resid_std_min": 0.018733250102528753,
+      "resid_std_max": 0.2265146011100397,
+      "resid_bias_mean": -8.136298189159045e-06,
+      "speckle_corr_r2_vs_lrhat": 0.307321858996365
+    },
+    "bicubic (antialias OFF)": {
+      "resid_std_mean": 0.08577986725717379,
+      "resid_std_min": 0.018070758307531687,
+      "resid_std_max": 0.19866408478765235,
+      "resid_bias_mean": -7.282758035061397e-06,
+      "speckle_corr_r2_vs_lrhat": 0.3154850919560724
+    },
+    "bilinear (antialias ON)": {
+      "resid_std_mean": 0.09074789629749679,
+      "resid_std_min": 0.01958775928922985,
+      "resid_std_max": 0.23513827427166853,
+      "resid_bias_mean": -7.282758035061397e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2970885363724928
+    },
+    "bilinear (antialias OFF)": {
+      "resid_std_mean": 0.08650289380787711,
+      "resid_std_min": 0.01822248948351914,
+      "resid_std_max": 0.2054488455109759,
+      "resid_bias_mean": -7.282758035061397e-06,
+      "speckle_corr_r2_vs_lrhat": 0.3127019697183617
+    },
+    "nearest": {
+      "resid_std_mean": 0.09903868816688527,
+      "resid_std_min": 0.02003915523268496,
+      "resid_std_max": 0.322677669081262,
+      "resid_bias_mean": 2.4644289054895874e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2576355149609998
+    },
+    "gaussian s=0.5 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09510543046163895,
+      "resid_std_min": 0.018979497337072625,
+      "resid_std_max": 0.25975429517478293,
+      "resid_bias_mean": 2.6992924586724185e-06,
+      "speckle_corr_r2_vs_lrhat": 0.27110540566593877
+    },
+    "gaussian s=0.7 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09419987857789783,
+      "resid_std_min": 0.019163363740427274,
+      "resid_std_max": 0.24218682463234223,
+      "resid_bias_mean": 4.4718400697474605e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2784560641729218
+    },
+    "gaussian s=0.9 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09504592204043485,
+      "resid_std_min": 0.019884901136477975,
+      "resid_std_max": 0.24544339572992424,
+      "resid_bias_mean": 5.590074336754838e-06,
+      "speckle_corr_r2_vs_lrhat": 0.27724211027370244
+    },
+    "gaussian s=1.1 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09642596220567473,
+      "resid_std_min": 0.02080853561876371,
+      "resid_std_max": 0.2505188053387107,
+      "resid_bias_mean": 6.164151911635116e-06,
+      "speckle_corr_r2_vs_lrhat": 0.27286771470734345
+    },
+    "gaussian s=1.3 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09798299281034285,
+      "resid_std_min": 0.021830464242415828,
+      "resid_std_max": 0.2548552388674267,
+      "resid_bias_mean": 6.756537332087282e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2674361899274099
+    },
+    "gaussian s=1.5 + stride2 (offset 0)": {
+      "resid_std_mean": 0.09955696240774191,
+      "resid_std_min": 0.022890471698285498,
+      "resid_std_max": 0.25820937293934754,
+      "resid_bias_mean": 7.525876685792925e-06,
+      "speckle_corr_r2_vs_lrhat": 0.26189449204643117
+    },
+    "gaussian s=0.5 + stride2 (offset .5)": {
+      "resid_std_mean": 0.0867064724677146,
+      "resid_std_min": 0.018281258137617516,
+      "resid_std_max": 0.20713150205958752,
+      "resid_bias_mean": -7.282720116093223e-06,
+      "speckle_corr_r2_vs_lrhat": 0.31197849790905385
+    },
+    "gaussian s=0.7 + stride2 (offset .5)": {
+      "resid_std_mean": 0.08816037804034726,
+      "resid_std_min": 0.01873546800089777,
+      "resid_std_max": 0.21805725659245245,
+      "resid_bias_mean": -7.270509598607637e-06,
+      "speckle_corr_r2_vs_lrhat": 0.30671345460218313
+    },
+    "gaussian s=0.9 + stride2 (offset .5)": {
+      "resid_std_mean": 0.09060695615539242,
+      "resid_std_min": 0.019589756933463376,
+      "resid_std_max": 0.23277729412947656,
+      "resid_bias_mean": -7.156993454519788e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2973751140935073
+    },
+    "gaussian s=1.5 + stride2 (offset .5)": {
+      "resid_std_mean": 0.09763875332744178,
+      "resid_std_min": 0.0227794935518549,
+      "resid_std_max": 0.25610941586441,
+      "resid_bias_mean": -5.656085927615989e-06,
+      "speckle_corr_r2_vs_lrhat": 0.2701361327796316
+    }
+  },
+  "winner": "bicubic (antialias OFF)",
+  "runner_up": "box_2x2_avgpool (antialias)",
+  "runner_ratio": 1.0084288606851726,
+  "recovered_kernel_4x4": [
+    [
+      0.014066401743156017,
+      -0.03864536996558664,
+      -0.04509798889683218,
+      0.007462181929969966
+    ],
+    [
+      -0.04536789521093179,
+      0.32787772830957757,
+      0.31877565253834533,
+      -0.0339041720887374
+    ],
+    [
+      -0.048203920773465615,
+      0.32171049704575233,
+      0.31272877755367867,
+      -0.03903692411720539
+    ],
+    [
+      0.017182382271574988,
+      -0.039238408862405545,
+      -0.03941608604367905,
+      0.008900347843236935
+    ]
+  ],
+  "recovered_kernel_sum": 0.9997932032764482,
+  "recovered_vs_box_linf": 0.07787772830957757,
+  "interior_std_recovered": 0.0852626866500453,
+  "interior_std_box": 0.0860351648314585,
+  "kernel_verdict": "REFUTED: the kernel is NOT a 2x2 box. The recovered kernel has centre weights of 0.3203 (vs 0.25 for a box) surrounded by negative lobes of about -0.0454 -- a sharpening kernel. Exact box costs +7.72e-04 residual std versus the optimal linear kernel, while bicubic(antialias OFF) costs only +1.22e-05, i.e. bicubic-AA-off is statistically indistinguishable from optimal.",
+  "sigma_global": 0.036990889343568846,
+  "v_global": 0.026781112411267814,
+  "sigma_rel_weighted": 0.017707720971019972,
+  "v_rel_weighted": 0.03009041754805756,
+  "three_param": {
+    "sigma": 0.0,
+    "a": 0.011252879007903843,
+    "v": 0.015744646317944564
+  },
+  "low_bin_x": 0.015677432198681823,
+  "low_bin_var_observed": 0.00011022857741368512,
+  "low_bin_var_fit_2par": 0.0013749082065943076,
+  "sigma_per_image": {
+    "mean": 0.03159442946093198,
+    "min": 0.0,
+    "max": 0.18254602519316676,
+    "p5": 0.0,
+    "p95": 0.08597030054352324
+  },
+  "v_per_image": {
+    "mean": 0.028179792694852934,
+    "min": -0.017925564444454752,
+    "max": 0.07370169554651963,
+    "p5": 0.015350055302884183,
+    "p95": 0.04338299570737814
+  },
+  "autocorr": {
+    "(0, 1)": -0.04129895144220183,
+    "(1, 0)": -0.05658566510465624,
+    "(1, 1)": 0.0021280429146724616
+  },
+  "order_conclusion": "Residual is WHITE (mean |autocorr| = 0.03334 < 0.05). Noise added AFTER downsampling."
+}

@@ -5,10 +5,12 @@ Every claim below is backed by a number produced by `scripts/inspect_dataset.py`
 `scripts/probe_quantization.py`, or the full-scan check quoted inline.
 Nothing here is inferred from the problem statement.
 
-> **Note on provenance.** `KLA_IMAGE_RESTORATION_MASTER_SPEC.md` (→ `docs/SPEC.md`) and
-> `peek.py` were **not found** anywhere on this machine. The U-numbers below use the
-> labels from the task brief; they could not be cross-checked against SPEC §2.2 because
-> the SPEC is absent. See `docs/MISSING_INPUTS.md`.
+> **Provenance.** `docs/SPEC.md` has since been supplied and the U-numbers below are now
+> verified against SPEC §2.2. `peek.py` was never found; `scripts/inspect_dataset.py` (the
+> name SPEC §5.1 and §12 actually call for) was written instead. See `docs/MISSING_INPUTS.md`.
+>
+> **Where SPEC and measurement disagree, `docs/SPEC_ADDENDUM.md` governs.** U4, U5 and U6 are
+> answered in `docs/decisions.md` (D1, D2). Content-domain findings are in D4/D5.
 
 ---
 
@@ -203,12 +205,65 @@ No meaningful covariate shift; a model fit on train LR is operating in-distribut
 
 ---
 
-## Summary of corrections to the task brief's assumptions
+---
 
-| Assumed | Actual (measured) |
+## U7 — is there a dataset README or metadata file?
+
+**No.** SPEC §5.1 step 2 requires looking for README / metadata / `.txt` / `.json` / `.csv` at
+any level and printing them in full. The only non-`.npy` file shipped anywhere in the dataset
+was a single loose file in `train/`:
+
+```
+C:\kla-data\train\.DS_Store   10,244 bytes
+first 16 bytes: 00 00 00 01 42 75 64 31 00 00 20 00 00 00 08 00
+                            ^^^^^^^^^^^ ASCII "Bud1"
+```
+
+`Bud1` is the magic number of a macOS Finder window-state database. It contains no readable
+text beyond `blob` / `bpli` type markers and **documents nothing**. It answers none of U1–U9.
+Moved to `C:\kla-data\_archive\train_DS_Store.bin` so it cannot be picked up by a directory
+glob. After the move, zero non-`.npy` files remain under `train/` or `test_NoisyLR/`.
+
+There is no `Data-public` README. All of U1–U9 had to be answered from the pixels.
+
+---
+
+## U4, U5, U6 — degradation forensics
+
+Answered in `docs/decisions.md` (D1 kernel, D2 order and noise). Summary:
+
+| Question | Answer |
 |---|---|
-| TIFF/image files, possibly 8-bit | `.npy` float32, continuous, no bit-depth grid |
-| GT 512×512, LR 256×256 | GT 256×256, LR 128×128 |
-| Mixed 512-GT / 256-GT split | Uniform — 3200× `(256,256)`, zero 512s |
-| `train/` holds a README answering U1–U9 | Loose file is `.DS_Store` (macOS `Bud1` binary), documents nothing |
-| Values in [0,1] | GT yes (exactly); LR overshoots — 3.0% of pixels > 1, 0.3–0.7% < 0 |
+| U4 downsample kernel | **Not** area/box. A sharpening kernel; `bicubic (antialias OFF)` is within 1.22e-05 residual std of the least-squares optimum, box costs 7.72e-04 |
+| U5 degradation order | Noise added **after** downsampling — residual autocorrelation ≈0 or slightly negative at all lags |
+| U6 noise parameters | 2-par form (SPEC §5.2): σ=0.036991, v=0.026781. But σ is an artifact — a 3-par fit gives σ=**0**, a=0.011253 (shot), v=0.015745 (speckle) |
+
+---
+
+## Content domain — the imagery is NOT semiconductor
+
+Recorded here because SPEC §5.1 and §5.4 make dataset characterisation part of this
+document, and because it contradicts SPEC §1/F8.
+
+Both splits are ordinary grayscale **natural photographs** — butterflies, animals, the Eiffel
+Tower, viaducts, mountains, fruit, foliage, building facades, cobblestones. Content is
+consistent with DIV2K/Flickr2K converted to grayscale and cropped to 256×256. GT histogram
+entropy is 4.98/6.00 bits; SEM imagery would be markedly more bimodal.
+
+Figures: `results/eda/content_train_gt.png`, `results/eda/content_test_inputs.png`.
+Full analysis and consequences: `docs/decisions.md` D4 and D5, `docs/SPEC_ADDENDUM.md` §7.
+
+---
+
+## Summary of corrections to prior assumptions
+
+| Assumed (task brief and/or SPEC) | Actual (measured) |
+|---|---|
+| TIFF/PNG images, possibly 8-bit (SPEC U1) | `.npy` float32, continuous, no bit-depth grid |
+| Both 512→256 and 256→128 regimes (SPEC F2) | Only 256→128. Zero 512-GT samples |
+| Test inputs mix 128 and 256 (SPEC §7.3) | All 400 test inputs are 128×128 |
+| `train/` holds a README answering U1–U9 | Loose file is `.DS_Store`, documents nothing |
+| Values in [0,1] | GT yes (exactly); LR overshoots — 3.0% > 1, 0.3–0.7% < 0 |
+| Downsample is plausibly area/box | Refuted — sharpening kernel, bicubic-AA-off |
+| Speckle + additive Gaussian (SPEC F3) | Additive term fits to **zero**; shot + speckle instead |
+| Semiconductor inspection imagery (SPEC §1, F8) | Natural photographs, DIV2K/Flickr2K-like |
