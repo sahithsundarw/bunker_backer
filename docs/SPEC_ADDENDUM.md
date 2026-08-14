@@ -7,6 +7,14 @@ the scripts named against each item.
 `docs/SPEC.md` has now been located and read in full (738 lines). Section references below
 are verified against the real text, not assumed.
 
+**Precedence order for this project:**
+
+1. `docs/VERIFICATION_CONTRACT.md` — immutable, defines "correct"
+2. **`docs/SPEC_ADDENDUM.md`** (this file) — overrides SPEC on any conflict
+3. `docs/SPEC.md`
+
+The SPEC→V-check requirement extraction lives in `docs/SPEC_VCHECK_MAP.md`.
+
 ---
 
 ## 1. F2 sizes — only one of the two stated regimes exists
@@ -104,19 +112,36 @@ Observed range **[-0.28, 2.16]**.
 
 **~3% of input pixels exceed 1.0.** Never clamp the input (F5, §18 pitfall 2).
 
-## 5. Consequence — `inference.py` needs no image library
+## 5. Consequence — `inference.py` needs NO image library at all
 
 The data is `.npy` end to end: `np.load` in, `np.save` out.
 
-**Remove `cv2` and `tifffile` from the imports of `inference.py`.** The SPEC §11.3 skeleton
-imports `cv2` because it was written before U1 was resolved. On this dataset that import is:
+### The module-level allowlist is now exactly these eight
 
-- **dead weight on a timed run** — SPEC §11.2 lists import cost as a seconds-scale lever on
-  the measured wall-clock, and §18 pitfall 5 calls out heavy imports specifically; and
-- **actively hazardous** — several `cv2` paths silently convert to 8-bit or clip to [0,1],
-  which corrupts inputs that legitimately reach 2.16.
+```
+argparse   os   sys   time   pathlib   concurrent.futures   numpy   torch
+```
 
-Keep the permissive `EXTS` glob from §11.1, but only the `.npy` branch executes here.
+**Nothing else.** In particular **no image IO library** — no `cv2`, no `tifffile`, no `PIL`.
+
+This is a **tightening** of `CLAUDE.md` §STYLE, which previously read *"…`numpy torch` + one
+image IO lib"*. The trailing allowance is removed, and `CLAUDE.md` §STYLE has been updated to
+match. Tightening is permitted; loosening is not (Prime Directive 1).
+
+The SPEC §11.3 skeleton imports `cv2` and its `load_image`/`save_image` helpers branch on
+`uint8`/`uint16`/float. That skeleton was written before U1 was resolved. On this dataset the
+`cv2` import is:
+
+- **dead weight on a timed run.** SPEC §11.2 lists import cost as a *seconds-scale* lever on
+  the measured wall-clock, and §18 pitfall 5 calls out heavy module-level imports by name.
+- **actively hazardous.** Several `cv2` paths silently convert to 8-bit or clip to [0,1].
+  Inputs here legitimately reach 2.16, so routing them through `cv2` corrupts values, which
+  is precisely the failure V12 exists to catch.
+
+Keep the permissive `EXTS` glob from §11.1 for defensive reasons, but only the `.npy` branch
+ever executes on this dataset. The `uint8`/`uint16` rescaling branches of the §11.3 skeleton
+should be deleted, not merely left unreachable — dead code that divides by 255 is a
+liability sitting next to data that must never be divided by 255.
 
 For the same reason, `scripts/fit_degradation.py` implements every resampling kernel from
 scratch in numpy — no result depends on a third-party library's undocumented antialias or
@@ -232,7 +257,68 @@ From `scripts/fit_degradation.py`, n=200 pairs. Full reasoning in `docs/decision
   no `test_GT`; test ground truth is withheld, so no score can be computed locally against
   the test set.
 
-## 9. Note on F17 wording
+## 9. Consequence for SPEC §11.2 — startup cost **is** the throughput score
+
+**V23 is promoted from Tier 1 to Tier 0.** Human-issued strengthening, 2026-08-15.
+`docs/VERIFICATION_CONTRACT.md` is immutable and has **not** been edited; the promotion is
+recorded here and is strictly stricter, which Prime Directive 1 permits.
+
+### The workload is tiny
+
+| quantity | measured |
+|---|---|
+| test files | 400 |
+| bytes per file | **65,664** (65,536 data + 128-byte `.npy` header) = 64.1 KB |
+| total input volume | **25.05 MB** |
+| work per image | 128×128 → 256×256, 1–3 M-param model (SPEC §7.1) |
+
+SPEC §7.1 puts the forward pass at *"well under a millisecond per image amortized"* on an
+H100 in bf16. So the entire GPU workload is on the order of **0.4 s**, against 25 MB of I/O
+that any modern disk serves in well under a second.
+
+### Fixed startup cost dominates it
+
+Measured on this machine (Python 3.12, 5 runs each):
+
+| stage | measured |
+|---|---|
+| bare interpreter start | 55–91 ms |
+| interpreter + `import numpy` | 214–240 ms (numpy alone: 172.6 ms cumulative, `-X importtime`) |
+
+`torch` is not installed yet (deliberately), so its import was **not** measured. Typical
+figures are 1–3 s for `import torch` and a further 1–3 s for first CUDA context creation —
+**treat those as estimates, not measurements**, and replace them with real numbers in
+`results/runtime_report.md` once torch is installed (V37).
+
+Even on the optimistic end, that puts fixed startup at roughly **3–6 s** against **~0.4 s**
+of actual compute. **Startup is on the order of 85–95% of the measured wall-clock.**
+
+### What follows
+
+1. **V23 is Tier 0, not Tier 1.** A stray module-level `import scipy` or `import cv2` is not
+   a hygiene nit here — it is a direct, large hit to a scored axis. The V23 budget of
+   `-X importtime` total < 3.0 s is the single highest-leverage throughput lever available.
+2. **SPEC §11.2's optimisation table is mostly irrelevant at this scale.** channels_last
+   (10–30%), cuDNN autotune (5–15%) and TF32 apply to a compute budget of ~0.4 s. Shaving
+   30% off 0.4 s saves 0.12 s; removing one heavy import saves an order of magnitude more.
+   Keep the cheap levers (they are free) but do not spend engineering time tuning them.
+3. **`torch.compile` must stay off by default** — already SPEC §11.2 and §18 pitfall 15, and
+   V41. At 400 images a 30–120 s compilation is catastrophic, not marginal. SPEC's stated
+   crossover of "~2000 images" is 5× the actual test-set size, so the crossover is never
+   reached. Record that number in `docs/decisions.md`.
+4. **Self-ensemble / TTA must stay off** (V42). 8× on 0.4 s is cheap in absolute terms, but
+   it cannot be justified against a fixed cost it does not amortise.
+5. **Do not build a `DataLoader` with 8 workers for 400 files.** SPEC §11.2 recommends
+   `num_workers=8` and §11.3 notes the eager-load alternative. Spawning 8 worker processes
+   on Windows or via spawn-start costs more than reading 25 MB. Eager-load all 400 files
+   (25 MB fits trivially in RAM) and skip the DataLoader entirely. Measure before assuming
+   otherwise.
+6. **V37/V38 must time the whole process externally**, including interpreter start — which
+   the contract already requires (`time python inference.py ...`, not an internal timer).
+   That requirement is doing more work than it appears to; an internal timer around the
+   forward pass would report ~0.4 s and hide 90% of the real cost.
+
+## 10. Note on F17 wording
 
 `docs/DATA_LOCATION.md` states the hard rule as *"Never train, fine-tune, or fit degradation
 parameters on test_NoisyLR (SPEC F17)."*

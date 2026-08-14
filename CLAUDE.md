@@ -110,6 +110,15 @@ When done, print a final report and **stop looping**. Do not invent new work.
 ## STYLE
 
 - Python 3.10+, type hints on public functions, docstrings on modules.
-- `inference.py` imports only: `argparse os sys time pathlib concurrent.futures numpy torch` + one image IO lib. **No `skimage`, `lpips`, `matplotlib`, `pandas`, `wandb`, `yaml`, `scipy` at module level** — import cost is inside KLA's measured window (SPEC §11.2).
+- `inference.py` module-level imports are **exactly** this allowlist, nothing else:
+  `argparse os sys time pathlib concurrent.futures numpy torch`
+  **No image IO library.** The dataset is `.npy` end to end (`np.load` / `np.save`), so
+  `cv2`, `tifffile` and `PIL` are dead weight on a timed run and actively hazardous —
+  several `cv2` paths silently convert to 8-bit or clip to [0,1], which corrupts inputs
+  that legitimately reach 2.16. See `docs/SPEC_ADDENDUM.md` §5.
+  Also **no `skimage`, `lpips`, `matplotlib`, `pandas`, `wandb`, `yaml`, `scipy`** at module
+  level — import cost is inside KLA's measured window (SPEC §11.2).
+  *This allowlist was tightened by the human on 2026-08-15 (removal of "+ one image IO lib").
+  V23 checks against it and is promoted to Tier 0 — see `docs/SPEC_ADDENDUM.md` §10.*
 - No `print` debugging left in shipped scripts; use a `--verbose` flag.
 - Prefer standard library and already-listed dependencies. Every new dependency must be justified in `docs/decisions.md` and pinned in `requirements.txt`.

@@ -5,9 +5,10 @@ Every claim below is backed by a number produced by `scripts/inspect_dataset.py`
 `scripts/probe_quantization.py`, or the full-scan check quoted inline.
 Nothing here is inferred from the problem statement.
 
-> **Provenance.** `docs/SPEC.md` has since been supplied and the U-numbers below are now
-> verified against SPEC §2.2. `peek.py` was never found; `scripts/inspect_dataset.py` (the
-> name SPEC §5.1 and §12 actually call for) was written instead. See `docs/MISSING_INPUTS.md`.
+> **Provenance.** `docs/SPEC.md` has been supplied and the U-numbers below are verified
+> against SPEC §2.2. The forensics run on `scripts/inspect_dataset.py` — the name SPEC §5.1
+> and §12 call for — which supersedes the throwaway `peek.py` and scans all 3200 pairs rather
+> than sampling. See `docs/MISSING_INPUTS.md`; no input is outstanding.
 >
 > **Where SPEC and measurement disagree, `docs/SPEC_ADDENDUM.md` governs.** U4, U5 and U6 are
 > answered in `docs/decisions.md` (D1, D2). Content-domain findings are in D4/D5.
