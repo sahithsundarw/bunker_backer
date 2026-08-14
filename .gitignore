@@ -1,0 +1,60 @@
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Outputs / artifacts ---
+results/eda/
+logs/
+reviews/
+runs/
+wandb/
+outputs/
+
+# --- Archives & model weights (never commit) ---
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+
+# --- Dataset: lives at C:\kla-data, OUTSIDE this repo. Never commit image data. ---
+# Belt-and-braces in case anything is ever copied or symlinked in.
+/kla-data/
+kla-data/
+data/
+train/
+test_NoisyLR/
+**/GT/
+**/NoisyLR/
+*.npy
+*.npz
+*.tif
+*.tiff
+*.png
+*.jpg
+*.jpeg
+*.bmp
+__MACOSX/
+.DS_Store
+._*
+
+# --- Local env / editor ---
+.env
+.env.local
+.vscode/
+.idea/
+Thumbs.db
