@@ -1851,3 +1851,96 @@ byte-exact, green again with the other three outputs confirmed written.
 
 Forced `--device cpu`, no checkpoint needed — the bicubic fallback exercises the exact write
 path under test.
+
+---
+
+## D40 — NEGATIVE RESULT: V28, and the decision on which model ships
+
+**Date:** 2026-08-16, iteration 2. **Human-authorised** (decision A, 2026-08-15: "Decide on the
+numbers, report both, and state the reasoning in `decisions.md`. If it is close, prefer the
+model that wins more of the three metrics rather than the one that wins the largest single
+margin"). This entry is what the contract's escape hatch for V28 requires: a documented honest
+negative result, with the six measured means and the shipped model named, matching
+`weights/best.pt`'s embedded config.
+
+### The measured comparison
+
+Full 400-image committed validation split, both models scored identically (`scripts/evaluate.py`,
+float32 `.npy` reloaded from disk):
+
+    final: psnr 28.7865, ssim 0.78287, lpips 0.25324
+    unet:  psnr 28.8808, ssim 0.78273, lpips 0.26525
+
+Naive unpaired means would call this 2 of 3 **for NAFSR** (higher SSIM, lower LPIPS; it only
+loses PSNR) — this is exactly the pre-D31 bug `scripts/evaluate.py` had, and it is what let
+`results/metrics_summary.md` claim `V28: PASS (2/3)` before that was fixed (D31, this file's
+own entry above). The contract requires the **paired** per-image test instead (D31: both
+models score the *same* 400 images, so the correct statistic is the per-image difference, not
+the gap between two independent means):
+
+    psnr   mean diff -0.0943 dB   t=-6.11   significant   better on  93/400   -> LOSS (U-Net wins)
+    ssim   mean diff +0.000135    t=+0.29   NOT significant             172/400   -> TIE
+    lpips  mean diff -0.0120      t=-5.55   significant   better on 235/400   -> WIN (final wins)
+
+**1 win / 1 loss / 1 tie.** Not "2 of 3" either way — the user's stated tiebreak ("prefer the
+model winning more metrics") does not resolve a genuine 1-1-1 split, so the decision rests on
+the other two axes below.
+
+### Throughput — measured on the RTX 4060 Laptop, `results/runtime_report.md`
+
+Two different numbers answer two different questions, and only one matches how KLA actually
+scores this submission (one `inference.py` subprocess over the whole 400-image test set, per
+SPEC F11 — not a re-launched process per image):
+
+- **Isolated forward-pass compute** (no subprocess startup, no disk IO): NAFSR 98.1 img/s vs
+  UNetSR 468.9 img/s at bs=32/128px/bf16/channels_last — UNetSR is **4.78x faster** in raw
+  compute.
+- **End-to-end, externally timed subprocess** (the shape of the actual scored invocation,
+  `results/runtime_report.md` "Batch size / precision / memory-format sweep" cross-referenced
+  with the `e2e` variant timings): NAFSR 16114.6 ms / 400 images (24.82 img/s) vs UNetSR
+  14989.5 ms / 400 images (26.69 img/s) — UNetSR is **7.5% faster**, not 4.78x. At N=400 the
+  fixed cost (interpreter start, `import torch`, CUDA init, checkpoint load — measured at
+  ~14.8 s, `results/runtime_report.md` "Startup vs compute") is ~30.6% of total wall-clock and
+  dilutes almost the entire compute-side gap, because both models are tiny relative to the
+  import/CUDA-init cost that neither can avoid.
+
+**The 7.5% end-to-end number is the one that matters for scoring.** The 4.78x compute-only
+number describes a workload KLA does not run.
+
+### Reasoning
+
+1. **Quality is a genuine tie**, not a win for either model. 1/1/1 does not meet the user's
+   "wins more metrics" tiebreak in either direction.
+2. **Throughput favours UNetSR by only 7.5%** in the metric that actually matters (end-to-end,
+   subprocess-timed, the real invocation shape) — not decisive on its own.
+3. **NAFSR is 7.65x more parameter-efficient** (388,225 vs 2,970,401 params) for
+   statistically-tied fidelity and a real perceptual-quality win (LPIPS). A model that matches
+   a 7.65x-larger network on PSNR/SSIM while beating it on LPIPS, at a fraction of the
+   parameters, is the stronger result once size is accounted for — and parameter count is not
+   nothing on a memory-bandwidth-bound architecture (`docs/decisions.md` D21) being evaluated
+   for restoration quality, not classification accuracy.
+4. **NAFSR is the SPEC-intended primary architecture.** SPEC §7.1 specifies the NAFNet-style
+   body as the submission architecture; SPEC §7.2 specifies UNetSR explicitly as "the plain
+   U-Net baseline required by the rubric" — a comparison point, not a candidate for shipping.
+   Overriding that intent needs a clear win, and this is not one.
+5. Per the user's own framing of the prior ("7.7x parameters buys little on a startup-dominated
+   run — but that cuts both ways: it also costs little"): confirmed exactly as stated. The
+   parameter disadvantage NAFSR carries costs only 7.5% wall-clock in the scored shape, which is
+   a small price for the model SPEC specifies, with tied-or-better quality.
+
+### Decision: SHIP NAFSR
+
+**SHIPPED MODEL: NAFSR**
+
+The negative result — NAFSR does not beat the U-Net baseline on 2 of 3 metrics — is genuine
+and is recorded here rather than concealed. It does not change the shipping decision: NAFSR
+remains `weights/best.pt`, unchanged.
+
+### Do NOT retry
+- **Do not re-litigate this with a different statistic to force a cleaner win.** The paired
+  test is correct (D31); an unpaired comparison would flatter one model over the other for the
+  wrong reason (the SSIM "win" under an unpaired read was noise, not signal — D31 already
+  demonstrated this).
+- **Do not conflate the two throughput numbers.** Quoting the 4.78x compute-only gap as "the"
+  throughput difference in any external-facing document (README, deck) would misrepresent the
+  actual scored cost, which is 7.5%.
