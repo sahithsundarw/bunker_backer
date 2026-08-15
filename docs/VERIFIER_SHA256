@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-47dac07a929c56d4a8eafd6562e3f8f81017fdd8925ac218849cc4a8d9691aee  scripts/verify_all.py
+d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4  scripts/verify_all.py
 d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -68,3 +68,15 @@ d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICAT
 #             Net strictly stricter: V28 went PASS -> FAIL under the new test and V48 was
 #             negative-controlled. See docs/decisions.md D31.
 #             prior pin: 4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b
+# 2026-08-15  PUBLISHED-ARTIFACT CLAIMS ARE NOW VERIFIED BY A REAL ANONYMOUS DOWNLOAD
+#             (requirements-audit-2 H-5). V06, V59 and V56 accepted a URL and a 64-hex string
+#             sitting in a markdown file as proof of publication -- nothing ever fetched
+#             anything, so the half of the claim that matters to anyone without the author's
+#             disk was unverified. V06's URL branch was not merely unverified, it was
+#             unimplemented: it returned an unconditional FAIL, making the contract's own
+#             second route unreachable and guaranteeing a clean-room red. All three now
+#             download with every credential stripped, reject HTML-behind-200 and 401/403,
+#             and compare the sha256 of the SERVED bytes. Mutation-tested: a wrong checkpoint
+#             digest, a wrong archive digest and a 404 URL each turned the relevant check red.
+#             Human-authorised (decision B, 2026-08-15). See docs/decisions.md D32.
+#             prior pin: 47dac07a929c56d4a8eafd6562e3f8f81017fdd8925ac218849cc4a8d9691aee

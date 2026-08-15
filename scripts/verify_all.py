@@ -229,6 +229,115 @@ def build_fixtures(root: Path) -> Path:
 PINNED_FILES = ("scripts/verify_all.py", "docs/VERIFICATION_CONTRACT.md")
 
 
+# ======================================================================================
+# Published-artifact verification (requirements-audit-2 H-5, docs/decisions.md D32)
+# ======================================================================================
+#: Hard ceiling on a published-artifact download. The outputs archive is ~91 MB; this leaves
+#: headroom while refusing a redirect to something enormous.
+PUBLISHED_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024
+PUBLISHED_FETCH_TIMEOUT_S = 300
+
+#: Per-process memo so two checks verifying the same URL download it once.
+_FETCH_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _fetch_digest(url: str) -> dict[str, Any]:
+    """Download `url` with NO credentials and return the sha256 of the served bytes.
+
+    A published artifact is only published if an anonymous stranger can get it. This uses a
+    bare urllib opener with no auth handler, no netrc, no cookie jar and no Authorization
+    header, and it removes GitHub token variables from the environment for the duration so
+    nothing downstream can pick them up. HTML is rejected explicitly: a 200 that returns a
+    sign-in page is the classic way a "public" URL is actually private.
+    """
+    if url in _FETCH_CACHE:
+        return _FETCH_CACHE[url]
+    import urllib.error
+    import urllib.request
+
+    res: dict[str, Any] = {"url": url}
+    stripped = {k: os.environ.pop(k, None)
+                for k in ("GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN",
+                          "GITHUB_USER", "GIT_ASKPASS")}
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        opener = urllib.request.build_opener()  # no auth/cookie handlers
+        req = urllib.request.Request(url, headers={"User-Agent": "kla-verifier/1.0"})
+        with opener.open(req, timeout=PUBLISHED_FETCH_TIMEOUT_S) as r:
+            res["status"] = int(getattr(r, "status", 0) or 0)
+            res["content_type"] = (r.headers.get("Content-Type") or "").lower()
+            h = hashlib.sha256()
+            total = 0
+            first = b""
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                if not first:
+                    first = chunk[:64]
+                total += len(chunk)
+                if total > PUBLISHED_ARTIFACT_MAX_BYTES:
+                    res["error"] = f"exceeds {PUBLISHED_ARTIFACT_MAX_BYTES} B cap"
+                    break
+                h.update(chunk)
+            res.setdefault("bytes", total)
+            res["bytes"] = total
+            res["sha256"] = h.hexdigest()
+            head = first.lstrip()[:15].lower()
+            if head.startswith(b"<!doctype") or head.startswith(b"<html") \
+                    or "text/html" in res["content_type"]:
+                res["error"] = ("served HTML, not the artifact -- a sign-in or error page "
+                                "behind a 200")
+    except urllib.error.HTTPError as e:
+        res["status"] = int(e.code)
+        res["error"] = (f"HTTP {e.code}"
+                        + (" (authentication required -- the artifact is NOT public)"
+                           if e.code in (401, 403) else ""))
+    except Exception as e:  # noqa: BLE001 - network failure is a FAIL, never a skip
+        res["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        for k, v in stripped.items():
+            if v is not None:
+                os.environ[k] = v
+    _FETCH_CACHE[url] = res
+    return res
+
+
+def _verify_published(url: str, expected: set[str] | str) -> tuple[bool, str, dict[str, Any]]:
+    """Fetch `url` anonymously; the served digest must be (one of) `expected`."""
+    want = {expected} if isinstance(expected, str) else set(expected)
+    r = _fetch_digest(url)
+    ev = {k: r.get(k) for k in ("url", "status", "bytes", "content_type", "sha256", "error")}
+    if r.get("error"):
+        return False, f"{url} -> {r['error']}", ev
+    if r.get("status") != 200:
+        return False, f"{url} -> HTTP {r.get('status')}, expected 200", ev
+    if not r.get("bytes"):
+        return False, f"{url} -> served 0 bytes", ev
+    got = r.get("sha256", "")
+    if got not in want:
+        return False, (f"{url} -> served bytes hash {got}, which matches NO published digest "
+                       f"({sorted(want)[:2]}) -- the published digest is wrong or the asset "
+                       f"was replaced"), ev
+    return True, (f"anonymous fetch of {url.rsplit('/', 1)[-1]} returned HTTP 200, "
+                  f"{r['bytes']} B, sha256 {got[:16]}... matching the published digest"), ev
+
+
+def _published_digests(text: str) -> set[str]:
+    return set(re.findall(r"\b[0-9a-f]{64}\b", text))
+
+
+def _published_urls(text: str, suffix: str) -> list[str]:
+    urls = re.findall(r"https?://[^\s)\]|`<>]+", text)
+    seen, out = set(), []
+    for u in urls:
+        u = u.rstrip(".,;")
+        if u.lower().endswith(suffix) and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def check_V00(ctx: Ctx) -> CheckResult:
     """Integrity pin over EVERY pinned file, not just the verifier.
 
@@ -395,16 +504,49 @@ def check_V06(ctx: Ctx) -> CheckResult:
                                {"size": size})
         if size <= 1024:
             return CheckResult("V06", FAIL, f"weights/best.pt is {size} B (<= 1 KB)", {"size": size})
+        # A local copy satisfies the contract's first route, but if this repo ALSO publishes a
+        # download URL then that URL is a claim made to reviewers and it is verified too.
+        # Otherwise V06 stays green on the author's disk while the published link rots -- the
+        # exact asymmetry V59 was added to catch (requirements-audit-2 H-5).
+        rd = ctx.p("weights", "README.md")
+        if rd.exists():
+            txt = rd.read_text(encoding="utf-8", errors="replace")
+            urls, digests = _published_urls(txt, ".pt"), _published_digests(txt)
+            if urls and digests:
+                ok, why, e = _verify_published(urls[0], digests)
+                if not ok:
+                    return CheckResult("V06", FAIL,
+                                       f"checkpoint present locally, but the URL published in "
+                                       f"weights/README.md does not check out: {why}",
+                                       {"size": size, "fetch": e})
+                return CheckResult("V06", PASS,
+                                   f"checkpoint present in clone ({size} B) and {why}",
+                                   {"size": size, "fetch": e})
         return CheckResult("V06", PASS, "checkpoint present in clone", {"size": size})
     rd = ctx.p("weights", "README.md")
     if rd.exists():
         txt = rd.read_text(encoding="utf-8", errors="replace")
-        urls = re.findall(r"https?://\S+", txt)
-        has_sha = re.search(r"\b[0-9a-f]{64}\b", txt) is not None
-        if urls and has_sha:
+        urls = _published_urls(txt, ".pt")
+        digests = _published_digests(txt)
+        if urls and digests:
+            # The contract's second route, implemented as the contract words it: "a URL that
+            # returns HTTP 200 from a logged-out session, plus a sha256 that matches after
+            # download". It previously returned an unconditional FAIL here, so the published
+            # route could never go green and nothing was ever fetched.
+            oks, details, ev = [], [], {}
+            for u in urls[:3]:
+                ok, why, e = _verify_published(u, digests)
+                oks.append(ok)
+                details.append(why)
+                ev[u] = e
+            if any(oks):
+                return CheckResult("V06", PASS, "; ".join(d for o, d in zip(oks, details) if o),
+                                   ev)
+            return CheckResult("V06", FAIL, "; ".join(details), ev)
+        if urls or digests:
             return CheckResult("V06", FAIL,
-                               "URL+sha256 present but not verified (needs a logged-out fetch)",
-                               {"urls": urls[:3]})
+                               "weights/README.md publishes a URL or a digest but not both",
+                               {"urls": urls[:3], "n_digests": len(digests)})
     rc, so, _ = ctx.run(["git", "remote", "-v"])
     if rc == 0 and not so.strip():
         return CheckResult("V06", SKIP, SKIP_WHITELIST["V06"])
@@ -2211,9 +2353,16 @@ def check_V56(ctx: Ctx) -> CheckResult:
                            "manifest command lacks --require_weights, so these outputs could "
                            "be the no-checkpoint bicubic fallback rather than model results",
                            {"command": str(mj["command"])[:200]})
+    ok, why, ev = _verify_published(str(mj["release_url"]).strip(),
+                                    str(mj["archive_sha256"]).strip())
+    if not ok:
+        return CheckResult("V56", FAIL,
+                           f"the manifest describes a published archive that does not check "
+                           f"out: {why}", {"fetch": ev, **{k: mj.get(k) for k in required}})
     return CheckResult("V56", PASS,
                        f"manifest describes {mj['n_files']} published outputs produced with "
-                       "--require_weights", {k: mj.get(k) for k in required})
+                       f"--require_weights, and {why}",
+                       {"fetch": ev, **{k: mj.get(k) for k in required}})
 
 
 def check_V59(ctx: Ctx) -> CheckResult:
@@ -2236,9 +2385,18 @@ def check_V59(ctx: Ctx) -> CheckResult:
     if tracked:
         return CheckResult("V59", PASS, "weights/best.pt is tracked in the repository")
     if published:
-        return CheckResult("V59", PASS,
-                           "checkpoint published via URL + sha256 in weights/README.md",
-                           {"sha256": sha.group(0), "urls": urls[:2]})
+        # Downloadability is the entire point of this check, so it is measured, not asserted.
+        pt_urls = _published_urls(txt, ".pt")
+        if not pt_urls:
+            return CheckResult("V59", FAIL,
+                               "weights/README.md carries a URL and a digest but no URL that "
+                               "points at a .pt asset", {"urls": urls[:3]})
+        ok, why, ev = _verify_published(pt_urls[0], _published_digests(txt))
+        if not ok:
+            return CheckResult("V59", FAIL,
+                               f"weights/best.pt is neither tracked nor genuinely "
+                               f"obtainable: {why}", ev)
+        return CheckResult("V59", PASS, f"checkpoint published and verified: {why}", ev)
     if ck.exists():
         return CheckResult("V59", FAIL,
                            f"weights/best.pt exists locally ({ck.stat().st_size} B) but is "

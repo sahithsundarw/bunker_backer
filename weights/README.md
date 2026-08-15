@@ -65,7 +65,7 @@ on a fresh clone is a known way to fail V06, and V06's own text names that failu
 | run id | `20260815T062831Z-final-s42` |
 | git SHA of the training run | `80e7fb049367afe99fbcabb8e5469861f630fecc` (tree was dirty at launch; recorded as `-dirty` in `results/experiments.csv`) |
 | weights shipped | EMA, at the best validation PSNR |
-| validation | PSNR 28.7851 / SSIM 0.78279 / LPIPS 0.25233 over the full 400-image committed split |
+| validation | PSNR 28.7865 / SSIM 0.78287 / LPIPS 0.25324 over the full 400-image committed split, from `results/baselines/final/metrics.json` |
 
 **Verified anonymously**, not from an authenticated tab: fetched with `GITHUB_TOKEN` and
 `GH_TOKEN` cleared, the URL returned **HTTP 200**, **3288805 bytes**, and the sha256 of the
@@ -109,7 +109,9 @@ Releases page (live, HTTP 200):
       HTTP 200 anonymously, served digest matches**
 - [x] file > 1 KB and not an LFS pointer stub (V06) — 3288805 B, a real torch archive
 - [x] checkpoint < 100 MB (V43) — 3.14 MiB
-- [ ] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35)
-- [ ] `inference.py --require_weights` succeeds against it — i.e. the bicubic fallback is
-      *not* silently in play
+- [x] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35)
+      — V35 green
+- [x] `inference.py --require_weights` succeeds against it — i.e. the bicubic fallback is
+      *not* silently in play — 400/400 test outputs produced this way, see
+      `results/restored_test_outputs/manifest.json`
 - [ ] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43)

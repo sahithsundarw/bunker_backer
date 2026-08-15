@@ -1475,3 +1475,80 @@ No tampering had occurred: both digests were recomputed during the audit and bot
   values precisely so that prose cannot satisfy it.
 - **Do not widen V48's tolerance to admit the published numbers.** The numbers were wrong; the
   documents were corrected instead (see D32).
+
+---
+
+## D32 — Published-artifact claims are now proved by download, not by prose
+
+**Date:** 2026-08-15, iteration 2. **Human-authorised** (decision B). **Source:**
+`requirements-auditor` H-5. **Affects:** V06, V59, V56. **Re-pinned:** `47dac07a` -> `d792ab7f`.
+
+### The hole
+
+Three checks certified that an artifact was published. All three did it by reading a markdown
+file. `check_V59` was `re.findall(r"https?://\S+")` plus `re.search(r"\b[0-9a-f]{64}\b")` — a
+URL-shaped string and a hex-shaped string in the same document. `check_V56` validated the
+*shape* of the manifest's keys. Neither ever opened a socket.
+
+This is the standard V33 already set for this repo: a check must not accept the subject's own
+word for the thing under test. Every "verified anonymously, HTTP 200, digest matches" sentence
+in this repository was, to the verifier, decoration.
+
+**V06 was worse than unverified — its published route was unimplemented.** The branch that
+handles "URL + sha256" returned an unconditional `FAIL` reading *"URL+sha256 present but not
+verified (needs a logged-out fetch)"*. Since `.gitignore` and V51 both refuse `*.pt`, that is
+the *only* route available to this repo, so V06 was guaranteed to be red in any fresh clone
+while passing locally purely because `weights/best.pt` happened to sit on the author's disk.
+The check most responsible for "can the evaluator get the model" was structurally incapable of
+saying yes.
+
+### What it does now
+
+`_fetch_digest()` downloads with a bare `urllib` opener — no auth handler, no cookie jar, no
+netrc, no `Authorization` header — and additionally pops `GITHUB_TOKEN`, `GH_TOKEN`,
+`GH_ENTERPRISE_TOKEN`, `GITHUB_USER` and `GIT_ASKPASS` from the environment for the duration
+and sets `GIT_TERMINAL_PROMPT=0`, so a pass cannot come from ambient credentials. It streams in
+1 MB chunks into `hashlib` under a 512 MB cap, then requires:
+
+- HTTP **200** — 401/403 is reported explicitly as *"the artifact is NOT public"*;
+- the body is **not HTML** — a sign-in or error page served behind a 200 is the classic way a
+  "public" URL turns out to be private, and it is rejected on both `Content-Type` and magic
+  bytes;
+- a non-empty body;
+- the sha256 of the **served** bytes matches a digest published in the same document.
+
+V06 now verifies the published URL **even when the local file exists**, which is stricter than
+the contract's either/or: a local copy proves nothing about a link that has rotted.
+
+### Mutation-tested, as required
+
+| mutation | result |
+|---|---|
+| checkpoint digest `...592313` -> `...5deadb` in `weights/README.md` | **V06 RED, V59 RED** |
+| `archive_sha256` last 3 chars `750` -> `000` in `manifest.json` | **V56 RED** |
+| `release_url` pointed at `does_not_exist.zip` (404) | **V56 RED** |
+| all three reverted byte-exact | **V06, V56, V59 all GREEN** |
+
+### Cost, accepted deliberately
+
+A full run now downloads ~94 MB (3.14 MB checkpoint + 91 MB outputs archive). A per-process
+memo means a URL fetched by two checks is downloaded once. This is a real cost on every
+verification run and it was accepted rather than cached to disk, because a disk cache is
+exactly the mechanism by which a check stops testing the live artifact. A network failure is a
+**FAIL, not a SKIP** — the suite already reaches the network in V55.
+
+### Also corrected here
+
+`weights/README.md` published `PSNR 28.7851 / SSIM 0.78279 / LPIPS 0.25233` — `train.py`'s
+in-run validation, not the evaluation record. Replaced with
+`28.7865 / 0.78287 / 0.25324` from `results/baselines/final/metrics.json`, which is what V27
+and V48 read. Note the direction: the retired LPIPS figure was the *flattering* one, in a repo
+whose stated hygiene rule is to always quote the less favourable number. Two checklist items
+that the evidence had already satisfied (V35, and `--require_weights` succeeding) were ticked.
+
+### Do NOT retry
+
+- **Do not cache downloaded artifacts to disk between runs to make the suite faster.** The
+  point of the check is that the *live* URL serves the right bytes today.
+- **Do not downgrade the fetch to a HEAD request or a Content-Length comparison.** A digest
+  over the served bytes is the only thing that detects a replaced asset.
