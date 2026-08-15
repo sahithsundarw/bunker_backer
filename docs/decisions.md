@@ -1644,3 +1644,35 @@ time, outside [8%, 22%]`. Reverted byte-exact, reconfirmed green.
 - **Do not test a continuous random draw's minimum against a near-zero absolute epsilon.**
   Test against a percentile of the configured range instead, sized so the false-positive rate
   at the chosen sample count is negligible. This is the mistake V62's own first draft made.
+
+---
+
+## D35 — V57 ADDED, closing U-6: V12 tested a helper, not the model's actual input
+
+**Date:** 2026-08-16, iteration 2. **Source:** `requirements-auditor` (U-6). Contract addition
+only.
+
+V12 calls `src.io_utils.load_array` directly and checks the return value. The contract's own
+wording for this requirement is "the tensor **entering the model**" — a different thing. A
+`clamp_` inserted anywhere in `inference.py`'s stack/H2D/channels_last/autocast pipeline would
+leave V12 green while genuinely destroying the out-of-range information SPEC F5 says is
+intentional.
+
+**V57** closes the gap by testing the real path instead of a helper: it imports
+`inference.py`'s own `load_net()` and `infer_chunk()` — not a reimplementation of the pipeline
+— loads the actual trained checkpoint, attaches a `register_forward_pre_hook` to the model, and
+drives the same extreme-value probe V12 already uses (`[-0.28, 2.16]`) through `infer_chunk`
+exactly as a real invocation would. It is forced to `--device cpu`, so it never contends with a
+running GPU benchmark and remains fast even mid-benchmark.
+
+**Negative control:** `t.clamp_(0.0, 1.0)` inserted immediately before the model call in
+`infer_chunk` (the exact defect class this check exists to catch). Result: **V12 stayed
+green** — it never executes this code path, confirming it genuinely cannot see this class of
+bug. **V57 correctly went red**: *"the tensor ACTUALLY ENTERING THE MODEL was clipped somewhere
+in the stack/H2D/channels_last/autocast path, even though V12's helper-level check passed."*
+Reverted byte-exact, V57 green again.
+
+### Do NOT retry
+- **Do not delete or "simplify" V12 now that V57 exists.** V12 is cheap, still correct, and
+  catches a different failure mode (the loader itself clipping). V57 subsumes it for the
+  purpose of the contract's actual wording; it does not replace it.

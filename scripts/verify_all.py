@@ -75,6 +75,7 @@ TIERS["V59"] = 0
 # U-8 -- two requirements no prior check could turn red for.
 # V61 F2 size-agnosticism, forwarded on every architecture (V25-36 band: model correctness)
 # V62 F4 degradation order-randomisation, actually measured (same band: data/degradation)
+TIERS["V57"] = 0
 TIERS["V61"] = 2
 TIERS["V62"] = 2
 
@@ -2471,6 +2472,87 @@ def check_V59(ctx: Ctx) -> CheckResult:
                            "who clones this repo",
                            {"ignored": True, "size": ck.stat().st_size})
     return not_impl("V59", "weights/best.pt (not trained yet) or a published URL + sha256")
+
+
+def check_V57(ctx: Ctx) -> CheckResult:
+    """The tensor ENTERING THE MODEL is unclipped -- tested on the real inference.py path.
+
+    V12 tests a helper (src.io_utils.load_array), not the model input; the contract's exact
+    wording is "the tensor entering the model" (requirements-auditor U-6). A clamp_ anywhere
+    in inference.py's stack/H2D/channels_last/autocast pipeline would leave V12 green. This
+    imports inference.py's own load_net() and infer_chunk() -- not a reimplementation of the
+    pipeline -- and attaches a forward pre-hook to the REAL net to capture exactly what it
+    receives, forcing --device cpu so it never contends for the GPU.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V57", "inference.py")
+    ck = ctx.p("weights", "best.pt")
+    if not ck.exists():
+        return not_impl("V57", "weights/best.pt (no trained checkpoint to test the real path)")
+    import importlib.util
+
+    import numpy as np
+
+    spec = importlib.util.spec_from_file_location("_v57_inference", ctx.p("inference.py"))
+    if spec is None or spec.loader is None:
+        return CheckResult("V57", FAIL, "could not load inference.py as a module")
+    # load_net() below does `from src.model import build_model` -- a deferred import that
+    # fires when load_net() is CALLED, not at exec_module time -- so the repo root has to
+    # stay on sys.path for the rest of this check, matching V22/V61/V62's convention of
+    # leaving it inserted for the life of the (one-shot) verifier process.
+    root_str = str(ctx.root)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+    try:
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V57", FAIL, f"inference.py failed to import: {type(exc).__name__}: {exc}")
+
+    try:
+        import torch
+
+        dev = mod.resolve_device("cpu")
+        net, loaded = mod.load_net(ck, dev, False)
+        if not loaded:
+            return CheckResult("V57", FAIL,
+                               "weights/best.pt exists but load_net() fell back to the "
+                               "bicubic upsampler -- cannot test the real model's input path")
+        use_amp, amp_dtype, _ = mod.resolve_precision("auto", dev)
+
+        seen: dict[str, Any] = {}
+
+        def _pre_hook(module, args):  # noqa: ANN001
+            if args:
+                t = args[0]
+                seen["min"] = float(t.min())
+                seen["max"] = float(t.max())
+
+        h = net.register_forward_pre_hook(_pre_hook)
+        try:
+            # SAME extreme-value construction V12 already uses (observed real range
+            # [-0.28, 2.16], SPEC_ADDENDUM section 4), routed through the ACTUAL pipeline
+            # function that every real inference.py run calls.
+            arr = np.array([[-0.28, 2.16], [0.5, 1.5]], dtype=np.float32)
+            arr = np.pad(arr, ((0, 126), (0, 126)), mode="wrap").astype(np.float32)
+            mod.infer_chunk(net, [arr], dev, use_amp, amp_dtype, False)
+        finally:
+            h.remove()
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V57", FAIL, f"exception exercising the real path: "
+                           f"{type(exc).__name__}: {exc}")
+
+    if "min" not in seen:
+        return CheckResult("V57", FAIL, "forward pre-hook never fired; net was not called "
+                           "the way infer_chunk normally calls it")
+    if seen["min"] > -0.27 or seen["max"] < 2.15:
+        return CheckResult("V57", FAIL,
+                           "the tensor ACTUALLY ENTERING THE MODEL was clipped somewhere in "
+                           "the stack/H2D/channels_last/autocast path, even though V12's "
+                           "helper-level check passed", seen)
+    return CheckResult("V57", PASS,
+                       f"real load_net()+infer_chunk() path delivers an unclipped tensor to "
+                       f"the model: min {seen['min']:.4f}, max {seen['max']:.4f}", seen)
 
 
 #: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and
