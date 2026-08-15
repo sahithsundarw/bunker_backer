@@ -11,14 +11,18 @@ architecture. `inference.py` prefers the **EMA** weights when present.
 
 ---
 
-## Status — 2026-08-15, iteration 1
+## Status — 2026-08-15, iteration 2
 
-**No checkpoint exists yet. Training has not been run.**
+**The checkpoint exists and is published as a GitHub Release asset (Route B, below).**
 
-`weights/best.pt` is absent from this repository, and `weights/*.pt` is currently in
-`.gitignore`. **V06 is therefore FAILING, correctly.** It will stay red until one of the two
-routes below is complete. Nothing in this file is a placeholder standing in for a value that
-was measured and then omitted — the values are genuinely not yet known.
+`weights/best.pt` is deliberately **not** in this repository: `.gitignore` bans `weights/*.pt`
+and verification check V51 lists `.pt` as a forbidden blob, so committing it is not an option
+here. It is instead served from a Release, with the digest of the served bytes recorded below.
+Every value in this file was measured; none is a placeholder.
+
+**If you cloned this repository, you do not have the model yet.** Download it before running
+anything you intend to score — see *Download*, below. Without it `inference.py` falls back to a
+bicubic upsample (details in the next section), which is not a model result.
 
 ### What `inference.py` does in the meantime
 
@@ -36,64 +40,72 @@ into a hard failure — use that flag in any run whose output you intend to scor
 
 ---
 
-## Download — to be completed when the checkpoint exists
+## Download
 
-Exactly one of these two routes must be satisfied before submission:
-
-**Route A — commit the file.** The checkpoint is small enough for plain git: D19 measures a
-constructed NAFSR w48 n16 checkpoint (model + EMA, 388,225 parameters) at **3.14 MiB**, far
-under GitHub's 100 MB limit and under V43's cap. This is the preferred route because it has
-no external dependency and no link to rot. It requires removing the `*.pt` line from
-`.gitignore` for this one path, which is a `.gitignore` change the main session owns.
-
-**Route B — GitHub Release asset.** Publish the file as a Release asset, then fill in the
-table below with a URL that returns **HTTP 200 from a logged-out session** (verify in a
-private browser window, not just in your own tab) and the sha256 of the exact bytes served.
-GitHub Releases are pre-approved by standing human authorisation (`docs/decisions.md` D23) and
-need no contract change — V06 already permits exactly this mechanism.
+**Route B — GitHub Release asset — is the route in force.** Route A (committing the file) was
+available on size grounds (3.14 MiB, far under GitHub's 100 MB limit and under V43's cap) but
+is closed here: `.gitignore` bans `weights/*.pt` and V51 lists `.pt` as a forbidden blob, and
+weakening either to admit the file is not a change this project permits. GitHub Releases are
+pre-approved by standing human authorisation (`docs/decisions.md` D23) and need no contract
+change — V06 already permits exactly this mechanism.
 
 Git LFS is **ruled out** — see `docs/decisions.md` D17 and D23. An unresolved LFS pointer stub
 on a fresh clone is a known way to fail V06, and V06's own text names that failure mode.
 
-The same Release carries the restored test outputs (`results/restored_test_outputs/README.md`,
-`docs/decisions.md` D23). Record that archive's digest here too, so both artifacts are
+### The checkpoint
+
+| field | value |
+|---|---|
+| URL | https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt |
+| sha256 | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
+| file size (bytes) | 3288805 |
+| parameter count | 388,225 (NAFSR w48 n16) |
+| architecture / config | `configs/final.yaml`; also embedded in the checkpoint under `config` |
+| training seed | 42 |
+| run id | `20260815T062831Z-final-s42` |
+| git SHA of the training run | `80e7fb049367afe99fbcabb8e5469861f630fecc` (tree was dirty at launch; recorded as `-dirty` in `results/experiments.csv`) |
+| weights shipped | EMA, at the best validation PSNR |
+| validation | PSNR 28.7851 / SSIM 0.78279 / LPIPS 0.25233 over the full 400-image committed split |
+
+**Verified anonymously**, not from an authenticated tab: fetched with `GITHUB_TOKEN` and
+`GH_TOKEN` cleared, the URL returned **HTTP 200**, **3288805 bytes**, and the sha256 of the
+**served** bytes equals the digest above and the digest of the local file. Re-verify with:
+
+```
+curl -sSL -o best.pt https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt
+py -3.12 -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('best.pt').read_bytes()).hexdigest())"
+```
+
+Place the file at `weights/best.pt`. `inference.py` resolves that path relative to its own
+file (`Path(__file__).resolve().parent`), so nothing else needs configuring — no flag, no
+environment variable, and it does not matter what directory you run from.
+
+### Both artifacts on one Release
+
+The same Release carries the restored test outputs archive
+(`results/restored_test_outputs/README.md`, `docs/decisions.md` D23), so both digests are
 verifiable from one place:
 
 | artifact | Release asset | sha256 |
 |---|---|---|
-| `best.pt` (checkpoint) | *pending* | *pending* |
-| restored test outputs archive (400 files) | *pending* | *pending* |
+| `best.pt` (checkpoint) | [`artifacts-v1/best.pt`](https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt) | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
+| restored test outputs archive (400 files) | *pending — see `results/restored_test_outputs/manifest.json` once generated* | *pending* |
 
 Releases page (live, HTTP 200):
 `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
 
-| field | value |
-|---|---|
-| URL | *pending — no checkpoint yet; do not fabricate* |
-| sha256 | *pending — must be the sha256 of the served bytes, not of a local copy* |
-| file size (bytes) | *pending* |
-| parameter count | *pending — 388,225 for NAFSR w48 n16 if that config ships unchanged (D19)* |
-| architecture / config | *pending — mirrors `configs/final.yaml`, also embedded in the checkpoint* |
-| training seed | *pending — 42 unless the shipped run says otherwise* |
-| git SHA of the training run | *pending — embedded in the checkpoint under `git`* |
-
-Compute the digest with:
-
-```
-py -3.12 -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('weights/best.pt').read_bytes()).hexdigest())"
-```
-
-> Recorded here rather than in the root `README.md` because there is no file for it to hash
-> yet, and V46 executes every fenced shell command in `README.md`. The same one-liner,
-> pointed at `scripts/verify_all.py`, is what produced the digest pinned in
-> `docs/VERIFIER_SHA256`.
+> These commands live here rather than in the root `README.md` because V46 executes every
+> fenced shell command in `README.md`, and a 3 MB download does not belong in a verification
+> run. The same digest one-liner, pointed at `scripts/verify_all.py`, is what produced the
+> hash pinned in `docs/VERIFIER_SHA256`.
 
 ## Checklist before submission
 
-- [ ] `best.pt` present in a **fresh clone** (Route A) **or** the table above complete and the
-      URL fetched successfully from a logged-out session (Route B)
-- [ ] file > 1 KB and not an LFS pointer stub (V06)
-- [ ] checkpoint < 100 MB (V43)
+- [x] `best.pt` present in a **fresh clone** (Route A) **or** the table above complete and the
+      URL fetched successfully from a logged-out session (Route B) — **Route B, verified
+      HTTP 200 anonymously, served digest matches**
+- [x] file > 1 KB and not an LFS pointer stub (V06) — 3288805 B, a real torch archive
+- [x] checkpoint < 100 MB (V43) — 3.14 MiB
 - [ ] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35)
 - [ ] `inference.py --require_weights` succeeds against it — i.e. the bicubic fallback is
       *not* silently in play

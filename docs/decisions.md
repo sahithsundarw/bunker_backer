@@ -1360,3 +1360,46 @@ future runs must beat. Any subsequent architecture, loss or augmentation change 
 measured against **28.7851 / 0.78279 / 0.25233 on the 400-image split**, and per D16 an
 in-distribution gain bought by narrowing the degradation randomisation is a regression against
 the actual objective, not an improvement.
+
+---
+
+## D30 — The checkpoint is published as a GitHub Release asset, verified anonymously
+
+**Date:** 2026-08-15, iteration 2. **Closes:** V59. **Route:** B (Release), per D23.
+
+`weights/best.pt` existed only on the development machine. `.gitignore` bans `weights/*.pt`
+and V51 lists `.pt` as a forbidden blob, so the file was untracked *and* unpublished — it
+worked for the author and was absent for everyone who cloned the repository. That is exactly
+the silent failure V59 was written to catch, and V59 was correctly red.
+
+**What was done.** Release `artifacts-v1` was created on the public remote and `best.pt`
+uploaded as an asset.
+
+| field | value |
+|---|---|
+| URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt` |
+| size | 3288805 B (3.14 MiB) |
+| sha256 | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
+
+**The digest is of the served bytes, not of the local copy.** The asset was re-fetched with
+`GITHUB_TOKEN` and `GH_TOKEN` cleared from the environment, so the fetch could not have
+succeeded on cached credentials: HTTP **200**, **3288805** bytes downloaded, and the sha256 of
+what the server returned equals the digest above and the digest of the local file. A URL
+verified only from an authenticated session is the standard way this check passes on the dev
+box and fails for the evaluator.
+
+**Route A (commit the file) was rejected, and the reasoning is worth recording** because it is
+the tempting one: at 3.14 MiB the checkpoint fits comfortably inside V51's 5 MB per-file and
+25 MB total caps, and `weights/README.md` had previously called Route A "preferred" on the
+grounds that it has no external dependency and no link to rot. Both remain true. It was still
+rejected: taking it requires editing `.gitignore` and V51 to admit a `.pt`, and loosening a
+check because it stands between the work and a green tally is precisely the move Prime
+Directive 1 forbids. The size argument is real but it is an argument for amending the caps on
+their merits, not for amending them mid-task to unblock a step. `weights/README.md` was
+updated to say so rather than leaving the stale "preferred" framing in place.
+
+**What this does not close.** V06 is not evidence of anything on this machine: it passes as
+soon as `weights/best.pt` exists on disk, which it does, so it was green while the checkpoint
+was unobtainable. V59 is the check that actually tests deliverability, which is why it was
+added. The restored-outputs archive is still pending and will ship on the same Release, with
+its digest recorded in the same table.
