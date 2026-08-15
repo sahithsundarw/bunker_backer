@@ -1,9 +1,24 @@
-# Plain U-Net learned baseline (SPEC 10 baseline 3, V28).
-# Same training budget as the final model so the comparison is fair.
+# Plain U-Net learned baseline (SPEC 7.2 fallback row / SPEC 10 baseline 3, V28).
+# Same data, loss, optimiser, schedule and iteration budget as configs/final.yaml so the
+# only difference is the body -- otherwise the comparison measures the training budget,
+# not the architecture.
+#
+# `name: UNetSR` is the frozen spelling in the build_model contract. The earlier spelling
+# `UNetBaseline` is still accepted as an alias by src/model.py so old checkpoints load.
+#
+# MEASURED cost (src/model.py):
+#   params 2,970,401 (2.970 M)   MACs @128x128 = 4.478 G   FLOPs ~= 8.96 G per image
+# Against NAFSR w48 n16 (0.388 M / 11.17 GF) the baseline is ~7.7x the parameters and
+# ~0.8x the FLOPs. The comparison is therefore roughly FLOP-matched, which is the fair
+# axis for a throughput-scored task, and NAFSR is given no parameter advantage.
+# Param-matched alternatives if a second baseline is wanted: w16 L4 = 0.743 M / 2.25 GF,
+# w32 L3 = 0.757 M / 6.69 GF.
 model:
-  name: UNetBaseline
+  name: UNetSR
   width: 32
-  levels: 4
+  levels: 4               # encoder-decoder depth; internal size multiple 2^(levels-1) = 8,
+                          # reflect-padded and cropped inside forward() so the external
+                          # requirement is still 1 (any H, W -> exactly 2H, 2W)
   scale: 2
   in_ch: 1
   out_ch: 1

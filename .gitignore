@@ -78,6 +78,10 @@ Thumbs.db
 !results/eda/*.txt
 !results/restored_test_outputs/
 !results/restored_test_outputs/.gitkeep
+# V48 reads results/metrics_summary.md from a FRESH CLONE, and Definition-of-Done #2 requires
+# fresh-clone verification -- so the table must be tracked. results/baselines/** stays ignored
+# (1200 .npy predictions live there).
+!results/metrics_summary.md
 # sample_inputs/ holds 6 real test_NoisyLR files (394 KB total). V47 runs inference against
 # this folder from a clean clone, so they must be tracked despite the blanket *.npy rule.
 # These are degraded INPUTS only -- no ground truth is committed anywhere in this repo.

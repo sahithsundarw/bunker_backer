@@ -87,3 +87,75 @@ GitHub's limit and is caught by the `*.npy` rule in `.gitignore`.
 `weights/README.md`, or committing a reduced-precision/subset artifact (which would not
 satisfy "actual model outputs"). Currently a `.gitkeep` placeholder only, so V13 fails
 honestly rather than appearing to pass.
+
+**UPDATE, iteration 1:** Git LFS is now ruled out by human instruction — unresolved LFS
+pointer stubs on a fresh clone are a known way to fail V06, and V06's own text names
+"not an LFS pointer stub" as a failure mode. The chosen mechanism is a single
+`np.savez_compressed` archive if it measures under ~40 MB, else external hosting with a
+published sha256 verified from a logged-out session. See `docs/decisions.md` D17. **This
+is not yet resolved** — see B9 below for the constraint it collides with.
+
+## B7 — V47 and V51 were mutually exclusive as implemented (RESOLVED, human-authorised)
+
+V51 banned **every** tracked `.npy`. V47 requires
+`python inference.py --input_dir sample_inputs --output_dir /tmp/o` to complete
+**from a clean clone**, which requires `.npy` files to be *in* that clone. SPEC §12 lists
+`sample_inputs/` as a repo item for the same reason. The two checks could therefore never
+both be green, and the Definition of Done was unreachable.
+
+This was not a judgement call the agent made on its own: the human explicitly instructed
+"copy 4-6 real .npy files from C:\kla-data\test_NoisyLR, ~400 KB total, commit directly.
+Unblocks V47" — the same human-issued-amendment mechanism as D6 and D10.
+
+**Resolution:** a narrow, bounded exemption for `sample_inputs/*.npy` (≤8 files, ≤512 KB;
+actual 6 files / 393,984 B) plus four **new** assertions that make V51 net stricter — the
+blob-extension ban widened from 4 to 20 extensions, a dataset-directory-token ban, a 5 MB
+per-file cap and a 25 MB total-tree cap. The last two catch a dataset dump under *any*
+extension, which the previous extension blacklist provably could not. Recorded in
+`docs/decisions.md` D15 with the new verifier digest; `docs/VERIFIER_SHA256` re-pinned.
+
+**Flagged honestly for the human:** the exemption is, in isolation, a loosening with
+respect to those six paths. The four new assertions are unambiguous strengthenings. If the
+human prefers the alternative reading — leave V51 red and treat the conflict as permanent —
+revert commit and this entry stands as the record of why.
+
+## B8 — `pip install lpips` silently downgrades torch to a CPU-only build
+
+Measured, iteration 1. `torch==2.11.0+cu128` was installed from
+`https://download.pytorch.org/whl/cu128` and verified (`torch.cuda.is_available()` True,
+RTX 4060 Laptop GPU). A subsequent
+`pip install scikit-image lpips pyyaml pytorch-msssim` resolved `lpips`'s torch/torchvision
+dependency **from PyPI**, replacing the CUDA build with `torch==2.13.0+cpu` /
+`torchvision==0.28.0+cpu`. After that, `torch.version.cuda` was `None` and
+`torch.cuda.is_available()` was `False`.
+
+**Why this matters beyond the dev box:** V04 installs into a fresh venv with only
+`pip install -r requirements.txt`. If `requirements.txt` does not force the PyTorch index,
+a clean-room install produces a **CPU-only torch** — the run still "passes" V04 while
+KLA's H100 sits idle, and the throughput score collapses with no error message anywhere.
+This is exactly the class of silent failure V04 exists to catch, and it would not have been
+caught by reading the file.
+
+**Resolution in flight:** torch/torchvision reinstalled from the cu128 index;
+`requirements.txt` must pin the index explicitly and `docs/ENVIRONMENT.md` must state the
+ordering hazard. Assigned to `docs-scribe` (owner of `requirements.txt`). Not yet verified
+end to end in a fresh venv — that is V04's job and V04 is still red.
+
+## B9 — the D17 `.npz` route collides with the V51 strengthening from B7
+
+`docs/decisions.md` D17 selects a single `np.savez_compressed` archive as the delivery
+mechanism for `results/restored_test_outputs/`. The V51 rewrite in B7 bans `.npz` outright
+and caps any tracked file at 5 MB. A ~40 MB `.npz` therefore cannot be committed without
+**another** human-authorised V51 amendment.
+
+The agent will not resolve this itself in either direction: loosening V51 a second time to
+admit a 40 MB blob is precisely the pattern Prime Directive 1 forbids, and it would gut the
+size caps that were just added. **Human decision required, two options:**
+
+1. External hosting with a published sha256 and a logged-out-verified link — needs no
+   contract change at all, and is the route the current V51 already permits.
+2. A second human-authorised V51 amendment carving out exactly
+   `results/restored_test_outputs/*.npz` with its own byte cap.
+
+Option 1 is the recommendation: it requires no further weakening of a check that exists to
+stop dataset blobs entering the repo. Blocked pending the human, and blocking V13.

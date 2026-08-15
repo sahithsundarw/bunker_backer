@@ -1,0 +1,54 @@
+# THE SUBMITTED CONFIG. This is the config that produced weights/best.pt.
+# SPEC 9 requires it to sit beside the checkpoint AND to be embedded inside the checkpoint
+# dict, so weights can never be paired with the wrong architecture (V35). V34 runs
+# `train.py --config configs/final.yaml --seed 42` twice and requires identical losses.
+#
+# Owner: model-core (model block) / trainer (optim, train blocks) / data-pipeline (data).
+# The `model` block is identical to configs/nafnet_x2.yaml. If they ever diverge, this file
+# is the truth for the submission and nafnet_x2.yaml is a development variant.
+#
+# MEASURED cost (src/model.py self-test, `py -3.12 -m src.model`):
+#   params 388,225 (0.388 M)   MACs @128x128 = 5.584 G   FLOPs ~= 11.17 G per image
+#   Checkpoint is ~4.7 MB per copy of the weights (fp32), well under V43's 100 MB cap
+#   even with model + EMA state stored.
+model:
+  name: NAFSR
+  width: 48
+  num_blocks: 16
+  scale: 2                # F2: exactly x2, verified on all 3200 pairs
+  in_ch: 1                # grayscale end to end, no BGR/RGB anywhere (V32)
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+data:
+  lr_patch: 64            # -> 128 GT patch
+  batch_size: 32
+  synth_ratio: 0.5        # fraction generated on the fly from GT (SPEC F15)
+  # Degradation params are MEASURED, not from SPEC 6.4. See docs/decisions.md D12.
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253                 # shot / linear term
+    v: 0.015745                 # speckle / quadratic term
+    randomise_frac: 0.30        # +/-30% on a and v
+    gauss_sigma_range: [0.0, 0.02]   # includes zero; hedge for SPEC F3
+    clip_lr: false              # SPEC F5 -- never clip synthetic LR
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]       # NAFNet beta2=0.9, not 0.999
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 500
+  total_iters: 20000      # compressed for a 1-day budget
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 1000
+  save_best_on: psnr

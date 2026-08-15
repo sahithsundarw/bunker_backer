@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13  scripts/verify_all.py
+cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d  scripts/verify_all.py
 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -23,3 +23,8 @@ d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13  scripts/verify
 # 2026-08-15  V39 SKIP allowance removed from the whitelist. See docs/decisions.md D10.
 # 2026-08-15  scripts/verify_all.py created during BOOTSTRAP and pinned for the first time.
 # 2026-08-15  V14 local-module false-positive fix. See docs/decisions.md D14.
+# 2026-08-15  V51 rewritten: bounded sample_inputs/*.npy exemption (<=8 files, <=512 KB)
+#             to resolve the V47-vs-V51 conflict, plus four NEW assertions (wider blob
+#             extension ban, dataset-directory-token ban, 5 MB per-file cap, 25 MB total
+#             tracked cap). Net stricter. See docs/decisions.md D15.
+#             prior pin: d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13

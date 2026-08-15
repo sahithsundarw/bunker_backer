@@ -1057,17 +1057,89 @@ def check_V50(ctx: Ctx) -> CheckResult:
                        "datasets or pretrained weights used.' (docs/decisions.md D13)")
 
 
+#: The only place a tracked ``.npy`` is permitted, and the bound on that permission.
+#: SPEC section 12 requires ``sample_inputs/`` and V47 runs inference against it from a
+#: clean clone, so those files MUST be in the clone. The exemption is deliberately narrow.
+SAMPLE_INPUTS_MAX_FILES = 8
+SAMPLE_INPUTS_MAX_BYTES = 512 * 1024
+
+#: Blob extensions that may never be tracked. Broader than the original four.
+BLOB_EXTS = (".npz", ".pt", ".pth", ".zip", ".env", ".tar", ".gz", ".7z", ".ckpt",
+             ".onnx", ".safetensors", ".bin", ".raw", ".dat", ".h5", ".hdf5",
+             ".parquet", ".mat", ".pkl", ".pickle")
+
+#: Path segments that would mean a slice of the dataset tree got committed.
+DATASET_DIR_TOKENS = ("/gt/", "/noisylr/", "/ground_truth/", "/test_noisylr/")
+
+#: No single tracked file may exceed this, and no repo may exceed the total. Catches a
+#: dataset dump under ANY extension, which an extension blacklist alone cannot.
+MAX_TRACKED_FILE_BYTES = 5 * 1024 * 1024
+MAX_TRACKED_TOTAL_BYTES = 25 * 1024 * 1024
+
+
 def check_V51(ctx: Ctx) -> CheckResult:
     if not ctx.exists(".gitignore"):
         return CheckResult("V51", FAIL, ".gitignore missing")
     rc, so, _ = ctx.run(["git", "ls-files"])
     tracked = so.splitlines()
+
     junk = [f for f in tracked
-            if f.endswith((".npy", ".npz", ".pt", ".pth", ".zip", ".env"))
-            or "__pycache__" in f or ".ipynb_checkpoints" in f]
+            if f.endswith(BLOB_EXTS) or "__pycache__" in f or ".ipynb_checkpoints" in f
+            or f.endswith(".DS_Store")]
+    # .npy is banned everywhere EXCEPT the bounded sample_inputs/ exemption below.
+    junk += [f for f in tracked
+             if f.endswith(".npy") and not f.startswith("sample_inputs/")]
     junk = [f for f in junk if not f.startswith("tests/fixtures/")]
     if junk:
-        return CheckResult("V51", FAIL, f"{len(junk)} junk/dataset files tracked", {"files": junk[:10]})
+        return CheckResult("V51", FAIL, f"{len(junk)} junk/dataset files tracked",
+                           {"files": sorted(set(junk))[:10]})
+
+    # A committed slice of the dataset tree, under any extension.
+    tree = [f for f in tracked
+            if any(t in ("/" + f.lower() + "/") for t in DATASET_DIR_TOKENS)]
+    if tree:
+        return CheckResult("V51", FAIL,
+                           f"{len(tree)} tracked files sit inside a dataset directory",
+                           {"files": sorted(tree)[:10]})
+
+    # The sample_inputs/ exemption is bounded in both count and total bytes.
+    samples = [f for f in tracked if f.startswith("sample_inputs/") and f.endswith(".npy")]
+    sample_bytes = 0
+    for f in samples:
+        p = ctx.p(*f.split("/"))
+        if p.exists():
+            sample_bytes += p.stat().st_size
+    if len(samples) > SAMPLE_INPUTS_MAX_FILES:
+        return CheckResult("V51", FAIL,
+                           f"sample_inputs/ has {len(samples)} .npy files, "
+                           f"cap is {SAMPLE_INPUTS_MAX_FILES}",
+                           {"count": len(samples), "bytes": sample_bytes})
+    if sample_bytes > SAMPLE_INPUTS_MAX_BYTES:
+        return CheckResult("V51", FAIL,
+                           f"sample_inputs/ totals {sample_bytes} B, "
+                           f"cap is {SAMPLE_INPUTS_MAX_BYTES} B",
+                           {"count": len(samples), "bytes": sample_bytes})
+
+    # Size caps catch a dataset dump regardless of extension.
+    total = 0
+    oversized = []
+    for f in tracked:
+        p = ctx.p(*f.split("/"))
+        if not p.exists():
+            continue
+        sz = p.stat().st_size
+        total += sz
+        if sz > MAX_TRACKED_FILE_BYTES:
+            oversized.append(f"{f} ({sz} B)")
+    if oversized:
+        return CheckResult("V51", FAIL,
+                           f"{len(oversized)} tracked files exceed "
+                           f"{MAX_TRACKED_FILE_BYTES} B", {"files": oversized[:10]})
+    if total > MAX_TRACKED_TOTAL_BYTES:
+        return CheckResult("V51", FAIL,
+                           f"tracked tree is {total} B, cap is {MAX_TRACKED_TOTAL_BYTES} B",
+                           {"total_bytes": total})
+
     keys = []
     for f in tracked:
         p = ctx.p(*f.split("/"))
@@ -1077,7 +1149,11 @@ def check_V51(ctx: Ctx) -> CheckResult:
                 keys.append(f)
     if keys:
         return CheckResult("V51", FAIL, f"possible secrets in {keys}")
-    return CheckResult("V51", PASS, f"{len(tracked)} tracked files, no secrets or dataset blobs")
+    return CheckResult("V51", PASS,
+                       f"{len(tracked)} tracked files ({total} B), no secrets or dataset "
+                       f"blobs; sample_inputs/ = {len(samples)} files, {sample_bytes} B",
+                       {"tracked": len(tracked), "total_bytes": total,
+                        "sample_count": len(samples), "sample_bytes": sample_bytes})
 
 
 def check_V52(ctx: Ctx) -> CheckResult:
