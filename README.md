@@ -232,7 +232,7 @@ measured step time extrapolated to an iteration count, not a completed run.
 | `docs/` | SPEC, SPEC addendum (governs on conflict), verification contract, dataset findings, I/O contract, decisions, blockers, state |
 | `results/eda/` | dataset figures, degradation fit, content contact sheets |
 | `results/metrics_summary.md` | machine-generated results table |
-| `results/restored_test_outputs/` | mandatory model outputs (**empty — no model yet**; delivery mechanism decided in `docs/decisions.md` D17) |
+| `results/restored_test_outputs/` | mandatory model outputs. **Holds a manifest and hashes, not the output bytes** — ~105 MB ships as a GitHub Release asset with a published sha256 (`docs/decisions.md` D23). **No outputs exist yet**; read that folder's `README.md`, which says so in plain words |
 | `weights/` | checkpoint location + `README.md` (**no checkpoint yet**) |
 
 ## Method summary
@@ -338,10 +338,11 @@ executed by `scripts/verify_all.py`, which runs 53 checks and writes
 clean-room checks. It is **not** listed as a fenced command here because it exits non-zero
 while the project is incomplete, and no command in this README exits non-zero.
 
-**The suite is not green, and this README does not claim it is.** What is red at this commit
-is red for one honest reason — the artifact does not exist yet: no checkpoint (V06), no
-`results/restored_test_outputs/` (V13), no completed training run and therefore no model to
-score (V25, V27, V28, V35, V45, V48), no runtime report (V37–V39, V43), no qualitative
-figures (V49). The authoritative per-check status is `results/verification_report.json`,
-regenerated on every run; `docs/STATE.md` carries the rolling ledger and `docs/BLOCKERS.md`
-the things that could not be resolved.
+**The suite is not green, and this README does not claim it is.** It stands at **PASS 37 /
+FAIL 16 of 53** as measured on commit `c88fc33`; regenerate the number rather than trusting
+this line, because it moves with every commit. What is red is red for one honest reason — the
+artifact does not exist yet: no checkpoint (V06), no completed training run and therefore no
+model to score (V25, V27, V28, V35, V45, V48), no runtime report (V37–V39, V43), no
+qualitative figures (V49). The authoritative per-check status is
+`results/verification_report.json`, regenerated on every run; `docs/STATE.md` carries the
+rolling ledger and `docs/BLOCKERS.md` the things that could not be resolved.

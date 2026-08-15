@@ -46,12 +46,26 @@ under GitHub's 100 MB limit and under V43's cap. This is the preferred route bec
 no external dependency and no link to rot. It requires removing the `*.pt` line from
 `.gitignore` for this one path, which is a `.gitignore` change the main session owns.
 
-**Route B — external hosting.** Publish the file, then fill in the table below with a URL
-that returns **HTTP 200 from a logged-out session** (verify in a private browser window, not
-just in your own tab) and the sha256 of the exact bytes served.
+**Route B — GitHub Release asset.** Publish the file as a Release asset, then fill in the
+table below with a URL that returns **HTTP 200 from a logged-out session** (verify in a
+private browser window, not just in your own tab) and the sha256 of the exact bytes served.
+GitHub Releases are pre-approved by standing human authorisation (`docs/decisions.md` D23) and
+need no contract change — V06 already permits exactly this mechanism.
 
-Git LFS is **ruled out** — see `docs/decisions.md` D17. An unresolved LFS pointer stub on a
-fresh clone is a known way to fail V06, and V06's own text names that failure mode.
+Git LFS is **ruled out** — see `docs/decisions.md` D17 and D23. An unresolved LFS pointer stub
+on a fresh clone is a known way to fail V06, and V06's own text names that failure mode.
+
+The same Release carries the restored test outputs (`results/restored_test_outputs/README.md`,
+`docs/decisions.md` D23). Record that archive's digest here too, so both artifacts are
+verifiable from one place:
+
+| artifact | Release asset | sha256 |
+|---|---|---|
+| `best.pt` (checkpoint) | *pending* | *pending* |
+| restored test outputs archive (400 files) | *pending* | *pending* |
+
+Releases page (live, HTTP 200):
+`https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
 
 | field | value |
 |---|---|

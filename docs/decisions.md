@@ -968,3 +968,33 @@ evidence rather than silently dropped, and a new anti-vacuity guard fails V09 if
 exclusion leaves zero pairs checked.
 
 Measured effect on the suite: **PASS 9 → 35, FAIL 44 → 18, Tier 1 fully green (9/9).**
+
+## D23 — `results/restored_test_outputs/` ships as a GitHub Release asset, superseding D17's committed-`.npz` route
+
+D17 selected `np.savez_compressed` into the repo if the artifact measured under ~40 MB. **That
+route is withdrawn.**
+
+The strengthened V51 (D15) bans `.npz` outright and caps any tracked file at 5 MB, so
+committing a ~40 MB archive would have required a **second** amendment loosening the size caps
+added one commit earlier. That was rejected on principle: *"loosen the check I just tightened,
+because it is blocking me"* is the reasoning pattern the project's standing rules name as a
+**stop signal, not a justification**.
+
+**Mechanism instead.** The 400 restored outputs (~105 MB raw — 400 × 256×256 float32) are
+published as a **GitHub Release asset**, pre-approved by the human's standing authorisation,
+with a sha256 recorded in `results/restored_test_outputs/README.md` and in
+`weights/README.md`. `results/restored_test_outputs/` carries a committed **manifest with
+per-file hashes**, so the folder is non-empty, self-describing and independently verifiable.
+
+This requires **no contract change at all** — it is exactly the mechanism V06 already permits
+for weights.
+
+**Stated honestly:** the committed folder holds a verified **pointer and manifest, not the raw
+output bytes**. That fact is written into the folder's own README in plain words, so a
+reviewer is never misled about what is actually in the repository. A "non-empty" folder that
+implies outputs are present when they are not would satisfy V13's letter and defeat its
+purpose.
+
+Supersedes D17. **D17 is retained unedited** as the record of the earlier decision — this file
+is append-only, and a superseded decision with its reasoning intact is more useful to a
+reviewer than a rewritten one. See `docs/BLOCKERS.md` B9.
