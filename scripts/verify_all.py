@@ -844,9 +844,73 @@ def _sem(d: dict[str, Any]) -> float | None:
     return float(std) / (float(n) ** 0.5)
 
 
+#: V25's bar, owned by the VERIFIER and hash-pinned, not read from train.py. Same governance
+#: reasoning as V33_THRESHOLDS (ml-skeptic F2): the subject under test must not own its own
+#: pass mark. The contract says PSNR > 40 dB; this is that number, not a copy of train.py's.
+V25_TARGET_DB = 40.0
+
+
+def _extract_json_object(text: str, must_contain: str) -> dict[str, Any] | None:
+    """Pull the first JSON object out of mixed log output. Returns None if absent."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = dec.raw_decode(text[i:])
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and must_contain in obj:
+            return obj
+    return None
+
+
 def check_V25(ctx: Ctx) -> CheckResult:
+    """Pipeline sanity: overfit 2 fixed pairs to PSNR > 40 dB.
+
+    A failure here means alignment, normalisation or the loss is broken, and nothing
+    downstream is trustworthy -- so this check runs the real training path rather than
+    trusting a recorded number.
+    """
     r = _needs(ctx, "V25", "train.py", "src/model.py")
-    return r or CheckResult("V25", FAIL, "overfit-2-pairs harness not wired up yet")
+    if r:
+        return r
+    if _data_root(ctx) is None:
+        return CheckResult("V25", FAIL,
+                           "dataset root not found (set KLA_DATA_ROOT); the overfit gate "
+                           "trains on real pairs and cannot run without them")
+    cfg = ctx.p("configs", "final.yaml")
+    if not cfg.exists():
+        return not_impl("V25", "configs/final.yaml")
+    rc, so, se = ctx.run([sys.executable, str(ctx.p("train.py")),
+                          "--config", str(cfg), "--overfit", "2"], timeout=3600)
+    rep = _extract_json_object(so + "\n" + se, "best_psnr_db")
+    if rep is None:
+        return CheckResult("V25", FAIL,
+                           f"train.py --overfit 2 produced no parsable report (rc={rc})",
+                           {"stdout_tail": so[-800:], "stderr_tail": se[-800:]})
+    best = rep.get("best_psnr_db")
+    ev = {k: rep.get(k) for k in
+          ("pass", "best_psnr_db", "best_at_iter", "iters", "n_pairs", "pair_names",
+           "split_of_pairs", "structural_kind", "seed", "device", "wall_clock_s")}
+    if rep.get("n_pairs") != 2:
+        return CheckResult("V25", FAIL,
+                           f"overfit ran on {rep.get('n_pairs')} pairs, the contract says 2",
+                           ev)
+    if rep.get("split_of_pairs") != "train":
+        return CheckResult("V25", FAIL,
+                           f"overfit pairs came from '{rep.get('split_of_pairs')}', not train",
+                           ev)
+    if best is None or not float(best) > V25_TARGET_DB:
+        return CheckResult("V25", FAIL,
+                           f"overfit reached {best} dB, below the {V25_TARGET_DB} dB gate — "
+                           "alignment, normalisation or the loss is broken", ev)
+    if rc != 0:
+        return CheckResult("V25", FAIL,
+                           f"overfit cleared {best} dB but train.py exited {rc}", ev)
+    return CheckResult("V25", PASS,
+                       f"overfit 2 pairs reached {float(best):.4f} dB at iter "
+                       f"{rep.get('best_at_iter')} (gate {V25_TARGET_DB} dB)", ev)
 
 
 def check_V26(ctx: Ctx) -> CheckResult:
@@ -1232,8 +1296,63 @@ def check_V33(ctx: Ctx) -> CheckResult:
 
 
 def check_V34(ctx: Ctx) -> CheckResult:
+    """Reproducibility: two identical seeded smoke runs must give identical losses."""
     r = _needs(ctx, "V34", "train.py")
-    return r or CheckResult("V34", FAIL, "seeded smoke run not reproducible yet")
+    if r:
+        return r
+    if _data_root(ctx) is None:
+        return CheckResult("V34", FAIL,
+                           "dataset root not found (set KLA_DATA_ROOT); the smoke run trains "
+                           "on real pairs and cannot run without them")
+    cfg = ctx.p("configs", "final.yaml")
+    if not cfg.exists():
+        return not_impl("V34", "configs/final.yaml")
+    runs = []
+    for _ in range(2):
+        rc, so, se = ctx.run([sys.executable, str(ctx.p("train.py")),
+                              "--config", str(cfg), "--seed", "42", "--smoke"], timeout=1800)
+        out = so + "\n" + se
+        losses = digest = None
+        for line in out.splitlines():
+            s = line.strip()
+            if s.startswith("SMOKE_LOSSES "):
+                try:
+                    losses = json.loads(s[len("SMOKE_LOSSES "):])
+                except ValueError:
+                    losses = None
+            elif s.startswith("SMOKE_DIGEST "):
+                digest = s[len("SMOKE_DIGEST "):].strip()
+        runs.append({"rc": rc, "losses": losses, "digest": digest,
+                     "tail": out[-500:]})
+    a, b = runs
+    if a["rc"] != 0 or b["rc"] != 0:
+        return CheckResult("V34", FAIL,
+                           f"smoke runs exited {a['rc']} and {b['rc']}",
+                           {"tail_a": a["tail"], "tail_b": b["tail"]})
+    if not a["losses"] or not b["losses"]:
+        return CheckResult("V34", FAIL,
+                           "train.py --smoke emitted no SMOKE_LOSSES line",
+                           {"tail_a": a["tail"], "tail_b": b["tail"]})
+    if len(a["losses"]) < 2:
+        return CheckResult("V34", FAIL,
+                           f"smoke run produced only {len(a['losses'])} loss value(s); a "
+                           "single step cannot demonstrate reproducibility",
+                           {"losses": a["losses"]})
+    if a["losses"] != b["losses"]:
+        diff = [(i, x, y) for i, (x, y) in enumerate(zip(a["losses"], b["losses"])) if x != y]
+        return CheckResult("V34", FAIL,
+                           f"seeded smoke runs diverge at {len(diff)} of "
+                           f"{len(a['losses'])} steps",
+                           {"first_divergences": diff[:5]})
+    if a["digest"] != b["digest"]:
+        return CheckResult("V34", FAIL,
+                           "loss values match but the run digests differ, so something "
+                           "outside the loss is non-deterministic",
+                           {"digest_a": a["digest"], "digest_b": b["digest"]})
+    return CheckResult("V34", PASS,
+                       f"two seeded smoke runs identical across {len(a['losses'])} steps",
+                       {"steps": len(a["losses"]), "digest": a["digest"],
+                        "first_loss": a["losses"][0], "last_loss": a["losses"][-1]})
 
 
 def check_V35(ctx: Ctx) -> CheckResult:

@@ -1134,3 +1134,50 @@ This is the second fabricated-or-unfounded number caught in iteration 1 (the fir
 `model-core`'s benchmark table, D19–D21). Both were caught by re-derivation rather than by
 review of the prose. That is the argument for keeping `ml-skeptic` in every review wave and for
 the standing rule that a number without a measurement behind it does not go in the repo.
+
+## D26 — V25 and V34 implemented; the overfit gate is CLEARED at 43.33 dB
+
+**Authored by the main session** (no subagent alive; V00 needs the digest present).
+`scripts/verify_all.py` sha256 is now
+`24b4b1f1f6919502a84ffe2360a9dce53137d9f31bd6d46c7710219e277f6c7f`
+(prior `b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2`).
+
+### Two more placeholders — nine in total
+
+V25 and V34 were BOOTSTRAP stubs of the same shape as the seven closed in D22: they returned
+an unconditional FAIL that no artifact could turn green. **Nine of the fifty-three checks were
+in that state.** That is worth stating plainly, because a suite reporting "44 FAIL" at
+iteration 0 looked like honest red when a fifth of it was actually inert.
+
+- **V25** now runs the real training path — `train.py --config configs/final.yaml --overfit 2`
+  — parses the emitted JSON report, and asserts the run used exactly 2 pairs, that they came
+  from the **train** split, and that the exit code is 0. It does not trust a recorded number.
+- **V34** runs `train.py --config configs/final.yaml --seed 42 --smoke` **twice** and requires
+  the loss sequences to be identical element-by-element, and the run digests to match. It also
+  fails a run producing fewer than 2 loss values, because a single step cannot demonstrate
+  reproducibility.
+
+### The 40 dB bar is verifier-owned
+
+`V25_TARGET_DB = 40.0` lives in the pinned verifier, not read from `train.py`. Same governance
+reasoning as D24: the subject under test must not own its own pass mark.
+
+### Result — the gate is CLEARED
+
+    V25 PASS: overfit 2 pairs reached 43.3295 dB at iter 6000 (gate 40.0 dB)
+    V34 PASS: two seeded smoke runs identical across 12 steps
+
+**This is the most important measurement of the iteration.** SPEC §16 and the contract both
+treat V25 as the hard gate: a model that cannot overfit two pairs it was trained on has broken
+alignment, normalisation or loss, and every downstream number would be meaningless. It clears
+by 3.33 dB, so the paired-crop geometry, the [0,1] convention, the unclipped-input handling and
+the loss are all confirmed end to end.
+
+### A scheduling subtlety worth recording
+
+A 4000-iteration budget stalls at **39.78 dB** and a 6000-iteration budget reaches **43.33 dB**,
+crossing 40 dB at roughly iteration 3000. The cause is the cosine schedule decaying
+*proportionally to the budget*: shortening the run does not simply truncate it, it lowers the
+learning rate faster throughout. **A short overfit run that lands just under 40 dB must not be
+read as an alignment failure** — that misdiagnosis would send someone hunting a geometry bug
+that does not exist. Recorded because the failure mode is convincing and wrong.

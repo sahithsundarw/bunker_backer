@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2  scripts/verify_all.py
+24b4b1f1f6919502a84ffe2360a9dce53137d9f31bd6d46c7710219e277f6c7f  scripts/verify_all.py
 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -39,3 +39,7 @@ b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2  scripts/verify
 #             3.0 -> 4.5, and V33 no longer mutates the committed artifact it verifies
 #             (ml-skeptic F3). See docs/decisions.md D24.
 #             prior pin: 590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd
+# 2026-08-15  V25 and V34 implemented (two more BOOTSTRAP placeholders, nine found in
+#             total). V25's 40 dB bar is now verifier-owned rather than read from
+#             train.py, same governance fix as V33. See docs/decisions.md D26.
+#             prior pin: b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2
