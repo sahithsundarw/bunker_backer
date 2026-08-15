@@ -1944,3 +1944,49 @@ remains `weights/best.pt`, unchanged.
 - **Do not conflate the two throughput numbers.** Quoting the 4.78x compute-only gap as "the"
   throughput difference in any external-facing document (README, deck) would misrepresent the
   actual scored cost, which is 7.5%.
+
+## D41 — Phase 2 cloud compute: premise re-derived, HF Jobs verified, private dataset repo confirmed
+
+**Date:** 2026-08-16. Written before any cloud training executes; `docs/PLAN_PHASE2.md` is the
+full plan this entry supports.
+
+### D7's estimate re-derived, and refuted at the size that actually matters
+
+D7 estimated fixed startup at 85-95% of scored wall-clock, from a 1-image measurement with
+torch *not installed*. `results/runtime_report.md` (committed `bdf4547`, this repo's first real
+end-to-end measurement) now gives the number at N=400 — the actual scored set size, RTX 4060,
+bf16, batch 32: **fixed startup 44.4%, compute ~56%** of a 22,514.6 ms median wall-clock. The
+proposed re-opening of 8x TTA rested on compute being ~5% of wall-clock; at the measured ~56%,
+8x compute is a **~5.3x** wall-clock increase (9,994 ms + 8×13,596 ms ≈ 118,762 ms), not the
+"+30%" the estimate implied. **TTA stays rejected** — same conclusion as D7, now for a measured
+reason. Full derivation: `docs/PLAN_PHASE2.md` §2.
+
+### HF Jobs verified live, not from docs alone
+
+Org: `Team-Ceciroleo67` (billing page: $30.00 credit, $0.00 used, expires 2026-09-01 — screenshot
+reviewed this session). A fine-grained token scoped to that org (repo read/write, Jobs
+start/manage, billing read) was used to:
+
+1. Launch a `cpu-basic` smoke job billed to the org namespace (`run_job(..., namespace=
+   'Team-Ceciroleo67')`) — completed, `owner.type == 'org'`, correct stdout retrieved via
+   `fetch_job_logs`. Confirms Jobs is enabled for this org and bills against the real credit
+   balance, not just the docs' claim that it should.
+2. Created `datasets/Team-Ceciroleo67/kla-ps01-phase2-data` with `private=True`. Verified
+   private two ways: the authed `repo_info().private == True`, **and** an unauthenticated
+   `curl` against both the API (`/api/datasets/...`) and the web URL returned **401** on both —
+   the repo is actually invisible logged-out, not just flagged private in a field a bug could
+   ignore.
+
+### Data uploaded
+
+`C:\kla-data\_archive\train.zip` (918,994,209 B), `Test_NoisyLR.zip` (23,419,125 B), and
+`configs/split_val.txt` pushed to the private dataset repo as-is (original archive bytes, not
+re-zipped) so cloud-side extraction reproduces the exact local dataset. **F17 still applies
+unconditionally in the cloud**: `test_NoisyLR` ships only because inference on it is required;
+any cloud training script must import the same `configs/split_val.txt`-driven split as
+`src/dataset.py`, never a reimplementation that could accidentally include it.
+
+### Pricing confirmed via `GET /api/jobs/hardware` (live, not docs)
+
+Matches `jobs-pricing` docs exactly: `a100-large` = 80 GB VRAM, $0.041667/min = $2.50/hr.
+**No H100 flavor exists in HF Jobs** — confirmed against the live hardware list, not inferred.
