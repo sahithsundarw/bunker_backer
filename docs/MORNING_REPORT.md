@@ -46,12 +46,13 @@ Every remaining failure is honest and traceable to a missing artifact, not a bro
 
 | Cause | Checks |
 |---|---|
-| Needs `decisions.md` D22 (docs-scribe, in flight) | V00 |
-| Needs a `--fresh-clone` run | V04 V46 |
-| Needs a trained checkpoint (trainer, in flight) | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
-| Needs the runtime report (perf-analyst, queued) | V37 V38 V39 |
-| Needs qualitative figures | V49 |
-| Was blocked on you — **now unblocked**, see below | V13 |
+| Needs the trained checkpoint — **training in flight now** | V06 V27 V28 V35 V43 V45 V48 |
+| Needs the runtime report (`perf-analyst`, queued behind the GPU) | V37 V38 V39 |
+| Needs qualitative figures, including the honest failure case | V49 |
+| Needs the UNetSR baseline trained at equal budget | V28 |
+
+Nothing is blocked on you, and nothing is blocked on a defect. Every one of the twelve is
+waiting on an artifact that a running job will produce.
 
 ---
 
