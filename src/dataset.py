@@ -40,7 +40,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -606,11 +606,13 @@ class PairedRestorationDataset(Dataset):
         lr_img, gt_img = self._pair(k)
 
         if self.split == "val":
-            lr_patch = np.asarray(lr_img, dtype=np.float32)
-            gt_patch = np.asarray(gt_img, dtype=np.float32)
+            # copy=True: a memory-mapped array is read-only and torch.from_numpy would hand
+            # the trainer a non-writable tensor.
+            lr_patch = np.array(lr_img, dtype=np.float32, copy=True)
+            gt_patch = np.array(gt_img, dtype=np.float32, copy=True)
             return {
-                "lr": torch.from_numpy(np.ascontiguousarray(lr_patch)[None]),
-                "gt": torch.from_numpy(np.ascontiguousarray(gt_patch)[None]),
+                "lr": torch.from_numpy(lr_patch[None]),
+                "gt": torch.from_numpy(gt_patch[None]),
                 "name": self.names[k],
                 "split": "val",
                 "synthetic": False,
@@ -816,19 +818,31 @@ def selftest_paired_crop(
     res["cutblur_crops"] = cb_checked
 
     # --- 5. synthetic branch: aligned, and NOT clipped ---------------------------------
-    smooth = rng.random((scale * size, scale * size))
-    ker = np.ones((5, 5)) / 25.0
-    pad = np.pad(smooth, 2, mode="edge")
-    smooth = sum(
-        ker[a, b] * pad[a : a + scale * size, b : b + scale * size]
-        for a in range(5) for b in range(5)
+    # A structured, high-contrast test image: oriented bars plus a low-pass random field,
+    # min-max normalised exactly as the real GT is (docs/SPEC_ADDENDUM.md section 3).
+    # Deliberately fine-grained: a 1-LR-pixel shift must visibly destroy the correlation, so
+    # the pattern carries energy near the LR Nyquist limit rather than being smooth.
+    N = scale * size
+    yy, xx = np.mgrid[0:N, 0:N].astype(np.float64)
+    field = rng.random((N, N))
+    padf = np.pad(field, 1, mode="edge")
+    field = sum(padf[a : a + N, b : b + N] for a in range(3) for b in range(3)) / 9.0
+    img = (
+        np.sin(2.0 * np.pi * (24.0 * xx + 16.0 * yy) / N + 0.7)
+        + 0.6 * np.cos(2.0 * np.pi * (30.0 * yy - 12.0 * xx) / N)
+        + 2.0 * (field - field.mean())
     )
-    smooth = ((smooth - smooth.min()) / (smooth.max() - smooth.min())).astype(np.float32)
-    lr_s = conv_downsample_2x(smooth)
+    img = (img - img.min()) / (img.max() - img.min())
+    gt_s = img.astype(np.float32)
+    lr_s = conv_downsample_2x(gt_s)
     syn = DataConfig(lr_patch=patch, scale=scale, synth_ratio=1.0, cutblur_prob=0.0,
                      dihedral=False, preload=True, seed=seed + 3)
-    ds_syn = PairedRestorationDataset.from_arrays([lr_s] * 4, [smooth] * 4, syn)
-    corr0, corr_shift, above1, below0, n_syn = [], [], 0, 0, 0
+    ds_syn = PairedRestorationDataset.from_arrays([lr_s] * 4, [gt_s] * 4, syn)
+
+    # SPEC 5.2's own alignment criterion: the correlation peak must sit at shift (0,0).
+    shifts = [(0, 0), (0, 1), (1, 0), (1, 1), (0, -1), (-1, 0)]
+    sums = {s: 0.0 for s in shifts}
+    above1 = below0 = n_syn = n_used = 0
     for n in range(min(64, n_crops)):
         item = ds_syn[n % len(ds_syn)]
         lp = item["lr"][0].numpy()
@@ -837,27 +851,37 @@ def selftest_paired_crop(
             fail.append("synth_ratio=1.0 produced a real pair")
             continue
         clean = conv_downsample_2x(gp)
-        a = lp[1:-1, 1:-1].ravel()
-        b = clean[1:-1, 1:-1].ravel()
-        corr0.append(float(np.corrcoef(a, b)[0, 1]))
-        sh = float(np.corrcoef(lp[1:-1, 1:-1].ravel(), clean[2:, 1:-1].ravel())[0, 1])
-        corr_shift.append(sh)
+        m = 2
+        a = lp[m:-m, m:-m].ravel()
+        for (dy, dx) in shifts:
+            b = clean[m + dy : lp.shape[0] - m + dy, m + dx : lp.shape[1] - m + dx].ravel()
+            sums[(dy, dx)] += float(np.corrcoef(a, b)[0, 1])
         above1 += int((lp > 1.0).sum())
         below0 += int((lp < 0.0).sum())
         n_syn += lp.size
-    res["synth_corr_shift0_mean"] = float(np.mean(corr0)) if corr0 else float("nan")
-    res["synth_corr_shift1_mean"] = float(np.mean(corr_shift)) if corr_shift else float("nan")
+        n_used += 1
+    corr = {f"{dy},{dx}": sums[(dy, dx)] / max(1, n_used) for (dy, dx) in shifts}
+    res["synth_corr_by_shift"] = corr
     res["synth_frac_above_1"] = above1 / n_syn if n_syn else float("nan")
     res["synth_frac_below_0"] = below0 / n_syn if n_syn else float("nan")
-    if not (res["synth_corr_shift0_mean"] > res["synth_corr_shift1_mean"] + 0.05):
+
+    best = max(corr, key=lambda k: corr[k])
+    runner = max((k for k in corr if k != "0,0"), key=lambda k: corr[k])
+    res["synth_corr_peak_shift"] = best
+    if best != "0,0":
+        fail.append(f"synthetic LR is misaligned: correlation peaks at shift ({best}), not (0,0)")
+    if corr["0,0"] - corr[runner] < 0.05:
         fail.append(
-            "synthetic LR is not aligned: corr at shift (0,0) = %.4f is not clearly above "
-            "corr at shift (1,0) = %.4f"
-            % (res["synth_corr_shift0_mean"], res["synth_corr_shift1_mean"])
+            "synthetic LR alignment is not decisive: corr(0,0)=%.4f vs best other shift "
+            "(%s)=%.4f" % (corr["0,0"], runner, corr[runner])
         )
-    if res["synth_corr_shift0_mean"] < 0.95:
-        fail.append(f"synthetic LR correlates only {res['synth_corr_shift0_mean']:.4f} with the "
-                    "clean downsample of its own GT patch")
+    # Absolute floor, not 1.0 on purpose: the measured noise is large (residual std 0.0901
+    # against a GT std of ~0.22), so even a perfectly aligned synthetic LR correlates ~0.92
+    # with the clean downsample of its own GT patch. A floor near 1.0 would only be
+    # satisfiable by a simulator that under-noises.
+    if corr["0,0"] < 0.85:
+        fail.append(f"synthetic LR correlates only {corr['0,0']:.4f} with the clean downsample "
+                    "of its own GT patch")
     if above1 == 0 and below0 == 0:
         fail.append("synthetic LR never leaves [0,1] -- it looks clipped, which SPEC F5 forbids")
 
