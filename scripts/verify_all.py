@@ -76,6 +76,7 @@ TIERS["V59"] = 0
 # V61 F2 size-agnosticism, forwarded on every architecture (V25-36 band: model correctness)
 # V62 F4 degradation order-randomisation, actually measured (same band: data/degradation)
 TIERS["V57"] = 0
+TIERS["V58"] = 4
 TIERS["V61"] = 2
 TIERS["V62"] = 2
 
@@ -2553,6 +2554,79 @@ def check_V57(ctx: Ctx) -> CheckResult:
     return CheckResult("V57", PASS,
                        f"real load_net()+infer_chunk() path delivers an unclipped tensor to "
                        f"the model: min {seen['min']:.4f}, max {seen['max']:.4f}", seen)
+
+
+#: How long a docs/link_check.md re-fetch stays trusted before V58 requires a new one.
+LINK_CHECK_MAX_AGE_HOURS = 72
+
+
+def _spec_23_urls(ctx: Ctx) -> list[str]:
+    """Extract the official links from docs/SPEC.md's "### 2.3 Official links" table.
+
+    Read dynamically rather than hardcoded so the check cannot silently drift from SPEC.md
+    if a link is ever added or changed there.
+    """
+    sp = ctx.p("docs", "SPEC.md")
+    if not sp.exists():
+        return []
+    txt = sp.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"###\s*2\.3\s*Official links(.*?)(?:\n##|\Z)", txt, re.S)
+    if not m:
+        return []
+    return re.findall(r"https?://[^\s`|)]+", m.group(1))
+
+
+def check_V58(ctx: Ctx) -> CheckResult:
+    """SPEC 2.3's official links are independently re-verified, and the record has not gone
+    stale (requirements-auditor U-10: licence links were re-checked, these never were).
+    """
+    urls = _spec_23_urls(ctx)
+    if not urls:
+        return not_impl("V58", "docs/SPEC.md ### 2.3 Official links table")
+    lc = ctx.p("docs", "link_check.md")
+    if not lc.exists():
+        return not_impl("V58", "docs/link_check.md")
+    txt = lc.read_text(encoding="utf-8", errors="replace")
+
+    rows: dict[str, tuple[str, str]] = {}
+    for line in txt.splitlines():
+        m = re.match(
+            r"\|\s*`?(https?://[^\s`|]+)`?\s*\|\s*(\d{3})\s*\|\s*"
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*\|", line)
+        if m:
+            rows[m.group(1)] = (m.group(2), m.group(3))
+
+    missing = [u for u in urls if u not in rows]
+    if missing:
+        return CheckResult("V58", FAIL,
+                           f"{len(missing)} of {len(urls)} SPEC 2.3 URLs are not recorded in "
+                           "docs/link_check.md", {"missing": missing[:5]})
+    bad_status = {u: s for u, (s, _) in rows.items() if u in urls and s != "200"}
+    if bad_status:
+        return CheckResult("V58", FAIL, f"{len(bad_status)} link(s) did not return 200",
+                           {"bad_status": bad_status})
+
+    import datetime as _dt
+
+    timestamps = []
+    for u in urls:
+        try:
+            timestamps.append(
+                _dt.datetime.strptime(rows[u][1], "%Y-%m-%dT%H:%M:%SZ")
+                .replace(tzinfo=_dt.timezone.utc))
+        except ValueError:
+            return CheckResult("V58", FAIL, f"unparseable timestamp for {u}: {rows[u][1]}")
+    oldest = min(timestamps)
+    age_h = (_dt.datetime.now(_dt.timezone.utc) - oldest).total_seconds() / 3600.0
+    if age_h > LINK_CHECK_MAX_AGE_HOURS:
+        return CheckResult("V58", FAIL,
+                           f"docs/link_check.md's oldest entry is {age_h:.1f}h old, over the "
+                           f"{LINK_CHECK_MAX_AGE_HOURS}h freshness bound -- re-run the check",
+                           {"age_hours": age_h, "oldest": oldest.isoformat()})
+    return CheckResult("V58", PASS,
+                       f"all {len(urls)} SPEC 2.3 links recorded at 200, oldest entry "
+                       f"{age_h:.1f}h old (<= {LINK_CHECK_MAX_AGE_HOURS}h)",
+                       {"n_urls": len(urls), "age_hours": age_h})
 
 
 #: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and

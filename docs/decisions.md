@@ -1692,3 +1692,40 @@ and is logged anyway. A smoke test legitimately should not pollute the ledger wi
 combinations by hand rather than by a live run, since the GPU was reserved by a running
 benchmark at the time; low risk given the change is a single added condition around an
 existing, unchanged `append_experiment` call.
+
+---
+
+## D37 — V58 ADDED, closing U-10: SPEC §2.3's links were never independently re-checked
+
+**Date:** 2026-08-16, iteration 2. **Source:** `requirements-auditor` (U-10). Contract
+addition only.
+
+Licence links in `docs/decisions.md` were re-fetched and dated; SPEC §2.3's hackathon resource
+links (landing page, registration, dataset Drive folder, PPTX/PDF resources, both webinars, the
+WhatsApp group) were never independently re-verified — nothing checked they still resolved.
+
+**Re-checked anonymously**, `curl -L` with a fresh process, no cookies, no saved session,
+`GITHUB_TOKEN`/`GH_TOKEN` cleared from the environment (none of these hosts are GitHub; cleared
+for consistency with the other fetch-based checks). All 9 links from SPEC §2.3 returned HTTP
+200. Recorded in `docs/link_check.md`.
+
+**V58** reads the canonical URL list **dynamically** from `docs/SPEC.md`'s own
+"### 2.3 Official links" table via regex, rather than a hardcoded copy that could silently
+drift if SPEC.md ever changes. It requires `docs/link_check.md` to record every one of those
+URLs at HTTP 200 with a UTC timestamp, and the **oldest** recorded timestamp must be ≤ 72
+hours old.
+
+**Deliberately does not re-fetch on every verifier run.** A live fetch of nine third-party URLs
+on every `--strict` invocation would make the whole suite's pass/fail depend on third-party
+site uptime — the same flakiness class D7 rejected for spawning DataLoader workers over a
+25 MB test set. Freshness is enforced by **expiring** the record instead: stale evidence fails
+loudly rather than the check silently re-trusting an old fetch forever.
+
+**Negative-controlled three ways**, each reverted byte-exact and reconfirmed green:
+1. Deleted the WhatsApp row entirely -> `1 of 9 SPEC 2.3 URLs are not recorded`.
+2. Injected `404` in place of one `200` -> `1 link(s) did not return 200`.
+3. Backdated every timestamp by 4 days -> `oldest entry is 96.0h old, over the 72h bound`.
+
+### Do NOT retry
+- **Do not make V58 re-fetch live on every run.** That trades a controllable, bounded
+  staleness window for an uncontrollable dependency on nine external services' uptime.
