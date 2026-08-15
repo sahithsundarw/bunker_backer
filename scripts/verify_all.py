@@ -1625,6 +1625,14 @@ BLOB_EXTS = (".npz", ".pt", ".pth", ".zip", ".env", ".tar", ".gz", ".7z", ".ckpt
              ".onnx", ".safetensors", ".bin", ".raw", ".dat", ".h5", ".hdf5",
              ".parquet", ".mat", ".pkl", ".pickle")
 
+#: The ONLY path exempt from the BLOB_EXTS ".pt" ban, and why: V06/V59 require the
+#: mandatory checkpoint to be genuinely obtainable from a clone, and Route A (commit it
+#: directly, since it is 1.97 MiB -- far under MAX_TRACKED_FILE_BYTES) is the mechanism this
+#: repo uses. Mirrors .gitignore's own `!weights/best.pt` carve-out of its blanket `*.pt`
+#: rule. Deliberately narrow, same pattern as the sample_inputs/*.npy exemption below:
+#: exactly one path, no glob, no directory. See docs/decisions.md D30.
+CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"
+
 #: Path segments that would mean a slice of the dataset tree got committed.
 DATASET_DIR_TOKENS = ("/gt/", "/noisylr/", "/ground_truth/", "/test_noisylr/")
 
@@ -1643,6 +1651,8 @@ def check_V51(ctx: Ctx) -> CheckResult:
     junk = [f for f in tracked
             if f.endswith(BLOB_EXTS) or "__pycache__" in f or ".ipynb_checkpoints" in f
             or f.endswith(".DS_Store")]
+    # The mandatory checkpoint is the one path exempt from the blob-extension ban.
+    junk = [f for f in junk if f != CHECKPOINT_BLOB_EXEMPTION]
     # .npy is banned everywhere EXCEPT the bounded sample_inputs/ exemption below.
     junk += [f for f in tracked
              if f.endswith(".npy") and not f.startswith("sample_inputs/")]

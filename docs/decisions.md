@@ -1347,3 +1347,59 @@ disk-verified full-split numbers, via `src.utils.update_checkpoint_metrics`.
 (no blend helps; TTA not worth the runtime cost) are expected to transfer by the same structural
 argument (r2 also bakes the frozen LS-5 stem/head into its own forward pass), but this is an
 expectation, not a measurement, and is documented as such rather than presented as verified.
+
+## D30 — V51 narrowly exempts `weights/best.pt`; V32's `.venv-mac` failure documented as environment noise (HUMAN-AUTHORISED, 2026-08-15)
+
+Both findings originate in `docs/AUDIT_20260815.md` (branch `audit/kla-requirements-20260815`,
+commit `c577a35`) and are resolved here during integration onto `codex/final-submission-28db`,
+per an explicit human instruction in that session: "if a verifier change is necessary, make the
+narrowest possible explicit exception for `weights/best.pt`; record the decision in docs;
+re-pin verifier hash if the repo process requires it" (V51), and "document that `.venv-mac` is
+local environment noise; do not treat third-party package scans as repo model behavior" (V32).
+That is the same human-issued-amendment mechanism used for D6, D10 and D15; the agent did not
+originate either resolution and may not originate one on its own.
+
+### V51 vs V06/V59 — the contradiction
+
+`check_V51`'s `BLOB_EXTS` tuple bans any tracked `.pt` file. `check_V06` and `check_V59` both
+require `weights/best.pt` — the mandatory checkpoint — to be tracked in the clone (Route A,
+since it is 1.97 MiB, far under `MAX_TRACKED_FILE_BYTES`). As implemented, satisfying V06/V59
+by committing the checkpoint directly automatically failed V51: `1 junk/dataset files tracked:
+['weights/best.pt']`, confirmed by running the verifier against this branch on 2026-08-15.
+`.gitignore` already carves out `!weights/best.pt` from its own blanket `*.pt` rule (that fix
+predates this session); `check_V51`'s extension blacklist had no equivalent carve-out.
+
+**Resolution:** a new constant, `CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"`, and one line
+in `check_V51` (`junk = [f for f in junk if f != CHECKPOINT_BLOB_EXEMPTION]`) removing exactly
+that single path — no glob, no directory, no other extension affected — from the blob-extension
+ban. This mirrors the `sample_inputs/*.npy` exemption pattern from D15: deliberately narrow,
+bounded to one exact path, and it exists only because a human authorised it.
+
+**Stated honestly, same as D15:** this is, in isolation, a loosening with respect to that one
+path. No other `.pt`/`.pth`/`.zip`/etc. file becomes trackable; the dataset-directory-token ban,
+the 5 MB per-file cap and the 25 MB total-tree cap are all unchanged and still apply to
+`weights/best.pt` itself (it passes them regardless, at 1.97 MiB). Verified after the change:
+V51 PASSES on this branch; `V06`/`V59` remain PASS as before.
+
+```
+new sha256 of scripts/verify_all.py: e1e2989cf7fdb8d6ac93b697f5a920e4b63474b4f2cffc6d9b626c81f1a64506
+prior pin:                           dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a
+```
+
+### V32 vs `.venv-mac` — documented as local noise, not a code fix
+
+`check_V32` skips `py.parts` containing exactly `.venv` when scanning the tree for plain
+`cv2.imread(` calls. The working tree on this Mac contains `.venv-mac/`, a locally created
+virtualenv whose path segment is `.venv-mac`, not `.venv` — an exact-match miss, not a
+substring check. The scan therefore walks into
+`.venv-mac/lib/python3.11/site-packages/lpips/__init__.py`, a third-party package, and reports
+`V32 FAIL plain cv2.imread in __init__.py`. No `cv2.imread(` exists anywhere in this
+repository's own source (`grep -rl "cv2.imread(" . --include="*.py"` excluding `.venv-mac`
+returns nothing).
+
+**No code change made**, per the narrower instruction for this finding. `.venv-mac/` is listed
+in `.gitignore` (line 3) and is untracked (`git status` shows `?? .venv-mac/`); it does not
+exist in a fresh clone, which is what the Definition of Done's fresh-clone verification actually
+scores. This FAIL is reproducible only on a working tree that happens to contain a differently
+named local virtualenv, and does not reflect the repository's own model behavior. Recorded here
+rather than silently working around it or loosening `check_V32`'s scan.
