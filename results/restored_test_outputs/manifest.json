@@ -50,5 +50,5 @@
   },
   "per_file_sha256": "sha256sums.txt (400 rows, `<sha256>  <filename>`, sorted by filename)",
   "ground_truth": "none exists. The released test set ships inputs only, so no score can be computed against it. Every metric in this repository is measured on a held-out split of train/.",
-  "note": "The .npy files are NOT committed. 400 outputs at 256x256 float32 is ~105 MB raw, which would require loosening V51's 5 MB per-file and 25 MB total-tree caps. See docs/decisions.md D23 and D31."
+  "note": "The .npy files are NOT committed. 400 outputs at 256x256 float32 is ~105 MB raw, which would require loosening V51's 5 MB per-file and 25 MB total-tree caps. See docs/decisions.md D23 and D30."
 }

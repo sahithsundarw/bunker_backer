@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b  scripts/verify_all.py
+47dac07a929c56d4a8eafd6562e3f8f81017fdd8925ac218849cc4a8d9691aee  scripts/verify_all.py
 d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -55,3 +55,16 @@ d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICAT
 #             attacker/repo payload. Replaced with real URL parsing + exact host match.
 #             See docs/decisions.md D28.
 #             prior pin: dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a
+# 2026-08-15  THREE CHECKS STRENGTHENED from requirements-audit-2 (H-1, H-4, H-6):
+#             V00 now enforces EVERY pin in this file, including docs/VERIFICATION_CONTRACT.md,
+#             which it previously filtered out and ignored entirely -- the IMMUTABLE document
+#             could have had a check deleted with the suite staying green.
+#             V28 no longer counts a statistically indistinguishable difference as a "win",
+#             and its negative-result escape hatch is no longer unlocked by any prose that
+#             happens to contain the words. Both models score the same 400 images, so the
+#             comparison is now a PAIRED per-image test.
+#             V48 now parses the results table and reconciles every number against
+#             results/baselines/*/metrics.json; it previously counted pipe characters.
+#             Net strictly stricter: V28 went PASS -> FAIL under the new test and V48 was
+#             negative-controlled. See docs/decisions.md D31.
+#             prior pin: 4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b

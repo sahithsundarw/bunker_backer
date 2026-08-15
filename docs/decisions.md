@@ -1403,3 +1403,75 @@ soon as `weights/best.pt` exists on disk, which it does, so it was green while t
 was unobtainable. V59 is the check that actually tests deliverability, which is why it was
 added. The restored-outputs archive is still pending and will ship on the same Release, with
 its digest recorded in the same table.
+
+---
+
+## D31 — Three checks STRENGTHENED after an independent audit found them unable to fail
+
+**Date:** 2026-08-15, iteration 2. **Source:** `requirements-auditor`, second pass.
+**Affects:** V00, V28, V48. **Verifier re-pinned:** `4e78dbca...` -> `47dac07a...`.
+
+All three edits are strictly stricter. No threshold was widened, no check removed, no skip
+added. V28 went from PASS to FAIL under its new test, which is the point.
+
+### H-1 (critical) — V28's escape hatch was permanently unlocked
+
+The contract lets a loss to the U-Net baseline convert FAIL->PASS *only* if an honest negative
+result is documented and the better model is shipped. The implementation tested that with:
+
+    documented = "V28" in dec and "negative result" in dec.lower()
+
+`docs/decisions.md` D22 — the paragraph written to *describe* this hatch — contains both
+strings. So `documented` was **True from the moment the hatch was documented**, `wins` did not
+gate the outcome at all, and V28 would have returned PASS with our model losing on all three
+metrics. A check that cannot fail certifies nothing; this is the tenth such defect found in
+this suite.
+
+Now the entry must (a) be a structured `## D<n> ... NEGATIVE RESULT` heading that mentions V28,
+(b) quote all six measured means at the precision the summary table prints them — boilerplate
+cannot do this, only an entry written against the actual measurement can — and (c) declare
+`SHIPPED MODEL: <name>` where `<name>` must equal the architecture actually stored inside
+`weights/best.pt`, read from the checkpoint's embedded config. That last clause is the
+contract's "the better model shipped" requirement, which nothing previously enforced.
+
+### H-1b — a tie was being counted as a win
+
+V28 compared two independent means with `>`. But both models score the **same 400 images**, so
+the correct statistic is the **paired per-image difference**. Under the old test our model
+"won" SSIM by a mean of +0.000135 while actually being better on only **172 of 400 images** —
+a coin flip, counted as a win, and enough to reach the 2-of-3 bar. The check now runs a paired
+t-test per metric and treats anything with |t| < 1.96 as a **tie**, which is neither a win nor
+a loss. It falls back to a 2xSEM test on the aggregate means only when per-image data is
+absent, and refuses to conclude anything from fewer than 30 pairs.
+
+### H-4 — V48 counted pipe characters and never compared a number
+
+It read `results/metrics_summary.md`, counted lines starting with `|`, and passed at >= 6. It
+never opened a `metrics.json` and never ran `evaluate.py`, so a table whose numbers disagreed
+with the evaluation records passed — and that is exactly the state the repo was in, with six
+documents publishing a PSNR the evaluator had never produced. It now parses the table and
+reconciles every record under `results/baselines/*/` against it, to 1e-3 on PSNR and 1e-4 on
+SSIM/LPIPS, and requires at least four records including `final`.
+
+**Negative control:** changing a single digit of one PSNR in the table (28.7865 -> 28.7965)
+turned V48 red with `1 evaluation record(s) have no matching row`; the byte-exact restore
+turned it green again.
+
+### H-6 — the contract's own hash pin was enforced by nothing
+
+`docs/VERIFIER_SHA256` pins two files. `check_V00` filtered that list with
+`parts[1].endswith("scripts/verify_all.py")` and **discarded the line pinning
+`docs/VERIFICATION_CONTRACT.md`**. The document CLAUDE.md calls IMMUTABLE could have had a
+check deleted from it and the suite would have stayed green — the exact failure the pin exists
+to prevent. V00 now enforces every pin in the file. It still hashes the verifier it is actually
+executing (`SELF_PATH`), so a pin cannot be satisfied by a second copy in the tree.
+
+No tampering had occurred: both digests were recomputed during the audit and both matched.
+
+### Do NOT retry
+
+- **Do not "fix" V28 by editing `docs/decisions.md` to add the words it looks for.** That is
+  symptom-fixing, `decisions.md` is append-only, and the new check reads structure and measured
+  values precisely so that prose cannot satisfy it.
+- **Do not widen V48's tolerance to admit the published numbers.** The numbers were wrong; the
+  documents were corrected instead (see D32).

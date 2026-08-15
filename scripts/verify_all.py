@@ -222,32 +222,57 @@ def build_fixtures(root: Path) -> Path:
 # ======================================================================================
 # TIER 0
 # ======================================================================================
+#: Files whose hash pin V00 enforces. Both are pinned in docs/VERIFIER_SHA256; until
+#: 2026-08-15 V00 filtered that list down to the verifier and silently ignored the contract,
+#: so the document CLAUDE.md calls IMMUTABLE could have had a check deleted from it without
+#: the suite noticing (requirements-auditor H-6, docs/decisions.md D31).
+PINNED_FILES = ("scripts/verify_all.py", "docs/VERIFICATION_CONTRACT.md")
+
+
 def check_V00(ctx: Ctx) -> CheckResult:
-    """Verifier self-hash integrity pin."""
-    digest = hashlib.sha256(SELF_PATH.read_bytes()).hexdigest()
+    """Integrity pin over EVERY pinned file, not just the verifier.
+
+    A digest that does not match its pin is only tolerated when the new digest appears
+    verbatim in docs/decisions.md -- i.e. the change was declared. That is the mechanism
+    Prime Directive 1 relies on, and it now covers docs/VERIFICATION_CONTRACT.md too.
+    """
     pin_file = ctx.p("docs", "VERIFIER_SHA256")
     if not pin_file.exists():
-        return CheckResult("V00", FAIL, "docs/VERIFIER_SHA256 missing", {"computed": digest})
-    pinned = None
+        return CheckResult("V00", FAIL, "docs/VERIFIER_SHA256 missing")
+    pins: dict[str, str] = {}
     for line in pin_file.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if s.startswith("#") or not s:
             continue
         parts = s.split()
-        if len(parts) >= 2 and parts[1].endswith("scripts/verify_all.py"):
-            pinned = parts[0]
-    if pinned is None:
-        return CheckResult("V00", FAIL, "no pin recorded for scripts/verify_all.py",
-                           {"computed": digest})
-    if pinned == digest:
-        return CheckResult("V00", PASS, "hash matches pin", {"sha256": digest})
+        if len(parts) >= 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+            pins[parts[1].replace("\\", "/")] = parts[0]
+    absent = [f for f in PINNED_FILES if f not in pins]
+    if absent:
+        return CheckResult("V00", FAIL, f"no pin recorded for {absent}",
+                           {"pinned_paths": sorted(pins)})
     dec = ctx.read("docs", "decisions.md") if ctx.exists("docs", "decisions.md") else ""
-    if digest in dec:
-        return CheckResult("V00", PASS, "hash changed but documented in decisions.md",
-                           {"computed": digest, "pinned": pinned})
-    return CheckResult("V00", FAIL,
-                       "verifier changed without a matching docs/decisions.md entry",
-                       {"computed": digest, "pinned": pinned})
+    ev: dict[str, Any] = {}
+    bad: list[str] = []
+    for rel in PINNED_FILES:
+        # The verifier hashes the file it is actually EXECUTING, so a pin cannot be
+        # satisfied by a second copy sitting in the tree.
+        f = SELF_PATH if rel == "scripts/verify_all.py" else ctx.p(*rel.split("/"))
+        if not f.exists():
+            bad.append(f"{rel}: pinned but missing from the tree")
+            continue
+        digest = hashlib.sha256(f.read_bytes()).hexdigest()
+        ev[rel] = {"computed": digest, "pinned": pins[rel]}
+        if digest == pins[rel]:
+            continue
+        if digest in dec:
+            ev[rel]["documented_in_decisions"] = True
+            continue
+        bad.append(f"{rel} changed without a matching docs/decisions.md entry "
+                   f"(computed {digest[:12]}..., pinned {pins[rel][:12]}...)")
+    if bad:
+        return CheckResult("V00", FAIL, "; ".join(bad), ev)
+    return CheckResult("V00", PASS, f"all {len(PINNED_FILES)} pinned files match", ev)
 
 
 def check_V01(ctx: Ctx) -> CheckResult:
@@ -1014,6 +1039,137 @@ def check_V27(ctx: Ctx) -> CheckResult:
                        f"{cand['lpips']['mean']:.5f} vs {ref['lpips']['mean']:.5f}", ev)
 
 
+#: Which results/baselines/<dir> supplied the U-Net reference, so the paired per-image
+#: reader looks in the same place the aggregate came from.
+_UNET_DIR_FOUND = [""]
+
+#: Two-sided normal critical value at alpha=0.05. A difference the paired test cannot
+#: separate from zero is a TIE, and a tie is not a win.
+T_CRIT = 1.96
+
+
+def _per_image(ctx: Ctx, name: str) -> dict[str, dict[str, float]] | None:
+    """Read the per-image rows of results/baselines/<name>/metrics.json, keyed by filename."""
+    if not name:
+        return None
+    p = ctx.p("results", "baselines", name, "metrics.json")
+    if not p.exists():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    rows = raw.get("per_image")
+    if not isinstance(rows, list) or not rows:
+        return None
+    out: dict[str, dict[str, float]] = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("file"):
+            out[str(r["file"])] = {k: float(v) for k, v in r.items()
+                                   if k != "file" and isinstance(v, (int, float))}
+    return out or None
+
+
+def _paired_verdict(cand_pi: dict[str, dict[str, float]] | None,
+                    ref_pi: dict[str, dict[str, float]] | None,
+                    key: str, higher_is_better: bool) -> dict[str, Any] | None:
+    """Paired t-statistic over the per-image differences. None if unavailable."""
+    if not cand_pi or not ref_pi:
+        return None
+    common = sorted(set(cand_pi) & set(ref_pi))
+    diffs = [cand_pi[f][key] - ref_pi[f][key] for f in common
+             if key in cand_pi[f] and key in ref_pi[f]]
+    n = len(diffs)
+    if n < 30:  # anti-vacuity: too few pairs to conclude anything
+        return None
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    sem = (var / n) ** 0.5
+    t = (mean / sem) if sem > 0 else 0.0
+    better = (mean > 0) if higher_is_better else (mean < 0)
+    sig = abs(t) >= T_CRIT
+    n_better = sum(1 for d in diffs if ((d > 0) if higher_is_better else (d < 0)))
+    return {"test": "paired", "n": n, "mean_diff": mean, "sem": sem, "t": t,
+            "images_better": n_better, "significant": sig,
+            "win": bool(better and sig), "loss": bool((not better) and sig)}
+
+
+def _unpaired_verdict(c: dict[str, Any], r: dict[str, Any],
+                      higher_is_better: bool) -> dict[str, Any]:
+    """Fallback when per-image data is absent: require the gap to exceed 2*SEM."""
+    delta = c["mean"] - r["mean"]
+    better = (delta > 0) if higher_is_better else (delta < 0)
+    sems = [s for s in (_sem(c), _sem(r)) if s is not None]
+    need = 2.0 * max(sems) if sems else 0.0
+    sig = abs(delta) > need
+    return {"test": "unpaired-2sem", "mean_diff": delta, "required_margin": need,
+            "significant": sig, "win": bool(better and sig),
+            "loss": bool((not better) and sig)}
+
+
+def _negative_result_documented(ctx: Ctx, cand: dict[str, dict[str, Any]],
+                                ref: dict[str, dict[str, Any]],
+                                need: tuple[str, ...]) -> tuple[bool, str]:
+    """Is the contract's negative-result escape hatch GENUINELY satisfied?
+
+    The previous test was ``"V28" in dec and "negative result" in dec.lower()``. The D22
+    paragraph that merely *describes* this hatch contains both strings, so the hatch was
+    permanently unlocked and ``wins`` did not gate the outcome at all: V28 would have
+    returned PASS with our model losing on all three metrics (requirements-auditor H-1).
+
+    A real entry must (a) be a structured, findable decision heading, (b) quote the six
+    measured means, which boilerplate cannot do, and (c) name the shipped model -- and that
+    name must match the architecture actually inside weights/best.pt, which is the
+    contract's "the better model shipped" clause.
+    """
+    if not ctx.exists("docs", "decisions.md"):
+        return False, "docs/decisions.md is missing"
+    dec = ctx.read("docs", "decisions.md")
+    blocks = re.split(r"^##\s+", dec, flags=re.M)
+    hit = None
+    for b in blocks:
+        head = b.splitlines()[0] if b.splitlines() else ""
+        if re.match(r"D\d+\b", head) and "NEGATIVE RESULT" in head.upper() and "V28" in b:
+            hit = b
+            break
+    if hit is None:
+        return False, ("no '## D<n> ... NEGATIVE RESULT' section mentioning V28 in "
+                       "docs/decisions.md; a passing mention of the words is not a record")
+    # (b) the six measured means, at the precision the summary table prints them
+    absent = []
+    for label, src_m in (("final", cand), ("unet", ref)):
+        for k in need:
+            dp = 4 if k == "psnr" else 5
+            if f"{src_m[k]['mean']:.{dp}f}" not in hit:
+                absent.append(f"{label}.{k}={src_m[k]['mean']:.{dp}f}")
+    if absent:
+        return False, (f"the negative-result entry does not quote the measured values "
+                       f"{absent} -- it was not written against this measurement")
+    # (c) the shipped model, cross-checked against the checkpoint itself
+    m = re.search(r"SHIPPED MODEL:\s*([A-Za-z0-9_.-]+)", hit)
+    if not m:
+        return False, ("the negative-result entry does not state 'SHIPPED MODEL: <name>', so "
+                       "the contract's 'better model shipped' clause cannot be checked")
+    claimed = m.group(1)
+    ck = ctx.p("weights", "best.pt")
+    if not ck.exists():
+        return False, f"claims SHIPPED MODEL: {claimed} but weights/best.pt does not exist"
+    try:
+        import torch
+
+        raw = torch.load(ck, map_location="cpu", weights_only=True)
+        cfg = raw.get("config", {}) if isinstance(raw, dict) else {}
+        mcfg = cfg.get("model", cfg) if isinstance(cfg, dict) else {}
+        actual = str(mcfg.get("name", ""))
+    except Exception as exc:  # noqa: BLE001
+        return False, f"could not read the architecture out of weights/best.pt ({exc})"
+    if actual.lower() != claimed.lower():
+        return False, (f"the entry says SHIPPED MODEL: {claimed} but weights/best.pt "
+                       f"contains {actual!r}")
+    return True, (f"structured entry present, quotes all six measured means, and "
+                  f"SHIPPED MODEL: {claimed} matches weights/best.pt")
+
+
 def check_V28(ctx: Ctx) -> CheckResult:
     """Final model must beat the U-Net baseline on at least 2 of the 3 metrics.
 
@@ -1025,9 +1181,11 @@ def check_V28(ctx: Ctx) -> CheckResult:
     if r:
         return r
     ref = None
+    _UNET_DIR_FOUND[0] = ""
     for nm in ("unet_baseline", "unet", "baseline_unet"):
         ref = _baseline_metrics(ctx, nm)
         if ref is not None:
+            _UNET_DIR_FOUND[0] = nm
             break
     if ref is None:
         return not_impl("V28", "results/baselines/unet_baseline/metrics.json")
@@ -1038,30 +1196,42 @@ def check_V28(ctx: Ctx) -> CheckResult:
     missing = [k for k in need if k not in cand or k not in ref]
     if missing:
         return CheckResult("V28", FAIL, f"metrics missing: {missing}")
-    wins = []
-    if cand["psnr"]["mean"] > ref["psnr"]["mean"]:
-        wins.append("psnr")
-    if cand["ssim"]["mean"] > ref["ssim"]["mean"]:
-        wins.append("ssim")
-    if cand["lpips"]["mean"] < ref["lpips"]["mean"]:
-        wins.append("lpips")
-    ev = {"wins": wins,
+
+    # "Outperforms" must mean outperforms. Both models score the SAME 400 images, so the
+    # correct statistic is the paired per-image difference, not the gap between two
+    # independent means. Counting a mean difference of +0.000135 SSIM -- which our model
+    # wins on only 172 of 400 images -- as a "win" is precisely the self-serving reading
+    # this check exists to prevent (docs/decisions.md D31).
+    cand_pi, ref_pi = _per_image(ctx, "final"), _per_image(ctx, _UNET_DIR_FOUND[0])
+    verdicts: dict[str, dict[str, Any]] = {}
+    for key in need:
+        v = _paired_verdict(cand_pi, ref_pi, key, higher_is_better=(key != "lpips"))
+        if v is None:  # no per-image data: fall back to 2*SEM on the unpaired means
+            v = _unpaired_verdict(cand[key], ref[key], higher_is_better=(key != "lpips"))
+        verdicts[key] = v
+    wins = sorted(k for k, v in verdicts.items() if v["win"])
+    losses = sorted(k for k, v in verdicts.items() if v["loss"])
+    ties = sorted(k for k, v in verdicts.items() if not v["win"] and not v["loss"])
+    ev = {"wins": wins, "losses": losses, "ties": ties, "verdicts": verdicts,
           "final": {k: cand[k]["mean"] for k in need},
-          "unet": {k: ref[k]["mean"] for k in need}}
+          "unet": {k: ref[k]["mean"] for k in need},
+          "paired": cand_pi is not None and ref_pi is not None}
     if len(wins) >= 2:
         return CheckResult("V28", PASS,
-                           f"beats the U-Net baseline on {len(wins)}/3 metrics: {wins}", ev)
-    dec = ctx.read("docs", "decisions.md") if ctx.exists("docs", "decisions.md") else ""
-    documented = "V28" in dec and "negative result" in dec.lower()
-    ev["negative_result_documented"] = documented
-    if documented:
+                           f"beats the U-Net baseline on {len(wins)}/3 metrics: {wins} "
+                           f"(losses {losses}, ties {ties})", ev)
+
+    ok, why = _negative_result_documented(ctx, cand, ref, need)
+    ev["negative_result"] = why
+    if ok:
         return CheckResult("V28", PASS,
-                           f"loses to the U-Net baseline ({len(wins)}/3) but the negative "
-                           "result is documented in docs/decisions.md as the contract permits",
-                           ev)
+                           f"does NOT beat the U-Net baseline (wins {wins}, losses {losses}, "
+                           f"ties {ties}) but the contract's escape hatch is properly "
+                           f"satisfied: {why}", ev)
     return CheckResult("V28", FAIL,
-                       f"beats the U-Net baseline on only {len(wins)}/3 metrics and no honest "
-                       "negative result is documented in docs/decisions.md", ev)
+                       f"beats the U-Net baseline on only {len(wins)}/3 metrics "
+                       f"(losses {losses}, ties {ties}) and the escape hatch is not "
+                       f"satisfied: {why}", ev)
 
 
 def check_V29(ctx: Ctx) -> CheckResult:
@@ -1580,15 +1750,73 @@ def check_V47(ctx: Ctx) -> CheckResult:
     return CheckResult("V47", PASS, f"{len(files)} samples in {dt:.1f}s", {"seconds": dt})
 
 
+#: Per-metric tolerance when reconciling the published table against the machine-written
+#: evaluation records. The table prints PSNR to 4 dp and SSIM/LPIPS to 5 dp, so these are
+#: a little over half a printed ulp -- tight enough that a stale number cannot hide.
+V48_TOL = {"psnr": 1e-3, "ssim": 1e-4, "lpips": 1e-4}
+
+
 def check_V48(ctx: Ctx) -> CheckResult:
+    """The results table must exist AND its numbers must match the evaluation records.
+
+    Until 2026-08-15 this counted lines starting with '|' and passed at >= 6. It never
+    opened a metrics.json, so a table whose numbers disagreed with the records passed --
+    which is the state the repo was actually in, with six documents publishing a PSNR the
+    evaluator had never produced (requirements-auditor H-4/H-2). The contract asks that
+    "the numbers match a fresh run of scripts/evaluate.py within tolerance"; the records in
+    results/baselines/*/metrics.json ARE that run's output, written by it and reloaded
+    from disk, so they are what the table is reconciled against.
+    """
     p = ctx.p("results", "metrics_summary.md")
     if not p.exists():
         return not_impl("V48", "results/metrics_summary.md")
-    txt = p.read_text(encoding="utf-8", errors="replace").lower()
-    rows = [l for l in txt.splitlines() if l.strip().startswith("|")]
+    rows = [l.strip() for l in p.read_text(encoding="utf-8", errors="replace").splitlines()
+            if l.strip().startswith("|")]
     if len(rows) < 6:
         return CheckResult("V48", FAIL, "fewer than 3 baselines + final in the table")
-    return CheckResult("V48", PASS, "results table present")
+    row_nums = [[float(x) for x in re.findall(r"-?\d+\.\d+", r)] for r in rows]
+
+    bdir = ctx.p("results", "baselines")
+    records: dict[str, dict[str, dict[str, Any]]] = {}
+    if bdir.is_dir():
+        for d in sorted(x for x in bdir.iterdir() if x.is_dir()):
+            m = _baseline_metrics(ctx, d.name)
+            if m and all(k in m for k in V48_TOL):
+                records[d.name] = m
+    if len(records) < 4:
+        return CheckResult("V48", FAIL,
+                           f"only {len(records)} evaluation records under results/baselines/; "
+                           "the contract requires >= 3 baselines + final",
+                           {"records": sorted(records)})
+    if "final" not in records:
+        return CheckResult("V48", FAIL,
+                           "no results/baselines/final/metrics.json, so the table cannot be "
+                           "reconciled against the final model", {"records": sorted(records)})
+
+    matched: dict[str, str] = {}
+    unmatched: list[dict[str, Any]] = []
+    for name, m in sorted(records.items()):
+        want = {k: m[k]["mean"] for k in V48_TOL}
+        hit = None
+        for row, nums in zip(rows, row_nums):
+            if all(any(abs(v - want[k]) <= V48_TOL[k] for v in nums) for k in V48_TOL):
+                hit = row[:70]
+                break
+        if hit is None:
+            unmatched.append({"record": name,
+                              "expected": {k: round(v, 6) for k, v in want.items()}})
+        else:
+            matched[name] = hit
+    if unmatched:
+        return CheckResult("V48", FAIL,
+                           f"{len(unmatched)} evaluation record(s) have no matching row in "
+                           "results/metrics_summary.md -- the published table disagrees with "
+                           "the measurement",
+                           {"unmatched": unmatched, "matched": sorted(matched)})
+    return CheckResult("V48", PASS,
+                       f"table reconciles against all {len(matched)} evaluation records "
+                       "(psnr 1e-3, ssim/lpips 1e-4)",
+                       {"matched": sorted(matched)})
 
 
 def check_V49(ctx: Ctx) -> CheckResult:
