@@ -71,6 +71,13 @@ TIERS["V55"] = 0
 TIERS["V56"] = 0
 TIERS["V59"] = 0
 
+# Checks added from the second requirements audit (docs/decisions.md D34), closing U-1 and
+# U-8 -- two requirements no prior check could turn red for.
+# V61 F2 size-agnosticism, forwarded on every architecture (V25-36 band: model correctness)
+# V62 F4 degradation order-randomisation, actually measured (same band: data/degradation)
+TIERS["V61"] = 2
+TIERS["V62"] = 2
+
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
 SKIP_WHITELIST: dict[str, str] = {
@@ -2464,6 +2471,169 @@ def check_V59(ctx: Ctx) -> CheckResult:
                            "who clones this repo",
                            {"ignored": True, "size": ck.stat().st_size})
     return not_impl("V59", "weights/best.pt (not trained yet) or a published URL + sha256")
+
+
+#: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and
+#: non-multiple-of-8 shapes, because F2 says ANY (H,W) -> exactly (2H,2W) and the internal
+#: pad/crop-back in UNetSR is the likeliest home for an off-by-(pad*scale) error.
+V61_SIZES = ((128, 128), (256, 256), (61, 97), (1, 1), (130, 66))
+V61_ARCHS = ("NAFSR", "UNetSR")
+
+
+def check_V61(ctx: Ctx) -> CheckResult:
+    """F2 size-agnosticism, forwarded for real, on EVERY architecture.
+
+    The 256->512 fixture that docs/SPEC_ADDENDUM.md calls "the only guard against silently
+    baking in 128->256" lived in ``src/model.py::_selftest()``, which nothing invoked, and
+    UNetSR was forwarded by no check at all (requirements-auditor U-1). Dead code is not a
+    guard. This builds each architecture and forwards each shape.
+    """
+    if not ctx.exists("src", "model.py"):
+        return not_impl("V61", "src/model.py")
+    try:
+        import torch
+
+        sys.path.insert(0, str(ctx.root))
+        from src.model import build_model
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V61", FAIL, f"cannot import build_model: {type(exc).__name__}: {exc}")
+
+    ran, bad = 0, []
+    for arch in V61_ARCHS:
+        try:
+            net = build_model({"name": arch, "scale": 2, "in_ch": 1, "out_ch": 1}).eval()
+        except Exception as exc:  # noqa: BLE001
+            bad.append({"arch": arch, "size": None, "why": f"build failed: {exc}"})
+            continue
+        for (h, w) in V61_SIZES:
+            x = torch.zeros((1, 1, h, w))
+            try:
+                with torch.no_grad():
+                    y = net(x)
+            except Exception as exc:  # noqa: BLE001
+                bad.append({"arch": arch, "size": [h, w],
+                            "why": f"{type(exc).__name__}: {str(exc)[:160]}"})
+                continue
+            ran += 1
+            if tuple(y.shape) != (1, 1, 2 * h, 2 * w):
+                bad.append({"arch": arch, "size": [h, w],
+                            "why": f"got {tuple(y.shape)}, expected (1, 1, {2*h}, {2*w})"})
+            elif not bool(torch.isfinite(y).all()):
+                bad.append({"arch": arch, "size": [h, w], "why": "non-finite output"})
+    need = len(V61_ARCHS) * len(V61_SIZES)
+    if bad:
+        return CheckResult("V61", FAIL,
+                           f"{len(bad)} of {need} arch x size combinations violate F2",
+                           {"violations": bad[:8], "ran": ran, "required": need})
+    if ran < need:  # anti-vacuity: silence is not a pass
+        return CheckResult("V61", FAIL,
+                           f"only {ran} of {need} combinations actually ran",
+                           {"ran": ran, "required": need})
+    return CheckResult("V61", PASS,
+                       f"{ran} arch x size combinations all yield exactly (1,1,2H,2W), finite",
+                       {"archs": list(V61_ARCHS), "sizes": [list(s) for s in V61_SIZES]})
+
+
+#: V62's acceptance, owned by the VERIFIER and hash-pinned rather than read from
+#: src/degrade.py -- the same governance fix D24 applied to V33, so the subject under test
+#: cannot move its own pass mark.
+V62_SAMPLES = 2000
+V62_SPAN_FRAC = 0.90          # a and v must span >=90% of their permitted +/-range
+V62_SIGMA_HI = 0.015          # sigma must reach at least this
+V62_PRE_DOWN_LO, V62_PRE_DOWN_HI = 0.08, 0.22
+
+
+def check_V62(ctx: Ctx) -> CheckResult:
+    """F4: the degradation actually randomises, including the pre-downsample order hedge.
+
+    V33 compares only the variance curve, which the order hedge barely moves, so
+    GAUSS_PRE_DOWN_PROB and the whole pre-downsample branch could have been deleted with
+    every check staying green (requirements-auditor U-8). The branch is counted by
+    observing the REAL code path: src.degrade.downsample is wrapped so we can see whether
+    the array handed to it was modified before decimation.
+    """
+    if not ctx.exists("src", "degrade.py"):
+        return not_impl("V62", "src/degrade.py")
+    import numpy as np
+
+    try:
+        sys.path.insert(0, str(ctx.root))
+        from src import degrade as dg
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V62", FAIL, f"cannot import src.degrade: {exc}")
+
+    cfg = dg.DegradeConfig()
+    rng = np.random.default_rng(20260815)
+    a_s, v_s, sig = [], [], []
+    for _ in range(V62_SAMPLES):
+        p = dg.sample_noise_params(rng, cfg)
+        a_s.append(p.a)
+        v_s.append(p.v)
+        sig.append(p.sigma)
+    frac = float(getattr(cfg, "randomise_frac", dg.NOISE_RANDOMISE_FRAC))
+    ev: dict[str, Any] = {"n": V62_SAMPLES, "randomise_frac": frac,
+                          "a": [min(a_s), max(a_s)], "v": [min(v_s), max(v_s)],
+                          "sigma": [min(sig), max(sig)]}
+    problems = []
+    for nm, vals, base in (("a", a_s, dg.NOISE_A_FITTED), ("v", v_s, dg.NOISE_V_FITTED)):
+        lo, hi = base * (1 - frac), base * (1 + frac)
+        span = (max(vals) - min(vals)) / (hi - lo) if hi > lo else 0.0
+        ev[f"{nm}_span_frac"] = span
+        if span < V62_SPAN_FRAC:
+            problems.append(f"{nm} spans only {span:.3f} of its +/-{frac:.0%} range")
+        if min(vals) < lo - 1e-9 or max(vals) > hi + 1e-9:
+            problems.append(f"{nm} escapes its permitted range [{lo:.6g}, {hi:.6g}]")
+    # sigma is drawn from a CONTINUOUS uniform, so the sampled min is essentially never
+    # exactly 0.0 -- requiring that would test an event that cannot happen. Instead require
+    # the configured lower bound to genuinely be (approximately) zero, and separately require
+    # the sampled min to fall within the leftmost 5% of the configured span: with 2000 draws
+    # from a uniform, P(min > 5th-percentile-of-min) is astronomically small, so this only
+    # fires if the range was shifted away from zero or the sampler is broken.
+    sigma_lo, sigma_hi_cfg = (float(cfg.gauss_sigma_range[0]), float(cfg.gauss_sigma_range[1]))
+    ev["sigma_range_cfg"] = [sigma_lo, sigma_hi_cfg]
+    if sigma_lo > 1e-6:
+        problems.append(f"configured gauss_sigma_range does not start near 0 ({sigma_lo:.6g})")
+    span = sigma_hi_cfg - sigma_lo
+    near_zero_bound = sigma_lo + 0.05 * span if span > 0 else sigma_lo
+    if min(sig) > near_zero_bound:
+        problems.append(f"sigma's sampled min {min(sig):.6g} does not fall in the near-zero "
+                        f"5% of its configured range [{sigma_lo:.6g}, {sigma_hi_cfg:.6g}] over "
+                        f"{V62_SAMPLES} draws -- statistically implausible unless the sampler "
+                        f"is not actually uniform over the full range")
+    if max(sig) < V62_SIGMA_HI:
+        problems.append(f"sigma never exceeds {V62_SIGMA_HI} (max {max(sig):.6g})")
+
+    # --- count the pre-downsample branch by observing the real call -------------------
+    gt = np.clip(np.random.default_rng(7).random((32, 32)).astype(np.float32), 0, 1)
+    taken = [0]
+    real_downsample = dg.downsample
+
+    def _spy(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        if x.shape == gt.shape and not np.array_equal(x, gt):
+            taken[0] += 1
+        return real_downsample(x, *a, **k)
+
+    n_trials = 800
+    try:
+        dg.downsample = _spy
+        r2 = np.random.default_rng(4242)
+        for _ in range(n_trials):
+            dg.degrade(gt, r2, cfg)
+    finally:
+        dg.downsample = real_downsample
+    rate = taken[0] / n_trials
+    ev["pre_down_rate"] = rate
+    ev["pre_down_trials"] = n_trials
+    ev["GAUSS_PRE_DOWN_PROB"] = float(dg.GAUSS_PRE_DOWN_PROB)
+    if not (V62_PRE_DOWN_LO <= rate <= V62_PRE_DOWN_HI):
+        problems.append(f"pre-downsample gaussian branch taken {rate:.1%} of the time, "
+                        f"outside [{V62_PRE_DOWN_LO:.0%}, {V62_PRE_DOWN_HI:.0%}] -- the F4 "
+                        f"order hedge is missing, disabled or mis-tuned")
+    if problems:
+        return CheckResult("V62", FAIL, "; ".join(problems), ev)
+    return CheckResult("V62", PASS,
+                       f"a/v span >={V62_SPAN_FRAC:.0%} of +/-{frac:.0%}, sigma reaches both "
+                       f"0 and >{V62_SIGMA_HI}, pre-downsample branch taken {rate:.1%}", ev)
 
 
 # ======================================================================================

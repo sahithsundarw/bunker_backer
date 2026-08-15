@@ -121,6 +121,9 @@
 > V10, and passed V09 too, because V09 reads `so[0]`/`so[1]` — the wrong axes for a
 > channels-last array.
 
+| **V61** | 2 | **F2 size-agnosticism, forwarded on every architecture, not read from dead code.** SPEC_ADDENDUM's 256→512 fixture — "the only guard against silently baking in 128→256" — lived in `src/model.py::_selftest()`, which nothing ever invoked, and `UNetSR`'s pad/crop-back was forwarded by zero checks. | For every architecture in `{NAFSR, UNetSR}` and every `(h, w)` in `{(128,128), (256,256), (61,97), (1,1), (130,66)}`, `build_model` then a forward pass must yield exactly `(1, 1, 2h, 2w)`, all finite. FAIL if fewer than all 10 combinations actually ran. |
+| **V62** | 2 | **F4 degradation-order randomisation is measured, not assumed.** V33 compares only the aggregate variance curve, which the pre-downsample order hedge barely moves — `GAUSS_PRE_DOWN_PROB` and its entire code branch could be deleted with every existing check staying green. | Over 2000 draws of `sample_noise_params`: `a` and `v` must each span ≥ 90% of their configured ±30% range without escaping it; `sigma`'s sampled minimum must fall in the near-zero 5% of its configured range and its maximum must exceed 0.015. Separately, over 800 calls to `degrade()` with a spy wrapped around `src.degrade.downsample`, the pre-downsample branch must be observed taken between 8% and 22% of calls. |
+
 ## WHITELIST FOR SKIPS
 
 A check may report SKIP **only** if listed here with a reason. The agent may append to this list only for genuine environmental impossibility (e.g. no GPU present), never for difficulty.

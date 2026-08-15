@@ -1580,3 +1580,67 @@ http all refused; the real asset URL and an uppercase-host variant both accepted
 
 Net stricter: closes an SSRF hole with no reduction in what the checks accept.
 prior pin: `d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4`
+
+---
+
+## D34 — V61 and V62 ADDED, closing U-1 and U-8: two requirements no check could fail on
+
+**Date:** 2026-08-16, iteration 2. **Source:** `requirements-auditor`, first and second pass
+(U-1, U-8). **Contract and verifier both re-pinned**, additions only.
+
+### U-1 — F2 size-agnosticism was verified by dead code
+
+`docs/SPEC_ADDENDUM.md` calls the 256->512 fixture "the *only* guard against silently baking
+in 128->256". That fixture lived inside `src/model.py::_selftest()`, and nothing in the
+verifier, `train.py`, or any script ever called it. `UNetSR`'s internal pad/crop-back — the
+likeliest home for an off-by-`(pad*scale)` bug, since `NAFSR` never pads at all — was forwarded
+by zero checks. A model could regress from "any (H,W) -> exactly (2H,2W)" to "only multiples of
+8" with the entire 57-check suite staying green.
+
+**V61** builds each of `{NAFSR, UNetSR}` and forwards each of `{(128,128), (256,256), (61,97),
+(1,1), (130,66)}` — even, odd, non-square, and a degenerate 1x1 — asserting the output is
+exactly `(1, 1, 2h, 2w)` and finite. Anti-vacuity: FAIL if fewer than all 10 combinations
+actually ran (a crash mid-loop cannot silently look like a pass).
+
+**Negative control:** `UNetSR.forward`'s crop-back line was mutated from
+`out.shape[-2] - ph * s` to `out.shape[-2] - ph` (dropping the `* s` — the exact off-by-scale
+bug the addendum worried about). V61 went red: `3 of 10 arch x size combinations violate F2`.
+Reverted byte-exact, reconfirmed green (`10/10`, finite).
+
+### U-8 — F4 order randomisation was asserted nowhere
+
+`GAUSS_PRE_DOWN_PROB` and the entire pre-downsample branch in `src/degrade.py::degrade()`
+could have been deleted and no check would have noticed: V33 compares only the aggregate
+variance-vs-intensity curve, which this hedge barely perturbs by design (it only ever touches
+the additive-Gaussian term, which fits to zero in the real data).
+
+**V62** measures the randomisation for real. Over 2000 draws of `sample_noise_params`: `a` and
+`v` must each span >= 90% of their configured +/-30% range without escaping it; `sigma`'s
+sampled minimum must land in the near-zero 5% of its configured range (see the note below on
+why this is not a literal `== 0` test) and its maximum must exceed 0.015. Separately, over 800
+calls to `degrade()`, `src.degrade.downsample` is wrapped with a spy that observes whether the
+array it receives was mutated before decimation — this counts the REAL code path taken, not a
+config flag — and the branch must be taken between 8% and 22% of the time.
+
+**A bug in my own first draft, caught before it shipped.** The first version of the sigma
+check required the *sampled* minimum to be `< 1e-9`, i.e. essentially exactly zero. `sigma` is
+drawn from a continuous `U(0, 0.02)` (`src/degrade.py::sample_noise_params`), so across any
+finite sample the minimum is *never* going to land within `1e-9` of zero — the check was
+testing an event with probability zero, and it correctly failed on the real, correct code
+(`min 1.26763e-06`). Fixed to a statistically sound bound: the configured lower edge of
+`gauss_sigma_range` must itself be near zero, and the *sampled* minimum must fall within the
+leftmost 5% of the configured span — a bound that 2000 uniform draws satisfy with overwhelming
+probability when the sampler is correct, and fails when the range is shifted or the sampler is
+broken. Recorded here because it is exactly the kind of check-writing mistake this project has
+shipped before (V54's false positive, V55's SSRF hole) — caught this time by running it against
+the known-correct code before trusting it, per the project's own negative-control rule.
+
+**Negative control:** `GAUSS_PRE_DOWN_PROB` set to `0.0` (deleting the hedge in effect, without
+touching the branch code). V62 went red: `pre-downsample gaussian branch taken 0.0% of the
+time, outside [8%, 22%]`. Reverted byte-exact, reconfirmed green.
+
+### Do NOT retry
+
+- **Do not test a continuous random draw's minimum against a near-zero absolute epsilon.**
+  Test against a percentile of the configured range instead, sized so the false-positive rate
+  at the chosen sample count is negligible. This is the mistake V62's own first draft made.
