@@ -10,7 +10,8 @@ Contract (frozen -- `inference.py`, `train.py` and `scripts/evaluate.py` code ag
 
     build_model(cfg: Mapping[str, Any]) -> torch.nn.Module
 
-    cfg = {"name": "NAFSR" | "UNetSR", "width": int, "num_blocks": int,
+    cfg = {"name": "NAFSR" | "UNetSR" | "AdaptiveLinearSR", "width": int,
+           "num_blocks": int,
            "scale": 2, "in_ch": 1, "out_ch": 1}
 
     forward: (B, in_ch, h, w) float32, UNCLIPPED  ->  (B, out_ch, scale*h, scale*w)
@@ -53,7 +54,14 @@ import torch.nn.functional as F
 
 from .blocks import ConvReLU, NAFBlock, PixelShuffleHead, bilinear_upsample
 
-__all__ = ["build_model", "NAFSR", "UNetSR", "count_parameters", "estimate_macs"]
+__all__ = [
+    "build_model",
+    "NAFSR",
+    "UNetSR",
+    "AdaptiveLinearSR",
+    "count_parameters",
+    "estimate_macs",
+]
 
 
 # --------------------------------------------------------------------------------------
@@ -73,6 +81,10 @@ _DEFAULTS: dict[str, Any] = {
     "ffn_expand": 2,
     "layerscale_init": 1.0,
     "padding_mode": "zeros",
+    "kernel_size": 5,
+    "intensity_bins": 1,
+    "std_bins": 1,
+    "gate_window": 1,
 }
 
 # Name aliases. "UNetBaseline" is accepted because early configs used it; keeping the
@@ -86,6 +98,9 @@ _ALIASES: dict[str, str] = {
     "unet": "UNetSR",
     "unetbaseline": "UNetSR",
     "baselineunet": "UNetSR",
+    "adaptivelinearsr": "AdaptiveLinearSR",
+    "adaptivelinear": "AdaptiveLinearSR",
+    "alsr": "AdaptiveLinearSR",
 }
 
 
@@ -258,6 +273,107 @@ class UNetSR(nn.Module):
         return out + skip
 
 
+class AdaptiveLinearSR(nn.Module):
+    """Piecewise local linear x2 restorer fitted by train-split least squares.
+
+    A denoised local mean selects an intensity bin and a local standard deviation selects a
+    texture bin. Each bin owns four local filters, one for every PixelShuffle subpixel. The
+    filters are fitted outside this module, stored as ordinary checkpoint parameters, and
+    selected per LR pixel in ``forward``. This makes the model nonlinear while retaining a
+    small, auditable closed-form training path that is practical on a CPU-only host.
+    """
+
+    def __init__(
+        self,
+        kernel_size: int = 5,
+        intensity_bins: int = 1,
+        std_bins: int = 1,
+        gate_window: int = 1,
+        scale: int = 2,
+        in_ch: int = 1,
+        out_ch: int = 1,
+    ) -> None:
+        super().__init__()
+        k = int(kernel_size)
+        gw = int(gate_window)
+        ib = int(intensity_bins)
+        sb = int(std_bins)
+        if k < 1 or k % 2 == 0:
+            raise ValueError(f"kernel_size must be positive and odd, got {k}")
+        if gw < 1 or gw % 2 == 0:
+            raise ValueError(f"gate_window must be positive and odd, got {gw}")
+        if ib < 1 or sb < 1:
+            raise ValueError(f"bin counts must be positive, got {ib}x{sb}")
+        if int(scale) != 2 or int(in_ch) != 1 or int(out_ch) != 1:
+            raise ValueError("AdaptiveLinearSR currently requires scale=2 and grayscale 1->1")
+
+        self.kernel_size = k
+        self.intensity_bins = ib
+        self.std_bins = sb
+        self.gate_window = gw
+        self.scale = 2
+        self.in_ch = 1
+        self.out_ch = 1
+        n_filters = ib * sb
+        self.filters = nn.Parameter(torch.zeros(n_filters, 4, k * k))
+        self.bias = nn.Parameter(torch.zeros(n_filters, 4))
+        self.register_buffer("intensity_thresholds", torch.zeros(max(0, ib - 1)))
+        self.register_buffer("std_thresholds", torch.zeros(ib, max(0, sb - 1)))
+
+    @torch.no_grad()
+    def set_fitted_state(
+        self,
+        filters: torch.Tensor,
+        intensity_thresholds: torch.Tensor,
+        std_thresholds: torch.Tensor,
+    ) -> None:
+        """Load fitted ``[bin, k*k+1, subpixel]`` coefficients and gate thresholds."""
+        want = (self.intensity_bins * self.std_bins, self.kernel_size**2 + 1, 4)
+        if tuple(filters.shape) != want:
+            raise ValueError(f"fitted filter shape {tuple(filters.shape)} != {want}")
+        if tuple(intensity_thresholds.shape) != tuple(self.intensity_thresholds.shape):
+            raise ValueError("intensity threshold shape does not match configured bins")
+        if tuple(std_thresholds.shape) != tuple(self.std_thresholds.shape):
+            raise ValueError("std threshold shape does not match configured bins")
+        self.filters.copy_(filters[:, :-1, :].permute(0, 2, 1))
+        self.bias.copy_(filters[:, -1, :])
+        self.intensity_thresholds.copy_(intensity_thresholds)
+        self.std_thresholds.copy_(std_thresholds)
+
+    def _gate(self, x: torch.Tensor) -> torch.Tensor:
+        if self.gate_window == 1:
+            mean = x
+            std = torch.zeros_like(x)
+        else:
+            p = self.gate_window // 2
+            xp = F.pad(x, (p, p, p, p), mode="replicate")
+            mean = F.avg_pool2d(xp, self.gate_window, stride=1)
+            mean_sq = F.avg_pool2d(xp.square(), self.gate_window, stride=1)
+            std = (mean_sq - mean.square()).clamp_min(0.0).sqrt()
+
+        intensity = torch.bucketize(mean.contiguous(), self.intensity_thresholds)
+        if self.std_bins == 1:
+            texture = torch.zeros_like(intensity)
+        else:
+            local_thresholds = self.std_thresholds[intensity]
+            texture = (std.unsqueeze(-1) > local_thresholds).sum(dim=-1)
+        return intensity * self.std_bins + texture
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        n, _, h, w = x.shape
+        p = self.kernel_size // 2
+        patches = F.unfold(
+            F.pad(x, (p, p, p, p), mode="replicate"),
+            kernel_size=self.kernel_size,
+        ).transpose(1, 2)
+        bins = self._gate(x).reshape(n, h * w)
+        selected_filters = self.filters[bins]
+        selected_bias = self.bias[bins]
+        values = (selected_filters * patches.unsqueeze(2)).sum(dim=-1) + selected_bias
+        subpixels = values.transpose(1, 2).reshape(n, 4, h, w)
+        return F.pixel_shuffle(subpixels, self.scale)
+
+
 def _model_section(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
     """Accept either a bare model config or a full training config with a ``model:`` block."""
     if not isinstance(cfg, Mapping):
@@ -281,7 +397,8 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
 
     Args:
         cfg: model hyper-parameters, or a full training config containing a ``model``
-            sub-mapping. Recognised keys: ``name`` (``"NAFSR"`` | ``"UNetSR"``), ``width``,
+            sub-mapping. Recognised keys: ``name`` (``"NAFSR"`` | ``"UNetSR"`` |
+            ``"AdaptiveLinearSR"``), ``width``,
             ``num_blocks`` (NAFSR), ``levels`` (UNetSR), ``scale``, ``in_ch``, ``out_ch``,
             ``dw_expand``, ``ffn_expand``, ``layerscale_init`` and ``padding_mode``. Every
             key is optional; missing keys fall back to ``_DEFAULTS``. Unrecognised keys are
@@ -324,6 +441,17 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
             ffn_expand=int(get("ffn_expand")),
             layerscale_init=float(get("layerscale_init")),
             padding_mode=str(get("padding_mode")),
+        )
+
+    if name == "AdaptiveLinearSR":
+        return AdaptiveLinearSR(
+            kernel_size=int(get("kernel_size")),
+            intensity_bins=int(get("intensity_bins")),
+            std_bins=int(get("std_bins")),
+            gate_window=int(get("gate_window")),
+            scale=scale,
+            in_ch=in_ch,
+            out_ch=out_ch,
         )
 
     # UNetSR. `num_blocks` is accepted as a synonym for `levels` only if `levels` is
@@ -392,6 +520,10 @@ def _selftest() -> int:
                           "in_ch": 1, "out_ch": 1},
         "UNetSR w32 L4": {"name": "UNetSR", "width": 32, "levels": 4, "scale": 2,
                           "in_ch": 1, "out_ch": 1},
+        "AdaptiveLinearSR k5 2x2": {
+            "name": "AdaptiveLinearSR", "kernel_size": 5, "intensity_bins": 2,
+            "std_bins": 2, "gate_window": 3, "scale": 2, "in_ch": 1, "out_ch": 1,
+        },
     }
     bad = 0
     for label, cfg in configs.items():
