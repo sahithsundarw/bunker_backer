@@ -4,6 +4,52 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
+**A prior halt in this session (safety classifier blocking Bash) resolved itself** — shell
+access returned and every item that was flagged mid-halt has since been independently
+confirmed. Nothing below is carried over on trust; each line was re-verified against a live
+check run or a re-executed negative control just now. Record kept because the resolution
+mechanism (SSRF guard, clone-hole fix, self-grading fix) is worth knowing about even though
+none of it is still open:
+
+- **SSRF guard on `_fetch_digest` (D33): PROVEN, not just written.** Re-ran the 14-case
+  negative control (`<scratchpad>/test_url_guard.py`) just now: 11/11 malicious vectors
+  refused (`file://`, loopback, link-local, ftp, path-position spoof, host-suffix spoof,
+  subdomain-suffix spoof, embedded credentials, non-443 port, plain http), 3/3 legitimate URLs
+  accepted (the real asset, an uppercase host, the githubusercontent redirect target).
+  **0 incorrect.** `docs/VERIFIER_SHA256` is pinned to `160bc228...` and V00 passes.
+- **V45/V48 fresh-clone hole: fixed.** `.gitignore` now tracks `results/experiments.csv` and
+  `results/baselines/*/metrics.json` (NOT the 2000 `.npy` predictions per baseline, which stay
+  ignored to respect V51's 25 MB cap). Confirmed: `V45 PASS "2 runs logged"`,
+  `V48 PASS "table reconciles against all 5 evaluation records"`.
+- **`scripts/evaluate.py`'s self-graded V28 line: fixed** (commit `9e0771d`). It was declaring
+  its own PASS/FAIL from unpaired mean deltas — the exact defect D31 removed from the verifier,
+  reintroduced one layer down. Now uses `paired_compare()` in `src/metrics.py`, confirmed
+  byte-for-byte parity with `verify_all.py --only V28`'s own win/loss/tie counts.
+- **README.md: rewritten and committed** (`4d64a82`), 12 false/contradictory claims fixed,
+  4 of 5 fenced commands executed in a genuine fresh anonymous clone as part of the fix.
+- **Confirmed live, this instant:** `V00 V06 V45 V48 V56 V59` all PASS. `V28` correctly
+  **FAIL** — 1 win (LPIPS) / 1 loss (PSNR) / 1 tie (SSIM), escape hatch not satisfied. That is
+  the check working, not a defect.
+
+## What is actually still open (verified moments ago, not carried over)
+- **`results/runtime_report.md` does not exist.** `scripts/benchmark_runtime.py` is written
+  (+769 lines, a full stage pipeline: scaling/variants/sweep/divergence) but has never been
+  run to completion — no output file, and the two `python.exe` processes still alive are
+  near-idle (18 KB / 5 KB RSS), not mid-benchmark. **The GPU is free right now.**
+  V37, V38, V39, V43 remain red on this alone.
+- **V61 (U-1, size-agnosticism) and V62 (U-8, order-randomisation) were drafted but never
+  applied** — `grep -c "check_V61\|check_V62" scripts/verify_all.py` is 0. Patch script:
+  `<scratchpad>/patch_new_checks.py`. Still the right design (V61 forwards {NAFSR, UNetSR} x 5
+  shapes asserting exactly `(1,1,2H,2W)` and finite; V62 measures degradation randomisation and
+  counts the pre-downsample branch by wrapping `src.degrade.downsample`) — apply, test, pin.
+- **V22** (bf16 max-abs-diff 1.27e-02 vs 1e-02) is still unfixed. Real bug, not an artifact gap.
+- **`adversarial-reviewer`** still never delivered (killed in iteration 1).
+- U-5 (deck), U-6, U-9, U-10, M-1 of the 7 originally-uncovered requirements remain open.
+
+---
+
+
+
 **Written at:** iteration 2, mid-flight. **Last verified commit:** `3e230c6`.
 **Verifier SHA:** `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b` — matches
 the pin, V00 green.
