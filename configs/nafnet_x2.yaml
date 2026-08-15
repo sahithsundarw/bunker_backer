@@ -8,12 +8,37 @@
 #
 # MEASURED cost of this model block (src/model.py self-test, `py -3.12 -m src.model`):
 #   params 388,225 (0.388 M)   MACs @128x128 = 5.584 G   FLOPs ~= 11.17 G per image
-# Scale-up options, measured, if a quality/throughput trade proves worth it:
-#   w56 n16 0.523 M / 15.1 GF | w64 n16 0.678 M / 19.6 GF | w80 n16 1.049 M / 30.4 GF
-#   w64 n28 1.048 M / 29.7 GF | w96 n16 1.500 M / 43.6 GF
-# SPEC 7.1 quotes a 1-3 M budget while SPEC 9 quotes width 48 / 16 blocks, which is
-# 0.388 M. SPEC 9's concrete numbers are kept as the default: a size change must be
-# justified by a measured quality delta, not by matching a stated band (docs/decisions.md).
+#
+# WHY WIDTH 48 AND NOT THE 1-3 M BAND SPEC 7.1 QUOTES.
+# SPEC 7.1 quotes a 1-3 M parameter budget; SPEC 9 quotes width 48 / 16 blocks, which
+# measures 0.388 M. SPEC 9's concrete numbers win, and the reason is the *training* cost
+# on the available hardware, not the inference cost. Measured on an RTX 4060 Laptop GPU
+# (8 GB), bf16 + channels_last, 400 images at 128x128 batch 16, and a train step at
+# batch 32 / 64x64 patches:
+#
+#   config    params   400 img    train step   20k iters   peak VRAM
+#   w48 n16   0.388 M   4618 ms      221 ms      73.7 min    3765 MiB   <- default
+#   w64 n16   0.678 M   5289 ms      261 ms      87.1 min    5010 MiB
+#   w80 n16   1.049 M   6452 ms      407 ms     135.5 min    6255 MiB
+#   w96 n16   1.500 M   7446 ms      423 ms     141.1 min    6975 MiB
+#   w64 n28   1.048 M   9021 ms     2766 ms     922.0 min    7925 MiB   <- thrashing
+#
+# Entering the 1-3 M band costs 1.8x-1.9x the training wall-clock for an UNMEASURED
+# quality gain, and w64 n28 does not fit the card (peak 7925 MiB of 8 GB; the 12.5x step
+# time is allocator spill, not compute). With a one-day budget the deciding factor is how
+# many training runs fit, so the default stays at 0.388 M until a quality delta is
+# actually measured. Raising width is the first thing to try if time allows.
+#
+# CAVEATS ON THE INFERENCE COLUMN, so nobody over-reads it:
+#  - Single-shot measurements with ~9% run-to-run variance. The w48 n16 figure re-measured
+#    as a median of 5 interleaved repeats is 4233 ms (range 4196-4329). Treat the column
+#    as ranking the configs, not as precise per-config timings.
+#  - These are RTX 4060 numbers. The model is memory-bandwidth bound, not compute bound
+#    (profile: 32.8% layer_norm, 17.9% conv bias-add, 16.2% convolution).
+#  - KLA scores on an H100 with roughly an order of magnitude more bandwidth. ESTIMATE,
+#    NOT MEASURED: ~0.4 s for the 400-image set there, which is what docs/decisions.md D7
+#    independently predicts and is small against 3-6 s of fixed startup. Nobody has run
+#    this model on an H100. Do not quote the 4060 numbers as the submission's throughput.
 model:
   name: NAFSR
   width: 48

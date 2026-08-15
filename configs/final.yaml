@@ -9,8 +9,8 @@
 #
 # MEASURED cost (src/model.py self-test, `py -3.12 -m src.model`):
 #   params 388,225 (0.388 M)   MACs @128x128 = 5.584 G   FLOPs ~= 11.17 G per image
-#   Checkpoint is ~4.7 MB per copy of the weights (fp32), well under V43's 100 MB cap
-#   even with model + EMA state stored.
+#   state_dict 1.57 MiB fp32; a full checkpoint carrying both `model` and `ema` measures
+#   3.14 MiB (torch.save, measured) -- far under V43's 100 MB cap.
 model:
   name: NAFSR
   width: 48

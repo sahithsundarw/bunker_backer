@@ -57,17 +57,23 @@ class LayerNorm2d(nn.Module):
     **Implemented via ``F.layer_norm`` on an NHWC view, not by hand.** The obvious manual
     form ``(x - x.mean(1)) / sqrt(x.var(1) + eps)`` is arithmetically identical but slower
     and much heavier: it is bandwidth-bound and autograd saves every intermediate.
-    MEASURED, NAFSR w48 n16 on an RTX 4060 Laptop GPU, bf16 autocast + channels_last,
-    400 images at 128x128 batch 16 for inference / batch 32 at 64x64 for the train step:
 
-        manual reduction : 400 img 5036 ms | train step 298 ms | peak 5249 MiB
-        F.layer_norm     : 400 img 4618 ms | train step 221 ms | peak 3765 MiB
-                           -> 1.09x inference, 1.35x training, 1.39x less VRAM
+    MEASURED, NAFSR w48 n16 on an RTX 4060 Laptop GPU, bf16 autocast + channels_last;
+    400 images at 128x128 batch 16 for inference, batch 32 at 64x64 for the train step.
+    Five repeats per variant, interleaved to cancel thermal drift, medians reported:
 
-    The training-memory win is the real prize: it is what keeps batch 32 at 64x64 inside
-    an 8 GB card. Profiling still attributes ~33% of forward CUDA time to layer_norm --
-    autocast promotes it to fp32 by policy -- so this is the floor for the op, not a
-    remaining bug.
+        manual reduction : 400 img 4939 ms | train step 305 ms | peak 4970 MiB
+        F.layer_norm     : 400 img 4233 ms | train step 208 ms | peak 3486 MiB
+                           -> 1.17x inference, 1.46x training, 1.43x less VRAM
+
+    The inference gap is outside run-to-run noise (manual range 4931-5269 ms, fused
+    4196-4329 ms -- non-overlapping). An earlier single-shot comparison put the inference
+    win at only 1.09x, which was inside the ~9% run variance and should not have been
+    quoted; interleaved repeats were needed to make the claim honestly.
+
+    Profiling attributes 32.8% of forward CUDA time to layer_norm even in the fused form
+    -- autocast promotes it to fp32 by policy -- so that is the floor for the op as
+    written, not a remaining bug.
 
     ``permute`` on a channels_last tensor is a metadata-only view, so the transposition is
     free in the configuration we actually run (``channels_last: true``, SPEC 9).
@@ -134,10 +140,14 @@ class NAFBlock(nn.Module):
 
     `layerscale_init` deviates from the official NAFNet release, which initialises the
     residual scales (`beta`, `gamma`) to **zero**. Zero-init makes every block an exact
-    identity at step 0, so the branch weights receive no gradient until `beta` itself has
-    grown away from zero. That costs iterations we do not have (20k-iteration budget,
-    SPEC 9), so the default here is 1.0 -- a plain residual with a learnable per-channel
-    gain. Keep it configurable so the choice can be ablated rather than asserted.
+    identity at step 0, so branch weights get gradient only in proportion to `beta`, which
+    must itself grow away from zero first. The default here is 1.0 -- a plain residual
+    with a learnable per-channel gain.
+
+    UNMEASURED: this is an argument from the shape of the gradient, not a result. No
+    convergence comparison has been run, because no training run exists yet. It is exposed
+    as a config key precisely so it can be ablated (0.0 vs 1.0 vs 1e-2) once there is a
+    training loop to ablate with; until then it is a default, not a finding.
     """
 
     def __init__(
