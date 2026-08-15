@@ -127,10 +127,38 @@ measured** for r2. Do not cite a blend or TTA number for r2 without re-running i
   CPU-bound and MPS-bound heavy jobs sequentially, not in parallel, on this hardware.
 
 ## Not yet done on this branch
-- Final deliverable summary (recommendation on replacing `weights/best.pt` with
-  `r2_nb8_psnrloss`) — pending.
 - Optionally: re-run blend search and/or TTA specifically against r2_nb8_psnrloss to confirm
-  the r1-derived conclusions transfer, if time allows (Phase 6 budget permitting).
+  the r1-derived conclusions transfer, if time allows.
+
+## Submission integration — branch `codex/final-submission-28db` (2026-08-15)
+
+Built off `codex/residual-ls5-refinement` @ `2720ccd`. Promoted `r2_nb8_psnrloss` to
+`weights/best.pt` (new SHA256 `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7`,
+verified via a live `inference.py --require_weights` dry-run before overwrite), regenerated
+`results/restored_test_outputs/` (400/400 outputs from `/Users/shanmukhsai/Downloads/NoisyLR`,
+validated from disk: shapes, dtype, finiteness, range, filename match — no PSNR/SSIM/LPIPS,
+no GT exists), wrote `results/runtime_report.md` (local Mac CPU, 7.1 img/s, labelled as such,
+not H100/CUDA), and updated `README.md`/`weights/README.md` to remove all "does not exist yet"
+language. Old `codex/package-final-outputs` (26.3277 dB packaging) was used only as a
+wording/format reference, per instruction — no old metrics or archive SHA carried forward.
+
+**V51/V06/V59 contradiction resolved:** `weights/best.pt` was being flagged by V51's `.pt`
+blob ban while V06/V59 required it tracked. Human-authorised narrow exception
+(`CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"`, one exact path) added to `check_V51`;
+`docs/VERIFIER_SHA256` re-pinned; full writeup in `docs/decisions.md` D30. V51 now PASSES.
+
+**V32 `.venv-mac` false positive:** documented in D30 as local environment noise (a
+differently-named, gitignored virtualenv that `check_V32`'s exact `.venv` match doesn't skip).
+No code change — it does not reproduce on a fresh clone, which is what actually gets scored.
+
+Full-suite result on this branch after the above (`--strict`, working tree, not fresh-clone):
+**45 PASS / 12 FAIL**, up from 44/13 before the V51 fix. Remaining FAILs are all pre-existing
+backlog (V04/V46 need `--fresh-clone`; V14 stdlib-module list gap; V25/V29/V34 need
+`KLA_DATA_ROOT`; V27/V28/V38/V49 not implemented; V32 environment noise, see above) plus **V56**,
+which is expected to stay red until the one remaining manual step — uploading
+`/tmp/semicon_final_outputs_28db.zip` (sha256
+`a33a9a5a129bb006eccb5cf3367abad3456c63d96c1e7bb26e76800e7e375f98`) as a GitHub Release asset
+and filling in `manifest.json`'s `release_url` — is completed by a human.
 
 ---
 
