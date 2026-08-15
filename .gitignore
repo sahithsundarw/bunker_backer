@@ -98,3 +98,18 @@ Thumbs.db
 !results/qualitative/*.png
 !results/qualitative/*.json
 !results/qualitative/*.md
+# V45 needs >=2 experiments.csv rows and V48 needs >=4 metrics.json records including
+# `final`, both read from results/, which is otherwise entirely ignored -- so a fresh clone
+# had ZERO of either and both checks passed on the author's box only, the exact
+# green-here/red-in-a-clone defect V59 exists to catch (reintroduced by the D31
+# strengthening that added this requirement). Track only the ledger and the five metrics
+# records (~300 KB total) -- NOT the 2000 .npy predictions per baseline, which would blow
+# V51's 25 MB whole-tree cap.
+!results/experiments.csv
+!results/baselines/
+!results/baselines/*/
+!results/baselines/*/metrics.json
+# Negating the directories above re-exposes their other contents too (pred_meta.json, the
+# 2000 .npy predictions) to the *.npy rule and later patterns -- .npy stays caught by the
+# blanket rule above, but pred_meta.json is not, so it needs its own explicit re-ignore.
+results/baselines/*/pred_meta.json
