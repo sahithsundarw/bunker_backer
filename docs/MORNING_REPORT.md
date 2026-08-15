@@ -10,13 +10,18 @@ clone verified with credentials suppressed.
 
 ## CHECK TALLY
 
-| | start of iteration 1 | now |
-|---|---|---|
-| PASS | 9 | **41** |
-| FAIL | 44 | **12** |
-| SKIP | 0 | 0 |
+| | start of iteration 1 | end of iteration 1 | now |
+|---|---|---|---|
+| PASS | 9 | 43 | **47** |
+| FAIL | 44 | 14 | **10** |
+| SKIP | 0 | 0 | 0 |
 
-Tier 1 is **fully green, 9/9**. Tier 0 is **15/16** — only V06 (weights) remains.
+Of 57 checks. The "43" column is the last full `--strict` run, at commit `c209cd2`; **V00,
+V27, V48 and V56** have gone green since, each confirmed by a targeted re-run. Nothing has
+gone red.
+
+**Still failing (10):** V04 V22 V28 V37 V38 V39 V43 V45 V46 V49.
+**Nine of those ten are waiting on an artifact, not on a defect.** The exception is V22.
 
 ## ✅ THE HARD GATE IS CLEARED — V25 = 43.3295 dB
 
@@ -43,20 +48,46 @@ This is worth your attention when reading any earlier tally from this project: t
 iteration 0 looked like honest red, but roughly a fifth of the suite was measuring nothing at
 all. The checks that looked strictest were the ones certifying least.
 
-Every remaining failure is honest and traceable to a missing artifact, not a broken fix:
+| Cause | Checks | Status |
+|---|---|---|
+| Needs the checkpoint **published** as a Release with a sha256 | ~~V06 V59~~ | **DONE** — Release `artifacts-v1` |
+| Needs `results/baselines/final/metrics.json` — **not** the training log | ~~V27 V48~~ | **DONE** — scored, n=400 |
+| Needs the 400 restored outputs, generated with `--require_weights` | ~~V56~~ | **DONE** — published + manifest |
+| Needs the UNetSR baseline trained at equal budget | V28, V45 | **training now**, ~20 min |
+| Needs qualitative figures, including the honest failure case | V49 | `loss-metrics` dispatched |
+| Needs the runtime report | V37 V38 V39 V43 | `perf-analyst`, needs exclusive GPU |
+| Needs a `--fresh-clone` run | V04 V46 | after the above |
+| **A real numerical defect in the AMP path** | **V22** | see below |
 
-| Cause | Checks |
-|---|---|
-| Needs the checkpoint **published** as a Release with a sha256 | V06 V59 |
-| Needs `results/baselines/final/metrics.json` from `scripts/evaluate.py` — **not** the training log | V27 V28 V48 |
-| Needs the UNetSR baseline trained at equal budget | V28 |
-| Needs the 400 restored outputs, generated with `--require_weights` | V56 |
-| Needs the runtime report (`perf-analyst`, never dispatched) | V37 V38 V39 V43 |
-| Needs qualitative figures, including the honest failure case | V49 |
+Nothing is blocked on you. Nine of the ten are waiting on an artifact that a specific command
+produces; V22 is the one that is a genuine bug.
 
-Nothing is blocked on you and nothing is blocked on a defect — every item is waiting on an
-artifact that a specific command produces. **Work is paused here at your instruction**;
-nothing is running.
+---
+
+## ⚠ V22 — THE ONE REAL DEFECT LEFT
+
+    V22  FAIL  bf16 vs fp32 diverge: mean 5.99e-04, max 1.27e-02
+
+The tolerance is mean < 1e-3 **and** max < 1e-2. **The mean passes comfortably. Only the max
+fails, at 1.27× the limit.** This is exactly the failure the last report predicted would appear
+the moment a real checkpoint existed — V22 previously read `0.00e+00` only because, with no
+weights, *both* precision arms took the bicubic fallback and were trivially identical.
+
+The cause is bf16's 8 mantissa bits: near an output of 1.0 the representable step is
+2⁻⁸ ≈ 0.0039, and that rounding accumulates across 16 blocks. Two acceptable remedies, in
+order: keep the numerically sensitive ops (LayerNorm / SCA / SimpleGate) or the model tail in
+fp32 under autocast; or switch the CUDA default to **fp16**, which has 10 mantissa bits at the
+same tensor-core throughput and carries no overflow risk at our activation scale.
+
+**Widening the tolerance is not on the list**, and the contract's own wording is why: V22 exists
+to guard "against a silently broken AMP path."
+
+**There is an unmeasured question underneath this that matters more than the check.** The 400
+published outputs were generated in **bf16**. The 28.7865 dB evaluation record was computed in
+**fp32** — `make_baselines.py` runs the model directly, without autocast. So the number we quote
+and the artifact we ship were produced by different numerical paths, and nobody has measured
+the gap in dB. That gets measured before the fix is chosen, and if bf16 costs real quality the
+published outputs get regenerated.
 
 ---
 
@@ -151,15 +182,27 @@ Classical baselines, 400-pair val split, scored on **reloaded float32 `.npy` fro
 | bicubic ×2 (the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 |
 | median 3×3 → bicubic | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | **0.40870** ± 0.15866 |
 | non-local means → bicubic | **26.2722** ± 4.3037 | **0.65152** ± 0.19523 | 0.42586 ± 0.18627 |
-| **ours (NAFSR, EMA)** | **28.7851 ± 4.5324** | **0.78279 ± 0.14169** | **0.25233** |
+| **ours (NAFSR, EMA)** | **28.7865 ± 4.5329** | **0.78287 ± 0.14169** | **0.25324 ± 0.13193** |
 
-**The model beats every baseline on all three metrics.** Run completed in 1:11:41 at 4.65 it/s,
+**The model beats every baseline on all three metrics.** Run completed in 1:11:43 at 4.65 it/s,
 20,000 iterations, seed 42, no OOM. Ledger row `20260815T062831Z-final-s42`.
+
+**These are now an evaluation record, not a training-log number.** `results/baselines/final/`
+holds 400 saved predictions and `results/baselines/final/metrics.json` holds the scores, both
+produced by `scripts/evaluate.py` reading float32 `.npy` **reloaded from disk**. That is what
+V27 and V48 read, and it is why they were red for hours after the model was demonstrably good:
+a number in a training log is not an evaluation record.
+
+Two small corrections to earlier reports, both caught by review rather than by a check:
+the previously published `28.7851 / 0.78279 / 0.25233` came from `train.py`'s in-run
+validation and differs in the fourth decimal from the disk-reloaded record above — **quote the
+record**; and the wall clock is **1:11:43**, not the 1:11:41 previously reported
+(`results/experiments.csv` has `wall_clock_s = 4303.5`).
 
 | vs | ΔPSNR | ΔSSIM | ΔLPIPS (lower better) |
 |---|---|---|---|
-| bicubic (the floor V27 asks for) | **+5.13 dB** | +0.235 | −0.160 |
-| non-local means (the honest bar) | **+2.51 dB** | +0.131 | −0.174 |
+| bicubic (the floor V27 asks for) | **+5.1341 dB** | +0.235 | −0.159 |
+| non-local means (the honest bar) | **+2.5143 dB** | +0.131 | −0.173 |
 
 Two things worth noting about the shape of this result:
 
@@ -242,26 +285,31 @@ Two judgement calls I made that you may want to overrule later, both reversible:
 
 ---
 
-## THE THREE THINGS TO DO NEXT — training is paused here at your instruction
+## WHAT IS RUNNING AND WHAT IS NEXT
 
-1. **Publish the checkpoint as a GitHub Release with a sha256, and record it in
-   `weights/README.md`.** This is the single highest-value remaining action and it needs no
-   GPU. `weights/best.pt` currently exists **only on this machine** — `.gitignore` and V51 both
-   refuse `*.pt`, so it is invisible to git and absent from every clone. Until it is uploaded,
-   a reviewer who clones this repo gets a bicubic upsampler, not the model. That closes V06 and
-   V59.
-2. **Run `scripts/evaluate.py` on the trained checkpoint** to write
-   `results/baselines/final/metrics.json`. V27, V28 and V48 read that file, **not** the training
-   log — so despite the model comfortably beating every baseline, those checks are still red and
-   will stay red until the evaluation record exists. Then generate the 400 restored outputs with
-   **`--require_weights`** (without it, `inference.py` silently falls back to bicubic and would
-   ship upsampler output as model results) and attach them to the same Release for V56.
-3. **Train the U-Net baseline at the same 20k budget** (`configs/baseline_unet.yaml`, ~60–90
-   min). This is the only remaining item that needs the GPU. V28 requires beating a *learned*
-   baseline trained under an equal budget; the three baselines measured so far are classical, so
-   the rubric's like-for-like comparison is genuinely missing right now.
+**Running right now:** the U-Net learned baseline, 20,000 iterations at the *same* budget as
+NAFSR (`20260815T174833Z-baseline_unet-s42`, 2,970,401 params, seed 42, detached PID 32828). It
+is training at ~17 it/s against NAFSR's 4.65, so it finishes in ~20 minutes rather than the
+60–90 estimated — UNetSR is 0.8× the FLOPs but far less memory-bandwidth bound. It closes
+**V28** (the like-for-like learned comparison, the one genuinely missing rubric item) and
+**V45** (the ledger needs ≥ 2 rows). Two agents are working alongside it on CPU only:
+`loss-metrics` on the qualitative figures, `requirements-auditor` on a static re-audit.
 
-After those: `perf-analyst` for the runtime report (V37–V39, V43), qualitative triplets
-including the honest failure case `000984.npy` — described accurately as **broadband texture**,
-not the periodic aliasing SPEC predicted and the measurement refuted — and a `--fresh-clone`
-`--strict` run before tagging `v0.1-submittable`.
+**Then, in order:**
+1. Score the U-Net → V28, V45.
+2. `inference-engineer` on **V22**, measurement first: bf16 vs fp16 vs fp32 on quality *and*
+   throughput, before anything in `inference.py` changes.
+3. `perf-analyst` → `results/runtime_report.md` → V37–V39, V43. It needs the GPU to itself or
+   the timings are worthless.
+4. `adversarial-reviewer` (still owed from iteration 1 — it was killed before writing its file)
+   and `cleanroom-tester`.
+5. `--strict --fresh-clone` → V04, V46. Definition of Done then needs that green on **two
+   consecutive** iterations from a fresh clone in a fresh venv.
+6. Tag `v0.1-submittable` once Tier 0 is green.
+
+**Everything already delivered this iteration is on the remote**, including both binary
+artifacts: Release `artifacts-v1` carries `best.pt` (3288805 B, sha256 `9c0f39a7…`) and
+`restored_test_outputs.zip` (91069597 B, sha256 `fbdf8a65…`). Both digests were taken from the
+**served** bytes after an anonymous re-fetch with all GitHub credentials cleared, not from the
+local copies — a URL verified only from a logged-in tab is the standard way this passes on the
+author's box and fails for the evaluator.
