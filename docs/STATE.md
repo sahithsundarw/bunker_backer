@@ -200,6 +200,30 @@ Degradation simulator (measured, `data-pipeline`), whole-set over all 2800 non-v
   `--help` measurement to ~0.25 s without changing the real run by a millisecond. Gaming the
   metric, not reducing the cost. Rejected deliberately.
 
+## Backlog — the 7 remaining UNCOVERED requirements (requirements-auditor, iteration 1)
+Four of the eleven gaps were closed as V54/V55/V56/V59 (D27). These seven remain; each is a
+requirement **no check can currently turn red**, with the auditor's proposed implementation.
+
+| Ref | Requirement | Proposed check |
+|---|---|---|
+| U-1 | **F2 size-agnosticism is verified only by dead code.** The 256→512 fixture the addendum calls "the *only* guard against silently baking in 128→256" lives in `src/model.py::_selftest()`, which **nothing invokes**. UNetSR's pad/crop-back is never forwarded by any check and is the likeliest home for an off-by-`ph*s` bug. | **V61** Tier 2: for arch ∈ {NAFSR, UNetSR} × (h,w) ∈ {(128,128),(256,256),(61,97),(1,1),(130,66)} assert `(1,1,2h,2w)` and finite. FAIL if <10 combinations ran. |
+| U-5 | **The deck is entirely outside the contract** — F13 format, F14 deck-side disclosure, and the addendum's mandatory proxy sentence. Its absence is not even tracked. | **V53** Tier 4: exactly one `*_KLA_PS01.pdf`, ≤9 pages, text contains "natural photograph" and "proxy", carries the repo URL, and contains **none** of the addendum's banned phrases. |
+| U-6 | **V12 tests a helper, not the model input.** It calls `src.io_utils.load_array` and checks the return; the contract says "the tensor **entering the model**". A `clamp_` anywhere in `inference.py`'s stack/H2D/autocast path leaves V12 green. Training path untested entirely. | **V57** Tier 0, subsumes V12: forward pre-hook records min/max of the tensor actually entering the model; require ≤−0.27 and ≥2.15 to survive. |
+| U-8 | **F4 order randomisation asserted nowhere.** `GAUSS_PRE_DOWN_PROB` and the pre-downsample branch could be deleted silently; V33 compares only the variance curve, which the order hedge barely moves. | **V62** Tier 2: 2000 samples — `a`,`v` span ≥90% of their ±30% range, `sigma` attains both ~0 and >0.015, pre-down branch taken 8–22% of the time. |
+| U-9 | **F7 proxy-OOD report absent.** SPEC §10 requires it and `decisions.md` D4 accepts the duty; nothing implements or checks it. | **V63** Tier 4: `metrics_summary.md` needs a proxy-OOD heading with PSNR/SSIM/LPIPS, membership from a committed list with empty train intersection. |
+| U-10 | **Official links never re-verified.** Licence links were re-fetched and dated; SPEC §2.3's hackathon links were not. | **V58** Tier 4: `docs/link_check.md` with url / status / UTC timestamp per §2.3 URL, re-issued unauthenticated, ≤72 h stale. |
+| M-1 | `train.py --no_ledger` lets a run skip `results/experiments.csv` entirely — an escape hatch around V45 and SPEC §9's "log every run". | Restrict to smoke paths, or write a `smoke=true` row. |
+
+Also from that audit, lower severity: **M-3** `IMPORT_ALLOWLIST` contains `__future__`, which is
+not in CLAUDE.md §STYLE's "exactly eight" and is documented nowhere — correct on the merits
+(zero import cost) but an undocumented widening; add a decisions line or amend CLAUDE.md.
+**M-4** V23 scans `tree.body` only, so an import nested in `if TYPE_CHECKING:`/`try:` is
+invisible. **M-5** V31 is a substring scan of `src/metrics.py` and would not notice the README
+or deck stating *different* settings, which §15 requires be stated. **M-6** V30 passes if
+`np.load` appears anywhere in `evaluate.py` — near-vacuous, though the implementation is in
+fact correct. **LOW** `weights/_probe.pt` (3.29 MB untracked scratch) will be mistaken for a
+checkpoint by a reader; delete it.
+
 ## Backlog (medium/low findings, no action yet)
 - `results/restored_test_outputs/` still empty. Blocked on B9 + a trained model. V13 red.
 - No `--fresh-clone` run performed this iteration; V04 and V46 red as a result.
