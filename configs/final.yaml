@@ -1,6 +1,6 @@
-# THE SUBMITTED CONFIG. This is the config that produced weights/best.pt.
-# SPEC 9 requires it to sit beside the checkpoint AND to be embedded inside the checkpoint
-# dict, so weights can never be paired with the wrong architecture (V35). V34 runs
+# PHASE-A NAFSR CONFIG. The promoted checkpoint now uses configs/backtrack_best.yaml; its
+# exact model config is also embedded inside weights/best.pt so architecture and weights
+# cannot be separated (V35). V34 still runs this neural config for the deterministic smoke.
 # `train.py --config configs/final.yaml --seed 42` twice and requires identical losses.
 #
 # Owner: model-core (model block) / trainer (optim, train blocks) / data-pipeline (data).
