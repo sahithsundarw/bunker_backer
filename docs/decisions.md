@@ -998,3 +998,139 @@ purpose.
 Supersedes D17. **D17 is retained unedited** as the record of the earlier decision — this file
 is append-only, and a superseded decision with its reasoning intact is more useful to a
 reviewer than a rewritten one. See `docs/BLOCKERS.md` B9.
+
+## D24 — V33 acceptance moved into the pinned verifier; thresholds tightened; verifier made side-effect-free
+
+**Authored by the main session, not `docs-scribe`** (which owns this file). No subagent was
+alive at the time — a session usage limit had killed all four — and V00 requires the new
+verifier digest to appear here or it fails by design. Append-only respected; `docs-scribe`
+has been notified.
+
+`scripts/verify_all.py` sha256 is now
+`b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2`
+(prior `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`).
+
+All three changes are **strengthenings**, made under the human's standing authorisation
+("any change that makes a check STRICTER — log as human-authorised, re-pin"). They respond to
+findings F2 and F3 from `reviews/ml-skeptic-1.md`.
+
+### 1. The governance hole (ml-skeptic F2) — the real problem
+
+`check_V33` did no thresholding of its own. It called `src.degrade.fidelity_report()` and
+asserted `res["pass"]`. **Every threshold lived in `src/degrade.py::FIDELITY_TOLERANCE` — a
+file owned by `data-pipeline` and not covered by `docs/VERIFIER_SHA256`, which pins only
+`scripts/verify_all.py` and `docs/VERIFICATION_CONTRACT.md`.**
+
+So a future iteration could have widened the acceptance bar until V33 went green **without
+touching a pinned file and without tripping Prime Directive 1**. The check was, in effect,
+grading its own homework: the subject under test owned the pass mark.
+
+Fix: the acceptance thresholds now live in `V33_THRESHOLDS` / `V33_STD_RATIO_RANGE` inside
+the pinned verifier, and are applied **on top of** the module's own `pass` flag. Acceptance is
+the AND of both, so this can only ever be stricter than what it replaced.
+
+### 2. Threshold tightened
+
+ml-skeptic measured 97% headroom on `gain_over_spec_2par_worst_bin` at the module's limit of
+3.0 and correctly called it near-vacuous. Observed 5.9169 (seed 0) and 5.9313 (seed 7), and
+the whole metric set is stable to <0.003 across noise seeds. The verifier-owned limit is
+**4.5**, leaving 24% headroom — still an order of magnitude more tolerance than the measured
+seed noise, while no longer passing anything that happens to be positive.
+
+Verifier-owned bar, with the measured value at pinning time:
+
+| metric | measured | verifier limit | headroom |
+|---|---|---|---|
+| `mean_abs_rel_err` | 0.38849 | ≤ 0.50 | 29% |
+| `mean_abs_rel_err_x_ge_0p1` | 0.27639 | ≤ 0.35 | 27% |
+| `resid_std_ratio` | 1.05540 | [0.90, 1.15] | 9% up |
+| `binned_r2` | 0.98038 | ≥ 0.97 | 1.1% |
+| `gain_over_spec_2par` | 1.89430 | ≥ 1.5 | 26% |
+| `gain_over_spec_2par_worst_bin` | 5.91693 | **≥ 4.5** (was 3.0) | 24% |
+
+### 3. The verifier no longer mutates what it verifies (ml-skeptic F3)
+
+`fidelity_report()` writes `results/degrade_fidelity/degrade_fidelity.json` unconditionally,
+regardless of `make_figure=False`. Because `check_V33` calls it live whenever the dataset is
+present, **running the verifier left `git status` dirty** — in direct conflict with Definition
+of Done criterion 5 ("git status is clean and the working tree equals the last verified
+commit"). Worse, the committed *evidence* for V33 was silently overwritten by whatever ran
+last, so the artifact could never disagree with the code and was not independent evidence at
+all.
+
+`check_V33` now snapshots the committed artifact and restores it byte-for-byte in a `finally`
+block. Verified: after a full V33 run, `git status --porcelain` shows only the verifier edit
+itself. The underlying unconditional write in `src/degrade.py` is `data-pipeline`'s to fix and
+is recorded as a follow-up; the verifier-side guard holds regardless of whether that lands.
+
+### Still open from this review, not fixed here
+
+- `scripts/evaluate.py::ANCHOR_TOL` has the same unpinned-threshold shape as F2. Logged, not
+  yet closed.
+- **ml-skeptic F1 (HIGH) is a retraction, not a fix:** the synthetic-LR clip-tail statistics
+  were measured on an artificial test tile and compared against real-dataset percentages —
+  two different corpora — and the conclusion drawn was directionally wrong. See D25.
+
+## D25 — RETRACTION: the synthetic-LR clip-tail comparison was invalid, and its conclusion was backwards
+
+**Authored by the main session** for the same reason as D24. Records a claim that was wrong
+and must not be repeated.
+
+### What was claimed
+
+`data-pipeline` reported, and the iteration-1 commit message repeated, that synthetic LR shows
+"**1.33% of pixels > 1.0 and 0.0084% < 0**, against real NoisyLR's 3.03% / 0.28%", and
+concluded the simulator was "**2.3× less likely to exceed 1.0 than real**" — i.e. that it
+under-noised the bright tail.
+
+### Why it was invalid
+
+The 1.33% / 0.0084% figures come from `selftest_paired_crop()`, which computes them on an
+**artificial test image** — `sin(2π(24x+16y)/N) + 0.6·cos(...) + 2·(lowpass random field)`,
+min-max normalised, over 64 patches. They are not a measurement of the dataset at all. They
+were then compared against **real-dataset** percentages. Two different corpora, one comparison.
+
+The quoted "real" pair is not attributable either. Measured real fractions above 1.0 / below 0:
+all-3200 3.1085% / 0.2849%; non-val 3.1437% / 0.2577%; val 2.8619% / 0.4749%; `test_NoisyLR`
+3.0801% / 0.6601%. The 0.28% matches all-3200; **the 3.03% matches none of them.**
+
+### The corrected measurement
+
+Re-derived on the identical corpus the fidelity report uses — all 2800 non-val train pairs,
+45,875,200 px, `degrade_fitted`, seed 1:
+
+| | frac > 1.0 | frac < 0.0 | range |
+|---|---|---|---|
+| synthetic | **3.2523%** | **0.6186%** | [−0.1639, **1.7177**] |
+| real (train/NoisyLR, non-val) | **3.1437%** | **0.2577%** | [−0.2786, **2.0735**] |
+
+Cross-checked through the training path `degrade()` on a strided subset: 3.3524% / 0.9807%.
+Clean LR with no noise at all: 0.0474% / 0.0296% — so the tail is essentially all noise.
+
+**The conclusion was directionally inverted.** The simulator does **not** under-produce the >1
+tail; it matches it (3.25% vs 3.14%). It **over**-produces the <0 tail by ~2.4× (0.62% vs
+0.26%).
+
+### The real finding underneath, which is worth keeping
+
+The simulator under-produces the **extreme** upper tail: synthetic max **1.7177** against real
+max **2.0735** on the same 2800 GT images (dataset-wide real max 2.1580). Gaussian shot+speckle
+has no mass out at 4–5σ the way the real sensor does.
+
+That is a genuine domain gap and it matters more than the retracted claim did, because this
+project's entire transfer argument rests on the degradation rather than on content (D16). A
+model never shown inputs above ~1.72 in training will meet them in the released test data,
+which reaches 2.158. **Action for the hardening loop:** extend the noise model's upper tail
+(e.g. an occasional heavy-tailed / impulse component) and measure whether it helps or hurts on
+the held-out split, rather than assuming. Do not simply widen σ — that would move the whole
+distribution, not the tail.
+
+**Confirmed good, independently:** `src/degrade.py` genuinely does not clip. Verified
+empirically — synthetic output spans [−0.1639, 1.7177].
+
+### Process note
+
+This is the second fabricated-or-unfounded number caught in iteration 1 (the first was
+`model-core`'s benchmark table, D19–D21). Both were caught by re-derivation rather than by
+review of the prose. That is the argument for keeping `ml-skeptic` in every review wave and for
+the standing rule that a number without a measurement behind it does not go in the repo.

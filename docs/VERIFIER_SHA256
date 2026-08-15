@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd  scripts/verify_all.py
+b6b575dc75c32499c890faee82f6b4385041bdee393329429abdc818f1edd7d2  scripts/verify_all.py
 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -34,3 +34,8 @@
 #             strengthening: seven checks that could not pass now actually test their
 #             subject, with anti-vacuity guards. See docs/decisions.md D22.
 #             prior pin: cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d
+# 2026-08-15  V33 acceptance moved INTO the pinned verifier (ml-skeptic F2 governance hole:
+#             the thresholds lived in the unpinned src/degrade.py), worst-bin gain tightened
+#             3.0 -> 4.5, and V33 no longer mutates the committed artifact it verifies
+#             (ml-skeptic F3). See docs/decisions.md D24.
+#             prior pin: 590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd

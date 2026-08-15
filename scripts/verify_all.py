@@ -1110,12 +1110,37 @@ def check_V32(ctx: Ctx) -> CheckResult:
                        {"in_shape": [1, 1, 32, 32], "out_shape": list(y.shape)})
 
 
+#: V33's acceptance thresholds, owned by the VERIFIER and therefore covered by
+#: docs/VERIFIER_SHA256. They were previously read only from src/degrade.py's own
+#: FIDELITY_TOLERANCE, which is not a pinned file — so a future iteration could have widened
+#: the bar to turn V33 green without touching anything pinned and without tripping Prime
+#: Directive 1. That governance hole was reported by ml-skeptic (iteration 1, finding F2).
+#: The module's own `pass` flag is still required; these are applied ON TOP of it, so the
+#: check is the AND of both and can only ever be stricter than before.
+#:
+#: Measured values at the time of pinning (2800 non-val pairs, 45,875,200 px), stable to
+#: <0.003 across noise seeds (seed 0 vs seed 7):
+#:   mean_abs_rel_err 0.38849 | _x_ge_0p1 0.27639 | resid_std_ratio 1.05540
+#:   binned_r2 0.98038 | gain_over_spec_2par 1.8943 | gain_worst_bin 5.9169
+V33_THRESHOLDS: dict[str, tuple[str, float]] = {
+    "mean_abs_rel_err": ("<=", 0.50),
+    "mean_abs_rel_err_x_ge_0p1": ("<=", 0.35),
+    "binned_r2": (">=", 0.97),
+    "gain_over_spec_2par": (">=", 1.5),
+    # Tightened from the module's 3.0 to 4.5. ml-skeptic measured 97% headroom at 3.0 and
+    # called it near-vacuous; the observed 5.917/5.931 leaves 24% headroom at 4.5, which
+    # still tolerates seed noise an order of magnitude larger than what was measured.
+    "gain_over_spec_2par_worst_bin": (">=", 4.5),
+}
+V33_STD_RATIO_RANGE = (0.90, 1.15)
+
+
 def check_V33(ctx: Ctx) -> CheckResult:
     """Degradation simulator fidelity, plus the mandatory evidence figure.
 
-    The tolerance lives in src/degrade.py next to the measurement it came from; this
-    check asserts the report passes it, that the claim is not vacuous, and that the
-    figure the contract requires actually exists on disk.
+    Acceptance is the AND of the module's own `pass` flag and the verifier-owned
+    thresholds above, so widening src/degrade.py's FIDELITY_TOLERANCE alone can no longer
+    turn this check green.
     """
     r = _needs(ctx, "V33", "src/degrade.py")
     if r:
@@ -1139,7 +1164,18 @@ def check_V33(ctx: Ctx) -> CheckResult:
     root = _data_root(ctx)
     if root is not None:
         # Recompute live against the real pairs -- far stronger than trusting an artifact.
-        res = fn(str(root), make_figure=False)
+        # fidelity_report() writes results/degrade_fidelity/degrade_fidelity.json
+        # unconditionally, which would leave the tree dirty and break Definition-of-Done
+        # criterion 5 ("git status is clean"). Reported by ml-skeptic (iteration 1, F3).
+        # The verifier must not mutate the repository it is verifying, so snapshot the
+        # committed artifact and restore it byte-for-byte afterwards.
+        _art = ctx.p("results", "degrade_fidelity", "degrade_fidelity.json")
+        _before = _art.read_bytes() if _art.exists() else None
+        try:
+            res = fn(str(root), make_figure=False)
+        finally:
+            if _before is not None and _art.exists() and _art.read_bytes() != _before:
+                _art.write_bytes(_before)
         source = "recomputed live"
     else:
         # No dataset on this machine (e.g. a fresh clone). Fall back to the committed
@@ -1166,6 +1202,26 @@ def check_V33(ctx: Ctx) -> CheckResult:
         return CheckResult("V33", FAIL,
                            "synthetic degradation does not match the real variance-vs-intensity "
                            "curve within the documented tolerance", res)
+    # Independent, verifier-owned acceptance. Applied on top of the module's own flag.
+    breaches = []
+    for key, (op, lim) in V33_THRESHOLDS.items():
+        val = met.get(key, res.get(key))
+        if val is None:
+            breaches.append(f"{key} not reported")
+            continue
+        if op == "<=" and not float(val) <= lim:
+            breaches.append(f"{key}={float(val):.5f} > {lim}")
+        elif op == ">=" and not float(val) >= lim:
+            breaches.append(f"{key}={float(val):.5f} < {lim}")
+    ratio = met.get("resid_std_ratio", res.get("resid_std_ratio"))
+    if ratio is None:
+        breaches.append("resid_std_ratio not reported")
+    elif not (V33_STD_RATIO_RANGE[0] <= float(ratio) <= V33_STD_RATIO_RANGE[1]):
+        breaches.append(f"resid_std_ratio={float(ratio):.5f} outside {V33_STD_RATIO_RANGE}")
+    if breaches:
+        return CheckResult("V33", FAIL,
+                           f"verifier-owned fidelity thresholds breached: {breaches}",
+                           {"breaches": breaches, **{k: met.get(k) for k in V33_THRESHOLDS}})
     ev = {k: v for k, v in res.items() if not isinstance(v, (list, dict))}
     ev.update({k: v for k, v in met.items() if not isinstance(v, (list, dict))})
     ev["figure"] = fig
