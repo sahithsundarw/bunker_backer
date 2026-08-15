@@ -4,182 +4,158 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** end of iteration 1. **NOTHING IS RUNNING.** No agent, no training job, no
-background shell. The user paused work here deliberately and will resume training later.
+**Written at:** iteration 2, mid-flight. **Last verified commit:** `3e230c6`.
+**Verifier SHA:** `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b` — matches
+the pin, V00 green.
 **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous
-clone verified with credentials stripped).
-**Verifier SHA:** `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b`
-(matches the pin in `docs/VERIFIER_SHA256`; V00 passes).
+clone verified).
 
-## ⛔ FIRST ACTION IN A NEW SESSION: commit and push
-Documentation and code updates are **complete on disk but UNPUSHED** — the previous session
-lost shell access to a safety classifier partway through. Nothing is half-written; the tree is
-consistent. Just:
+## Tally: PASS 47 / FAIL 10 of 57
 
-    cd C:\Users\sahit\OneDrive\Desktop\semi
-    git add -A
-    git status --short          # sanity: no *.pt, no *.npy outside sample_inputs/
-    git commit -F "C:\Users\sahit\.claude\jobs\350d944b\tmp\commit_msg.txt"
-    git push origin main
+Last full `--strict` run measured **PASS 43 / FAIL 14** at `c209cd2`. Four have gone green
+since, each confirmed by a targeted re-run: **V00** (see the CRLF note below), **V27**, **V48**,
+**V56**. Nothing has gone red. 47 + 10 = 57.
 
-If that message file is gone (job tmp is cleaned on job deletion), write your own — the full
-content is in `docs/decisions.md` D28 and D29.
+**FAIL (10):** V04 V22 V28 V37 V38 V39 V43 V45 V46 V49
 
-## Tally: PASS 41 / FAIL 12 of the *old* 53, measured BEFORE the last four checks were added
-**Do not trust that number — re-run the verifier.** It predates: the trained model, four added
-checks (V54 V55 V56 V59 → the suite is now **57**), the V10 strengthening, and the V55 SSRF
-fix. `py -3.12 scripts\verify_all.py --strict` is the only authority.
+| Check | Why it is red | Owner of the fix |
+|---|---|---|
+| **V22** | **The only genuine engineering defect left.** See its own section below. | `inference-engineer`, needs GPU |
+| V28 | needs a *learned* baseline at equal budget | U-Net run **in flight now** |
+| V45 | ledger needs >= 2 data rows; has 1 | same U-Net run closes it |
+| V49 | `results/qualitative/` empty | `loss-metrics`, dispatched |
+| V37 V38 V39 V43 | no `results/runtime_report.md` exists | `perf-analyst`, needs exclusive GPU |
+| V04 V46 | require `--fresh-clone`, not yet run | main session, after the above |
 
-Known state at the last full run: Tier 1 fully green; Tier 0 was 15/16 with only V06 short.
-V25 — **the hard gate — CLEARED at 43.3295 dB** against a 40 dB bar, which is what makes every
-quality number since then trustworthy.
+## ⚙ IN FLIGHT RIGHT NOW
+- **U-Net baseline training**, PID **32828**, detached (NOT a tool-managed background job, so
+  the 10-minute Bash timeout cannot kill it). Run id `20260815T174833Z-baseline_unet-s42`,
+  UNetSR 2,970,401 params, 20,000 iters, seed 42, `--out weights/baseline_unet.pt`.
+  Log: `<scratchpad>/unet_train.log`, stderr `<scratchpad>/unet_train.err`. Expect 60-90 min.
+  **`--out` matters: without it this run would overwrite `weights/best.pt`.**
+- `loss-metrics` agent building `results/qualitative/` (CPU-only, told not to touch the GPU).
+- `requirements-auditor` agent doing a static re-audit into `reviews/requirements-audit-2.md`.
 
-## ⚠ NINE of the original 53 checks were inert placeholders
-V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact could
-ever turn green** — they looked identical before and after a real defect. All nine now test
-their subject with anti-vacuity guards (D22, D26). A further **eleven requirements had no check
-at all**; four were added as V54/V55/V56/V59 (D27) and the remaining seven are listed in the
-backlog section below. Read any historical tally with this in mind: the "44 FAIL" at iteration
-0 looked like honest red while a fifth of the suite was measuring nothing.
+## What iteration 2 has banked so far
 
-## Agents — all COMPLETE, do not re-dispatch
-`inference-engineer`, `model-core`, `data-pipeline`, `loss-metrics`, `docs-scribe`, `trainer`,
-`ml-skeptic`, `requirements-auditor`.
-**`adversarial-reviewer` never delivered** — it was killed by a usage limit before writing its
-file, so `reviews/adversarial-1.md` does not exist. It is the one review-wave agent still owed,
-and it is worth re-running: it attacks `inference.py` the way a hostile evaluator would.
-Surviving reviews: `reviews/ml-skeptic-1.md`, `reviews/requirements-audit-1.md` (note
-`reviews/` is gitignored, so these are local-only).
+**1. The checkpoint is deliverable (V59).** Release `artifacts-v1`, asset `best.pt`,
+3288805 B, sha256 `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313`.
+The digest is of the **served** bytes — re-fetched with `GITHUB_TOKEN`/`GH_TOKEN` cleared,
+HTTP 200. D30. Route A (committing the 3.14 MiB file) was rejected: it fits V51's caps, but
+taking it means editing `.gitignore` and V51 to admit a `.pt`.
 
-## ⛔ SESSION HALTED — shell execution blocked, work left UNCOMMITTED
+**2. The evaluation record exists (V27, V48).** `results/baselines/final/metrics.json`:
 
-A safety classifier began blocking **every** Bash call partway through iteration 1, including
-read-only ones. It is triggered by conversation content and fires for the remainder of that
-session, so it cannot be worked around from inside it. Resume in a **fresh session**, or in
-the default (non-auto) permission mode.
+    final   n=400   psnr 28.7865 +/- 4.5329   ssim 0.78287 +/- 0.14169   lpips 0.25324 +/- 0.13193
 
-### UNCOMMITTED work sitting in the tree — do this FIRST
-1. `scripts/verify_all.py` carries a **security fix** to V55 (SSRF: the GitHub host check was
-   an unanchored `re.search`, so `https://evil.example.com/github.com/attacker/payload.git`
-   parsed as owner `attacker` / repo `payload`). Fixed via `_parse_github_remote()` using
-   `urllib.parse.urlsplit` with an exact host match. **Verified against 8 bypass vectors, all
-   correct.**
-2. `docs/VERIFIER_SHA256` is already re-pinned to
-   `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b`.
-3. `docs/decisions.md` entry **D28 is already appended** (done via file edit, since shell
-   execution was blocked). Append-only was respected — nothing above it was touched. So the
-   three files are now mutually consistent and V00 should pass.
-4. **All that remains is `git add` + `git commit` + `git push`** of exactly:
-   `scripts/verify_all.py  docs/VERIFIER_SHA256  docs/decisions.md`
-   Suggested subject:
-   `fix(V55): SSRF - GitHub host validation was an unanchored substring match`
-   Verify first with `py -3.12 scripts\verify_all.py --only V00,V55` — both should be green.
+V27 passes by **+5.1341 dB** over bicubic, clearing its two-standard-error bar rather than
+merely being positive.
 
-### The training run — ✅ COMPLETE, exit 0
-`train.py --config configs/final.yaml --seed 42 --iters 20000` finished in **1:11:41** at
-4.65 it/s, no OOM. Ledger row `20260815T062831Z-final-s42` appended to
-`results/experiments.csv`. `weights/best.pt` holds the EMA weights at the best validation PSNR.
+**3. The 400 restored outputs are published (V56).** Produced by the shipped `inference.py`
+with `--require_weights` (log line `loaded weights/best.pt (ema weights)`), 400 in 20.09 s
+(19.9 img/s), cuda/bf16/batch 32, 0 unreadable, 0 write errors. All 400 re-loaded from disk:
+float32, ndim 2, (256,256), finite, global range exactly [0.0, 1.0], filenames identical to the
+inputs — **0 violations**. Archive `restored_test_outputs.zip`, 91069597 B, sha256
+`fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`, also verified anonymously
+at HTTP 200. `manifest.json` + `sha256sums.txt` committed.
 
-**Final validation, EMA, full 400-image committed split, scored from reloaded `.npy` on disk:**
+## ⚠ THREE NUMBERS THAT WERE WRONG IN THE DOCS — use these instead
 
-    PSNR 28.7851 +/- 4.5324    SSIM 0.78279 +/- 0.14169    LPIPS 0.25233    n=400
+1. **Quote `28.7865 / 0.78287 / 0.25324`, not `28.7851 / 0.78279 / 0.25233`.** The old triple
+   came from `train.py`'s in-run validation. The new one is `scripts/evaluate.py` scoring
+   float32 `.npy` **reloaded from disk** after clipping. Fourth-decimal differences, but the
+   evaluation record is the authority and it is what V27/V48 read.
+2. **The 20k NAFSR run took `1:11:43`, not `1:11:41`.** `results/experiments.csv` records
+   `wall_clock_s = 4303.5`. Caught by review.
+3. **Still never quote `30.3944`** — that is the 100-image checkpoint-selection subset.
 
-Beats every baseline on all three metrics: **+5.13 dB over bicubic** (the floor V27 formally
-requires) and **+2.51 dB over non-local means** (the honest bar), with LPIPS improving from
-0.409-0.426 down to 0.252.
+## V22 — the one real defect left, and how NOT to fix it
 
-That LPIPS direction is the important part. Across the classical baselines PSNR/SSIM and LPIPS
-pulled in *opposite* directions — NLM won fidelity by 2.6 dB while scoring the worst LPIPS,
-because it over-smooths. Improving both simultaneously is evidence the balanced loss is working
-rather than the model buying PSNR at the perceptual metric's expense.
+    V22  FAIL  bf16 vs fp32 diverge: mean 5.99e-04, max 1.27e-02
 
-**Do not confuse two numbers:** training logged `psnr 30.3944` at iteration 20000, but that is
-the **100-image subset** used for in-run checkpoint selection. The reportable figure is the
-**full 400-image split, 28.7851**. Always quote the lower one.
+Tolerance is mean < 1e-3 **and** max < 1e-2. **The mean passes comfortably; only the max
+fails**, at 1.27x the limit. This is the failure STATE predicted would appear the moment a real
+checkpoint existed — previously it read `0.00e+00` only because both precision arms took the
+bicubic fallback.
 
-### What the checkpoint still needs before any of it counts
-1. `scripts/evaluate.py` must write `results/baselines/final/metrics.json` — **V27, V28 and V48
-   read that file, not the training log.** Until it exists those checks stay red no matter how
-   good the model is.
-2. `weights/best.pt` exists ONLY on this disk. `.gitignore` and V51 both ban `*.pt`, so it is
-   invisible to git — exactly what V59 detects. It is not delivered until it is a GitHub
-   Release asset with a published sha256 in `weights/README.md`.
-3. The 400 restored test outputs must be generated with **`--require_weights`**, or
-   `inference.py` silently falls back to bicubic and ships upsampler output as model results.
+Cause is bf16's 8 mantissa bits: at an output near 1.0 the representable step is ~2^-8 = 0.0039,
+and error accumulates across 16 blocks. Remedies, in preference order:
 
-## THE NEXT CONCRETE ACTION (in order)
-0. **Commit and push** — see the block at the top. Nothing else should happen first.
-1. `py -3.12 scripts\verify_all.py --strict` to get a real tally against the 57-check suite.
-   Expect V22 to be newly red (see the warning below) — that is anticipated, not a surprise.
-2. **Publish the checkpoint as a GitHub Release with a sha256** and record URL + digest in
-   `weights/README.md`. Highest value, needs no GPU. Closes V06 and V59. Until this happens a
-   reviewer who clones the repo gets a bicubic upsampler rather than the model.
-3. `py -3.12 scripts\evaluate.py` on the trained checkpoint so
-   `results/baselines/final/metrics.json` exists — **V27, V28 and V48 read that file, not the
-   training log.** Then generate the 400 restored outputs with **`--require_weights`** and
-   attach them to the same Release (V56).
-4. **Tag `v0.1-submittable` and push the tag** as soon as Tier 0 is green, so a working
-   fallback always exists on the remote.
-5. Train the U-Net baseline at the **same 20k budget**
-   (`configs/baseline_unet.yaml`, ~60–90 min) — V28 needs a *learned* baseline at equal budget;
-   the three measured baselines are classical.
-6. Dispatch `perf-analyst` (owns `scripts/benchmark_runtime.py`, `results/runtime_report.md`)
-   for V37 V38 V39 V43; re-run `adversarial-reviewer`, which never delivered; run
-   `cleanroom-tester` once the README is final.
-7. Then the remaining Tier 2–4 items and the §3 hardening loop. Model quality first, throughput
-   second.
+1. Keep the numerically sensitive ops (LayerNorm / SCA / SimpleGate) and/or the model tail in
+   fp32 under autocast.
+2. Switch the CUDA default to **fp16** — 10 mantissa bits vs bf16's 8, same tensor-core
+   throughput, and our activation scale carries no overflow risk.
 
-## Standing authorisation — what I may and may not do
-**Pre-authorised:** any change making a check STRICTER (log + re-pin); new V-checks for defects
-reviewers find; installing packages, venvs, training runs, GitHub Releases, commit and push;
-rejecting an experiment that does not improve a measured number (add it to Do-NOT-retry with the
-measurement); architecture/hyperparameter/augmentation/loss choices within SPEC §7-§9 guided by
-measurement.
+**Widening V22's tolerance is NOT an option** — that is the Prime Directive 1 violation, and
+the contract's own wording ("guards against a silently broken AMP path") is the reason.
+
+**Open question worth measuring while fixing it:** the shipped restored outputs were generated
+in **bf16**, but the 28.7865 dB evaluation record was computed in **fp32**
+(`make_baselines.py` runs the model directly, without autocast). Nobody has measured what bf16
+costs in dB. Measure bf16 vs fp16 vs fp32 PSNR/SSIM/LPIPS on the val split before choosing the
+fix, and if bf16 costs real quality, regenerate the published outputs.
+
+## ⚠ NEW GOTCHA: V00 can go red from line endings alone
+
+V00 hashes `scripts/verify_all.py`'s **raw** bytes. `.gitattributes` says `* text=auto eol=lf`
+and the committed blob is LF, but an editing tool had rewritten the working copy as **CRLF**,
+so the on-disk hash was `966431a4...` against a pin of `4e78dbca...` and V00 failed. **Nothing
+was tampered with and the repo was never wrong** — `git diff` was empty. Fixed by rewriting the
+working copies of 10 tracked text files CRLF -> LF; `git add -A` then staged **zero** content
+changes, proving it was a working-copy artifact only. If V00 goes red, check line endings
+before believing anything else. This is `docs/BLOCKERS.md` B3 biting in a new way: B3
+anticipated it in a fresh clone, not from a local editor.
+
+## Agents — status
+COMPLETE, do not re-dispatch: `inference-engineer`, `model-core`, `data-pipeline`,
+`loss-metrics` (iter 1), `docs-scribe`, `trainer`, `ml-skeptic`, `requirements-auditor` (iter 1).
+**Still owed: `adversarial-reviewer`** — killed by a usage limit before it wrote its file, so
+`reviews/adversarial-1.md` does not exist. It needs the GPU, so it is queued behind training.
+Also queued: `perf-analyst` (exclusive GPU), `cleanroom-tester` (after the README is final).
+
+## Remaining plan, in order
+1. U-Net finishes -> score it -> **V28**, **V45**.
+2. `inference-engineer` on **V22**, measurement-first (bf16 vs fp16 vs fp32 quality AND
+   throughput) before changing the default.
+3. `perf-analyst` -> `results/runtime_report.md` -> **V37 V38 V39 V43**. Must have the GPU to
+   itself or the timings are worthless.
+4. `adversarial-reviewer` and `cleanroom-tester`.
+5. `--strict --fresh-clone` -> **V04 V46**. Definition of Done needs this green on **two
+   consecutive** iterations, from a fresh clone in a fresh venv.
+6. Tag `v0.1-submittable` once Tier 0 is green.
+7. Then the LOOP_PROMPT section 3 hardening loop. Quality first, throughput second.
+
+## Standing authorisation — unchanged
+**Pre-authorised:** making a check STRICTER (log + re-pin); new V-checks for reviewer findings;
+installing packages, venvs, training runs, GitHub Releases, commit and push; rejecting an
+experiment that does not improve a measured number (log it in Do-NOT-retry with the number);
+architecture/hyperparameter/loss choices within SPEC sections 7-9 guided by measurement.
 **NEVER without the human:** weaken, delete, skip or widen the tolerance of any check; edit
-`VERIFICATION_CONTRACT.md` except to add or tighten; train/fit anything on `test_NoisyLR`;
-download DIV2K or attempt source identification; commit dataset, weights, or anything over the
-V51 caps. **If I find myself reasoning toward any of these because it would unblock progress:
-STOP, write it to BLOCKERS.md, work something else. That reasoning is the signal, not the
-justification.**
-
-## Training guidance in force
-On CUDA OOM: halve batch size and retry up to three times, logging each. Never stall. The GPU is
-an RTX 4060 with 8 GB. Run the SPEC §16 gates in order. The bicubic baseline is already
-established (23.6524 dB), so every later number has a floor.
+`VERIFICATION_CONTRACT.md` except to add or tighten; train/fit on `test_NoisyLR`; download DIV2K
+or attempt source identification; commit dataset files, weights, or anything over the V51 caps.
+**If I reason toward any of these because it would unblock progress: STOP, write it to
+BLOCKERS.md, work something else. That reasoning is the signal, not the justification.**
 
 ## Things a fresh session would otherwise rediscover the hard way
-- **`pip install lpips` silently replaces the CUDA torch with a CPU-only build.** Verified
-  twice. Reinstall from the cu128 index afterwards and re-check `torch.cuda.is_available()`.
-  Good state: torch 2.11.0+cu128, torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
-- **`scripts/verify_all.py` was edited four times this iteration** (D22 seven placeholders,
-  D24 V33 governance, D26 V25/V34, D27 four added checks, D28 the SSRF fix). Any further edit
-  needs its own `decisions.md` entry **and** a re-pin, or V00 fails by design.
-- **A new V-check is code like any other.** V54 fired a false positive on its first run and
-  V55 shipped an SSRF hole — both in checks written the same day. Verify a new absence-check
-  with a **negative control**: inject the defect, confirm it goes red, remove it, confirm
-  green. A check never seen to fail is not known to work.
+- **`pip install lpips` silently replaces CUDA torch with a CPU-only build.** Verified twice.
+  Reinstall from the cu128 index and re-check `torch.cuda.is_available()`. Good state:
+  torch 2.11.0+cu128, torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
+- **Tool-managed background Bash caps at a 10-minute timeout.** A 60-90 minute training run
+  launched that way gets killed. Launch it detached (PowerShell `Start-Process ... -PassThru`
+  with redirected stdout/stderr) and watch the log.
+- **`train.py` defaults `--out` to `weights/best.pt`.** Any baseline run without an explicit
+  `--out` destroys the shipped checkpoint.
+- **A new V-check is code like any other.** V54 shipped a false positive and V55 an SSRF hole,
+  both the day they were written. Verify every absence-check with a **negative control**.
+  Done for V56 this iteration: stripping `--require_weights` from the manifest turned it red,
+  `n_files=399` turned it red, and the byte-exact restore turned it green again.
 - **`sample_inputs/` is populated and committed** (6 real inputs, 393,984 B). `.gitignore`
-  carries explicit negations for it, for `results/metrics_summary.md` and for
-  `results/degrade_fidelity/`. Do not "tidy up" those rules — three checks read those paths
-  from a fresh clone.
-- **B9 is RESOLVED** (GitHub Release + sha256, D23). V13 passes. Do **not** revisit it by
-  loosening V51 to admit a committed `.npz` — that route was considered and rejected because
-  it would gut the size caps added one commit earlier.
+  carries deliberate negations for it, for `results/metrics_summary.md`,
+  `results/degrade_fidelity/` and `results/restored_test_outputs/`. Do not "tidy up" those
+  rules — several checks read those paths from a fresh clone.
+- **V23 is intermittent on a loaded box** — measured 1.60 s this iteration against a 3.0 s
+  budget, but 3.14 s once under load. The entire budget is `import torch`.
 - **Nothing is currently blocked on the human.** `docs/BLOCKERS.md` has no open items.
-- **V22 is expected to go red the moment a real checkpoint exists.** It currently reads
-  `mean 0.00e+00` only because there are no weights, so both precision arms take the bicubic
-  fallback. Measured against an untrained NAFSR: bf16-vs-fp32 mean **1.107e-03** against
-  V22's 1e-3 limit — a coin flip. Remedies in preference order: (a) re-measure with the
-  TRAINED checkpoint, since random init is a worst case; (b) keep LayerNorm/SCA/SimpleGate in
-  fp32; (c) switch the CUDA default to fp16 (10 mantissa bits vs bf16's 8, same tensor-core
-  throughput, no overflow risk at our activation scale). **Widening V22's tolerance is NOT an
-  option** — that is precisely the PD1 violation.
-- **V23 is intermittent on a loaded box.** Measured `inference.py --help` at 2.35-2.48 s
-  against a 3.0 s Tier-0 budget, but one run hit 3.14 s while sibling agents loaded the
-  machine (bare `import torch` hit 5.3 s in the same conditions). The entire budget is
-  `import torch`; inference.py's marginal cost above it is ~0. Deferring the torch import into
-  `main()` would cut the `--help` measurement to ~0.25 s **without changing the real run by a
-  millisecond** — that is gaming the metric, and it was deliberately not done.
 
 ---
 
