@@ -1,109 +1,162 @@
 # MORNING REPORT
 
-Written for a human returning to this project cold, and for a fresh agent session with no
-memory. Updated continuously **before** each step, not after, so that if the session is cut
-off mid-operation this file still describes what was in flight.
+**Assume you read only this file.** Kept current as work proceeds, not written at the end.
+Operational resume point is `docs/STATE.md` "RESUME HERE".
 
-**Read `docs/STATE.md` "RESUME HERE" first.** This file is the narrative; that one is the
-operational resume point.
+**Repo:** https://github.com/sahithsundarw/semicon-kla-image-restoration — public, anonymous
+clone verified with credentials suppressed.
 
 ---
 
-## Where the project stands
+## CHECK TALLY
 
-**Repo is live and public:** https://github.com/sahithsundarw/semicon-kla-image-restoration
+| | start of iteration 1 | now |
+|---|---|---|
+| PASS | 9 | **35** |
+| FAIL | 44 | **18** |
+| SKIP | 0 | 0 |
 
-Verified, not assumed:
-- `gh repo view` reports `"visibility": "PUBLIC"`, `"isPrivate": false`.
-- An **unauthenticated** clone succeeds — run with `GIT_TERMINAL_PROMPT=0`,
-  `GIT_ASKPASS=/bin/false`, `credential.helper=` and global/system git config nulled, so it
-  is not passing on cached credentials. Exit 0, 71 files.
-- Push size **6.4 MiB**. The instruction was to stop and escalate above ~10 MB; well under.
+Tier 1 is **fully green, 9/9**. Tier 0 is 12/16.
 
-**Nothing is trained yet.** There is no checkpoint, no metric number, and no restored test
-output. Iteration 1 built the machinery, not the model. Any results table you see should be
-marked not-yet-measured; if you find one with numbers in it, distrust it and re-derive.
+Every remaining failure is honest and traceable to a missing artifact, not a broken fix:
 
-## What was done, in order
+| Cause | Checks |
+|---|---|
+| Needs `decisions.md` D22 (docs-scribe, in flight) | V00 |
+| Needs a `--fresh-clone` run | V04 V46 |
+| Needs a trained checkpoint (trainer, in flight) | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
+| Needs the runtime report (perf-analyst, queued) | V37 V38 V39 |
+| Needs qualitative figures | V49 |
+| Was blocked on you — **now unblocked**, see below | V13 |
 
-1. **Pre-push audit.** Proved no dataset or weight blob is tracked *or ever was*: scanned
-   `git ls-files` for 13 forbidden extensions, scanned every path for `kla-data` / `GT` /
-   `NoisyLR` tokens, and walked all reachable history with
-   `git log --all --diff-filter=A --name-only` plus a largest-blob-in-history scan. Clean.
-   Largest tracked object is `results/eda/pairs_grid.png` (2,500,869 B), a required EDA
-   figure, not data. `C:\kla-data` has never entered the repo.
-2. **Created the public remote** and verified V06/V13's network preconditions as above.
-3. **Populated `sample_inputs/`** with 6 real degraded inputs (128x128 float32, 393,984 B
-   total). Five of the six carry values outside [0,1] — min -0.1397, max 1.5914 — so the
-   folder genuinely exercises the "never clip the input" path rather than a sanitised sample.
-4. **Measured the baseline:** PASS 9 / FAIL 44 / SKIP 0 at commit `a980b2f`.
-5. **Resolved a contract conflict** (see below), and **dispatched five builders in parallel.**
+---
 
-## The three things worth a human's attention
+## DECISIONS I MADE UNDER YOUR AUTHORISATION
 
-### 1. V47 and V51 were mutually exclusive — resolved, but flagged honestly
-V51 banned every tracked `.npy`. V47 requires inference to run against `sample_inputs/`
-**from a clean clone**, which requires those `.npy` files to be in the clone, and SPEC §12
-lists the folder as a repo item. Both checks could not be green at once, so the Definition of
-Done was literally unreachable.
+**1. B9 resolved: GitHub Release, not Git LFS, not a committed blob.**
+You pre-authorised GitHub Releases, which resolves the deadlock I had escalated. The 400
+restored test outputs (~105 MB raw) will ship as a Release asset with a published sha256, and
+`results/restored_test_outputs/` will carry a manifest plus per-file hashes so the folder is
+non-empty and independently verifiable. This needs **no contract change at all** — it reuses
+exactly the mechanism V06 already permits for weights. Recorded honestly: the folder holds a
+verified pointer and manifest, not the raw bytes, and the reason is stated in the README rather
+than glossed. The alternative (a second V51 amendment to admit a ~40 MB `.npz`) would have gutted
+the size caps I had just added, so I did not take it.
 
-Resolved the way D6 and D10 were: the human explicitly authorised committing the files, so a
-**narrow bounded exemption** was added (`sample_inputs/*.npy`, ≤8 files, ≤512 KB) together
-with **four new assertions that make V51 net stricter** — blob-extension ban widened from 4
-to 20 extensions, a dataset-directory-token ban, a 5 MB per-file cap and a 25 MB total-tree
-cap. The last two catch a dataset dump under *any* extension, which the old blacklist
-provably could not.
+**2. V51 reconciled with V47 — bounded exemption, four new assertions.**
+V51 banned every tracked `.npy`; V47 requires `sample_inputs/*.npy` *in a clean clone*. The two
+could not both be green, so the Definition of Done was unreachable. Resolved with a narrow
+exemption (≤8 files, ≤512 KB; actual 6 / 393,984 B) **plus** four strengthenings: blob-extension
+ban widened 4→20 extensions, a dataset-directory-token ban, a 5 MB per-file cap and a 25 MB
+total-tree cap. The last two catch a dataset dump under *any* extension, which an extension
+blacklist provably cannot. Stated plainly in `BLOCKERS.md` B7: the exemption is, in isolation, a
+loosening over six paths; everything else added is strictly stricter.
 
-**Stated plainly:** the exemption is, in isolation, a loosening with respect to six paths.
-Everything else added is a strengthening. Full record in `docs/BLOCKERS.md` B7 and
-`docs/decisions.md` D15. If you prefer the stricter reading, revert that commit — B7 stands
-as the record of the reasoning either way.
+**3. Seven checks that could never pass are now real. This is the biggest correctness find.**
+V26, V27, V28, V29, V32, V33 and V35 were BOOTSTRAP placeholders returning an unconditional FAIL
+that **no artifact could ever turn green**. That is worse than a missing check: it looks identical
+before and after a defect is introduced, so it silently certifies nothing. All seven now test
+their subject, each with an anti-vacuity guard. Notable choices:
+- **V27** enforces "a margin, not noise" *statistically* — the PSNR gain must exceed two standard
+  errors of the mean — rather than with a constant I would have had to invent.
+- **V28** implements the contract's negative-result escape hatch exactly as narrowly as written.
+- **V32** additionally asserts a 3-channel input is **rejected**; a model that silently accepts
+  3 channels would let an accidental BGR/RGB path through without ever raising.
+- **V35** loads with `weights_only=True`, the same path `inference.py` uses, so a checkpoint
+  needing arbitrary unpickling can no longer pass V35 and then break the shipped script.
 
-### 2. `pip install lpips` silently destroys the CUDA install — and would silently destroy the throughput score
-Measured, twice. Installing `lpips` resolves its torch dependency from PyPI and **replaces
-`torch==2.11.0+cu128` with `torch==2.13.0+cpu`**. After that `torch.cuda.is_available()` is
-`False`.
+**4. V09 was in direct conflict with V20.** It treated an unreadable *input* as a scale
+violation, but a corrupt file forms no `(in, out)` pair, the contract says "for every pair", and
+V20 explicitly declares corrupt inputs survivable. No implementation could satisfy both. Fixed to
+match the contract wording, with unreadable inputs reported in evidence and a new guard that
+fails V09 if the exclusion leaves zero pairs checked.
 
-The reason this is more than a dev-box annoyance: **V04 installs a fresh venv from
-`requirements.txt` alone.** If that file does not force the PyTorch index, the clean-room
-install produces a CPU-only torch, the run still exits 0, V04 still *passes* — and on KLA's
-H100 the GPU sits unused while the throughput score collapses with no error anywhere. This is
-the exact class of silent failure V04 exists to catch, and no amount of reading the file
-would reveal it. Logged as `docs/BLOCKERS.md` B8; `requirements.txt` fix assigned to
-docs-scribe. **Not yet verified end to end in a fresh venv — V04 is still red.**
+---
 
-### 3. B9 needs a human decision and blocks V13
-`docs/decisions.md` D17 chose a single `np.savez_compressed` archive as the delivery
-mechanism for `results/restored_test_outputs/` (~105 MB raw as 400 `.npy`). Git LFS is
-already ruled out by human instruction, because unresolved LFS pointer stubs on a fresh clone
-are a known way to fail V06.
+## RESULTS SO FAR
 
-But the V51 strengthening in item 1 bans `.npz` and caps any tracked file at 5 MB. So a
-~40 MB archive cannot be committed without **a second** human-authorised V51 amendment —
-which would gut the size caps just added, and is precisely the pattern Prime Directive 1
-forbids an agent from doing on its own initiative.
+Classical baselines, 400-pair val split, scored on **reloaded float32 `.npy` from disk**:
 
-**Two options, recommendation first:**
-1. **External hosting with a published sha256**, link verified from a logged-out session.
-   Requires no contract change at all; the current V51 already permits it.
-2. A second human-authorised V51 amendment carving out
-   `results/restored_test_outputs/*.npz` with its own byte cap.
+| baseline | PSNR dB | SSIM | LPIPS |
+|---|---|---|---|
+| bicubic ×2 (the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 |
+| median 3×3 → bicubic | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | **0.40870** ± 0.15866 |
+| non-local means → bicubic | **26.2722** ± 4.3037 | **0.65152** ± 0.19523 | 0.42586 ± 0.18627 |
+| **ours (NAFSR)** | training in flight | — | — |
 
-Blocked pending your call.
+**Two readings that change what we optimise:**
+- **The honest bar is 26.27 dB, not 23.65 dB.** V27 only formally requires beating bicubic. A
+  learned model that clears V27 but loses to a 35 ms classical filter is not defensible, so the
+  trainer's target is set past NLM, not past bicubic.
+- **PSNR/SSIM and LPIPS disagree across these baselines.** NLM wins fidelity by 2.6 dB while
+  scoring the *worst* LPIPS, because it over-smooths. That is measured evidence for SPEC §8's
+  balanced loss and against optimising any single metric — and it is good deck material.
 
-## Known-red and honest about it
-- **V13** — `results/restored_test_outputs/` is empty. Blocked on B9 and on a trained model.
-- **V06** — no `weights/best.pt` exists; `weights/*.pt` is gitignored.
-- **V04 / V46 / V47** — need a `--fresh-clone` run, not performed in this pass.
-- **V00** — red until `docs/decisions.md` carries the new verifier digest (D15, docs-scribe).
-- Everything Tier 2 that needs a trained model: V25 V27 V28 V34 V35 V45 V48 V49.
+D3's published anchor reproduced **exactly**: 23.424736 ± 2.831883 vs 23.4247 ± 2.8319.
 
-## Standing strategic note (D16)
-The provided imagery is grayscale **natural photographs**, not semiconductor imagery — a
-proxy. KLA's hidden test set may be genuine inspection imagery. What transfers across that
-gap is the **measured degradation** (recovered 4x4 sharpening downsample kernel, shot noise
-rather than Gaussian, noise applied *after* downsampling), not any content prior learned from
-photographs. So prefer wide degradation randomisation over squeezing in-distribution dB. A
-future iteration that buys +0.2 dB in-distribution by narrowing the degradation range is a
-**regression** against the real objective and must be rejected on those grounds, even though
-the in-distribution number improved.
+**Model** (measured): NAFSR w48 n16 = **388,225 params**, 5.584 GMAC / 11.169 GFLOP per 128²,
+checkpoint 3.14 MiB. UNetSR baseline = 2,970,401 params, 4.478 GMAC. Roughly FLOP-matched at
+0.80× with NAFSR at 0.13× the parameters, so the baseline comparison gives NAFSR no parameter
+advantage. NAFSR is **memory-bandwidth bound, not compute bound** — which is why SPEC §11.2's
+optimisation table matters so little here.
+
+**Degradation simulator**, whole-set over all 2800 non-val pairs (45,875,200 px): mean abs rel
+err 0.3885, R² 0.9804, and it beats SPEC §5.2's two-parameter model by **1.894× mean / 5.917×
+worst bin** — independent confirmation that SPEC's prescribed noise model is wrong here.
+
+**Runtime:** `inference.py --help` import cost **2.35–2.48 s** against V23's 3.0 s Tier-0 budget.
+The entire budget is `import torch`; inference.py's marginal cost above it is ≈0.
+
+---
+
+## INTEGRITY EVENTS WORTH KNOWING
+
+**Two agents produced fabricated numbers. Both were caught, and I did not take either at its
+word.** `model-core` self-disclosed inventing a benchmark table before running it, and separately
+had an unchecked checkpoint size already committed. It retracted and re-measured — real values
+1.17× (not the 1.09× it had quoted, which was inside run-to-run noise) and 3.14 MiB (not 4.7 MB).
+`ml-skeptic` is now independently re-deriving the headline numbers rather than reviewing the
+claims. The audit debt is tracked in `STATE.md`.
+
+**`pip install lpips` silently replaces the CUDA torch with a CPU-only build.** Verified twice.
+This matters far beyond the dev box: V04 installs a fresh venv from `requirements.txt` alone, so
+an unpinned index yields a CPU-only torch — the run exits 0, **V04 passes**, and on KLA's H100 the
+GPU sits unused while the throughput score collapses with no error anywhere. Logged as B8.
+
+---
+
+## THINGS AWAITING YOU
+
+**Nothing is blocking.** B9 was the only item and your authorisation resolved it.
+
+Two judgement calls I made that you may want to overrule later, both reversible:
+1. **NAFSR is 0.388 M params, below SPEC §7.1's 1–3 M band.** Measured reason: on the 8 GB card
+   the band costs 1.8–1.9× training wall-clock for an *unmeasured* quality gain, and w64/n28 does
+   not fit at all (7925 MiB, 12.5× step-time collapse). On a one-day budget the number of runs
+   that fit is the binding constraint. First thing to revisit once there is a quality number.
+2. **`sample_inputs/` holds 6 real test inputs.** You authorised this; it is what makes V47 real.
+
+---
+
+## RISKS I AM TRACKING
+
+- **V22 is expected to go red the moment a real checkpoint exists.** It reads 0.00e+00 today only
+  because both precision arms take the bicubic fallback. Against an untrained NAFSR, bf16-vs-fp32
+  measures **1.107e-03** against V22's 1e-3 limit. Remedies in order: re-measure with the trained
+  checkpoint (random init is a worst case), keep LayerNorm/SCA in fp32, or switch to fp16 (10
+  mantissa bits vs bf16's 8). **Widening the tolerance is not on the list.**
+- **V23 is intermittent on a loaded machine** — 3.14 s observed under load against a 3.0 s budget,
+  while bare `import torch` alone hit 5.3 s. Deferring the torch import would cut the `--help`
+  measurement to ~0.25 s without changing the real run by a millisecond; that is gaming the
+  metric and was deliberately not done.
+
+---
+
+## THE THREE THINGS I WOULD DO NEXT
+
+1. **Land a trained checkpoint.** It alone unblocks ten checks (V06 V25 V27 V28 V34 V35 V43 V44
+   V45 V48). The V25 overfit-to-40 dB gate runs first and gates everything after it.
+2. **Tag `v0.1-submittable` the moment Tier 0 is green**, so a working fallback always exists on
+   the remote regardless of what happens later.
+3. **Fresh-clone run** to close V04/V46 and prove B8's `requirements.txt` fix in a clean venv —
+   that is the one failure mode that passes locally and fails silently on the evaluator's machine.
