@@ -160,6 +160,40 @@ which is expected to stay red until the one remaining manual step — uploading
 `a33a9a5a129bb006eccb5cf3367abad3456c63d96c1e7bb26e76800e7e375f98`) as a GitHub Release asset
 and filling in `manifest.json`'s `release_url` — is completed by a human.
 
+## V04/V46 fresh-clone dry run — independently verified on real Linux (2026-08-15)
+
+`_fresh_clone_run` uses `sys.executable` for the nested venv, so it can only ever exercise the
+machine actually invoking `verify_all.py`. On this Mac dev box that machine is macOS/arm64, and
+`requirements.txt` intentionally pins `torch==2.11.0+cu128` — a CUDA-only build with **no wheel
+published for macOS at all** (confirmed: `pip download --platform manylinux_2_28_x86_64
+--python-version 312 ... torch==2.11.0+cu128` resolves and downloads a real 820 MB wheel from
+`download.pytorch.org/whl/cu128`, but the same install on macOS lists only bare, non-`+cu128`
+versions). So V04/V46 FAIL on this machine by design, not because of a defect — this is exactly
+the B8 "loud failure on the wrong platform" the pin exists to produce.
+
+Independently verified on **real Linux** (`python:3.12-slim` Docker container, `git` + `numpy`
+installed into the outer/orchestrating interpreter only — `numpy` is needed because `main()`
+calls `build_fixtures()` at the top level, not just inside the nested clone's venv):
+
+- `python3 scripts/verify_all.py --strict --fresh-clone --only V04` → **PASS**, "fresh clone +
+  fresh venv end-to-end".
+- `python3 scripts/verify_all.py --strict --fresh-clone --only V46` → **PASS**, same.
+- Nested venv installed exactly `torch 2.11.0+cu128` / `torchvision 0.26.0+cu128`, `torch.version.cuda
+  == '12.8'`, matching `requirements.txt`'s own claim, with `inference.py` then running end to
+  end against `tests/fixtures/single` inside that fresh venv.
+- Running V04 and V46 **together** in one container (two full fresh clones + two full ~820 MB
+  torch downloads back to back) produced one transient V04 FAIL with a truncated pip error
+  ("line 560, in read"); re-run in isolation it PASSED cleanly. Read as resource/network
+  contention from double-downloading in immediate succession inside one container, not a
+  dependency or pin defect — recorded here rather than silently dismissed.
+
+**Not committed as a code or verifier change** — the local, gitignored
+`results/verification_report.json` still honestly reports V04/V46 FAIL because that is what
+actually ran on this machine. This section is the durable record that the underlying
+requirement (clean-environment dry run, on the Linux/CUDA platform KLA's H100 environment
+actually matches) has been independently exercised and passes, even though this dev machine
+cannot demonstrate that itself. `docs/BLOCKERS.md` B8 updated to match.
+
 ---
 
 # ARCHIVED — unrelated prior session context (Windows/RTX-4060, 53-check framework). Ignore.
