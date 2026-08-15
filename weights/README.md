@@ -11,16 +11,37 @@ architecture. `inference.py` prefers the **EMA** weights when present.
 
 ---
 
-## Status — 2026-08-15, iteration 1
+## Status — 2026-08-15, `codex/final-submission-28db`
 
-**No checkpoint exists yet. Training has not been run.**
+**A trained checkpoint is present and tracked (Route A — committed directly).**
 
-`weights/best.pt` is absent from this repository, and `weights/*.pt` is currently in
-`.gitignore`. **V06 is therefore FAILING, correctly.** It will stay red until one of the two
-routes below is complete. Nothing in this file is a placeholder standing in for a value that
-was measured and then omitted — the values are genuinely not yet known.
+`weights/best.pt` is the `r2_nb8_psnrloss` residual-refinement checkpoint: a closed-form 5×5
+least-squares restoration fit (`stem`, `head.expand`, `head.project`) with its `body` frozen,
+plus a fresh 8-block NAFSR residual correction trained on top, described in
+`docs/decisions.md` D28/D29. It supersedes the earlier closed-form-only checkpoint
+(SHA256 `d5807dab…`, val PSNR 26.3277 dB), which improved on every one of the three scored
+metrics.
 
-### What `inference.py` does in the meantime
+| Field | Value |
+|---|---|
+| SHA256 | `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7` |
+| File size | 2,068,091 bytes (1.97 MiB) |
+| Architecture | NAFSR, width=48, num_blocks=8, scale=2, in_ch=out_ch=1 (embedded in `config.model`) |
+| Total parameters | 246,529 (84,049 frozen LS-5 stem/head + 162,480 trainable residual body) |
+| Training seed | 42 |
+| Training iterations | 4,000 (`iter` key) |
+| Git SHA at training time | `73696a694d3b2be13fe17d2dc4e891d2165da020-dirty` |
+| Val PSNR (disk-verified, full 400-pair split) | **28.0394 dB** |
+| Val SSIM (disk-verified, full 400-pair split) | **0.74804** |
+| Val LPIPS (disk-verified, full 400-pair split) | **0.29571** |
+| Validation protocol | `scripts/make_baselines.py` → `scripts/evaluate.py`, reloaded from disk (V30 round-trip), `configs/split_val.txt` (400 pairs), never the final test set |
+
+The checkpoint's own `metrics` block also retains the in-loop n=100 selection number
+(`in_loop_selection_val_psnr_n100`) under a name that makes clear it is **not** the reported
+result — the reported 28.0394 dB figure is the full-400-split, disk-verified number, per
+`docs/decisions.md` D28/D29.
+
+### What `inference.py` does if the checkpoint is missing or fails to load
 
 If the checkpoint cannot be found or cannot be loaded, `inference.py` prints
 
@@ -31,70 +52,47 @@ inference.py: checkpoint not found at <path>; falling back to bicubic x2 upsampl
 on stderr and completes with **exit code 0**, producing a parameter-free bicubic ×2 upsample
 of each input. That is a deliberate degradation-not-crash policy: a script that runs and
 scores badly is scored, and a script that crashes is not (CLAUDE.md PD4). It is **not** a
-model result and must never be reported as one. Pass `--require_weights` to turn the fallback
-into a hard failure — use that flag in any run whose output you intend to score.
+model result and must never be reported as one. `results/restored_test_outputs/` was generated
+with `--require_weights`, which turns that fallback into a hard failure instead — so the
+packaged outputs are guaranteed to be real model output, not a silent fallback.
 
 ---
 
-## Download — to be completed when the checkpoint exists
+## Download
 
-Exactly one of these two routes must be satisfied before submission:
+**Route A — committed directly.** `weights/best.pt` is tracked in this repository at 1.97 MiB,
+far under GitHub's 100 MB limit. No external link, no Release asset, no link-rot risk for the
+checkpoint itself. (The separate 400-file *restored test outputs* archive is too large for this
+route and ships as a Release asset instead — see `results/restored_test_outputs/README.md`.)
 
-**Route A — commit the file.** The checkpoint is small enough for plain git: D19 measures a
-constructed NAFSR w48 n16 checkpoint (model + EMA, 388,225 parameters) at **3.14 MiB**, far
-under GitHub's 100 MB limit and under V43's cap. This is the preferred route because it has
-no external dependency and no link to rot. It requires removing the `*.pt` line from
-`.gitignore` for this one path, which is a `.gitignore` change the main session owns.
+Verify the committed bytes match the table above:
 
-**Route B — GitHub Release asset.** Publish the file as a Release asset, then fill in the
-table below with a URL that returns **HTTP 200 from a logged-out session** (verify in a
-private browser window, not just in your own tab) and the sha256 of the exact bytes served.
-GitHub Releases are pre-approved by standing human authorisation (`docs/decisions.md` D23) and
-need no contract change — V06 already permits exactly this mechanism.
-
-Git LFS is **ruled out** — see `docs/decisions.md` D17 and D23. An unresolved LFS pointer stub
-on a fresh clone is a known way to fail V06, and V06's own text names that failure mode.
-
-The same Release carries the restored test outputs (`results/restored_test_outputs/README.md`,
-`docs/decisions.md` D23). Record that archive's digest here too, so both artifacts are
-verifiable from one place:
-
-| artifact | Release asset | sha256 |
-|---|---|---|
-| `best.pt` (checkpoint) | *pending* | *pending* |
-| restored test outputs archive (400 files) | *pending* | *pending* |
-
-Releases page (live, HTTP 200):
-`https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
-
-| field | value |
-|---|---|
-| URL | *pending — no checkpoint yet; do not fabricate* |
-| sha256 | *pending — must be the sha256 of the served bytes, not of a local copy* |
-| file size (bytes) | *pending* |
-| parameter count | *pending — 388,225 for NAFSR w48 n16 if that config ships unchanged (D19)* |
-| architecture / config | *pending — mirrors `configs/final.yaml`, also embedded in the checkpoint* |
-| training seed | *pending — 42 unless the shipped run says otherwise* |
-| git SHA of the training run | *pending — embedded in the checkpoint under `git`* |
-
-Compute the digest with:
-
-```
-py -3.12 -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('weights/best.pt').read_bytes()).hexdigest())"
+```bash
+python -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('weights/best.pt').read_bytes()).hexdigest())"
 ```
 
-> Recorded here rather than in the root `README.md` because there is no file for it to hash
-> yet, and V46 executes every fenced shell command in `README.md`. The same one-liner,
-> pointed at `scripts/verify_all.py`, is what produced the digest pinned in
-> `docs/VERIFIER_SHA256`.
+should print `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7`.
+
+## Reproduction
+
+The checkpoint was produced in two stages, both on branch `codex/residual-ls5-refinement`:
+
+1. **Closed-form LS-5 fit** (frozen stem/head), reproduced with:
+   ```bash
+   python train.py --config configs/final.yaml --seed 42 --closed_form_linear --out weights/best.pt
+   ```
+2. **Residual refinement on top of the frozen fit** (`scripts/train_residual.py`, Phase 2/4 of
+   `docs/decisions.md` D28/D29), using `configs/phase4_psnr_focus.yaml` and `--num_blocks 8`.
+   Full command and config are recorded in `docs/decisions.md` D29 and embedded in the
+   checkpoint's own `config`/`git` keys, so the run is traceable without external notes.
 
 ## Checklist before submission
 
-- [ ] `best.pt` present in a **fresh clone** (Route A) **or** the table above complete and the
-      URL fetched successfully from a logged-out session (Route B)
-- [ ] file > 1 KB and not an LFS pointer stub (V06)
-- [ ] checkpoint < 100 MB (V43)
-- [ ] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35)
-- [ ] `inference.py --require_weights` succeeds against it — i.e. the bicubic fallback is
-      *not* silently in play
-- [ ] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43)
+- [x] `best.pt` present in a fresh clone (Route A)
+- [x] file > 1 KB and not an LFS pointer stub (V06)
+- [x] checkpoint < 100 MB (V43's cap)
+- [x] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35) —
+      confirmed live via `inference.py --require_weights` against `sample_inputs/`
+- [x] `inference.py --require_weights` succeeds against it — the bicubic fallback is not in play
+- [ ] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43) — done
+      for this checkpoint in Phase 5 of this branch's integration
