@@ -1,7 +1,41 @@
 #!/usr/bin/env python3
-"""Training entry point. Reproduces weights/best.pt (SPEC 9).
+"""Training entry point. Reproduces ``weights/best.pt`` (SPEC 9).
 
-    python train.py --config configs/nafnet_x2.yaml --data_root <dataset_root>
+    py -3.12 train.py --config configs/final.yaml --data_root C:/kla-data
+    py -3.12 train.py --config configs/final.yaml --seed 42 --smoke        # V34
+    py -3.12 train.py --config configs/final.yaml --overfit 2              # V25 gate
+
+Three run modes, one code path
+------------------------------
+``--overfit N``
+    **The V25 hard gate.**  Trains on ``N`` fixed real pairs (default 2) taken from the
+    *training* half of the committed split, then measures PSNR on those same pairs.  It must
+    exceed 40 dB.  If it does not, alignment, normalisation or the loss is broken and no
+    downstream number is trustworthy -- the correct response is to stop and diagnose, never
+    to tune the threshold.  Exit code is non-zero on failure.
+
+``--smoke``
+    A handful of steps with no checkpoint and no ledger row, used by the verifier.  Prints
+    one ``SMOKE step=...`` line per step plus a ``SMOKE_DIGEST``; two invocations with the
+    same ``--seed`` must produce byte-identical lines (V34).
+
+default
+    The real run.  Cosine schedule with warmup, bf16 autocast, channels_last, EMA, periodic
+    validation on the committed held-out split, best-on-PSNR checkpointing, and one row
+    appended to ``results/experiments.csv`` (V45).
+
+Things that are deliberate, not accidental
+------------------------------------------
+* The loss is computed on the **unclipped** network output (SPEC 8).  Clipping happens only
+  where a prediction is turned into a metric or a file; clipping inside training would
+  zero the gradient of every saturated pixel, and ~3% of real pixels exceed 1.0.
+* Validation reads the committed ``configs/split_val.txt`` through ``src.dataset``; the
+  split is never regenerated here (V29).  ``test_NoisyLR`` is never opened by this file --
+  it has no ground truth and training on it is forbidden (SPEC F17).
+* Model selection uses held-out validation only.  No training image ever scores a
+  checkpoint.
+* The shipped weights are the **EMA** weights (SPEC 9); ``inference.py`` reads
+  ``ckpt['ema']`` in preference to ``ckpt['model']``.
 
 Owner: trainer.
 """
@@ -9,22 +43,604 @@ Owner: trainer.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import dataclasses
+import hashlib
+import json
+import math
+import os
 import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+_ROOT = Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from src.dataset import (  # noqa: E402
+    DataConfig,
+    PairedRestorationDataset,
+    build_datasets,
+    resolve_data_root,
+    train_val_names,
+)
+from src.losses import build_loss  # noqa: E402
+from src.metrics import clip_prediction, lpips_score, psnr, ssim  # noqa: E402
+from src.model import build_model, count_parameters  # noqa: E402
+from src.utils import (  # noqa: E402
+    EMA,
+    append_experiment,
+    configure_backends,
+    cosine_warmup_lr,
+    format_hms,
+    git_sha,
+    load_config,
+    resolve_device,
+    save_checkpoint,
+    seed_everything,
+    update_checkpoint_metrics,
+)
+
+#: Where the run ledger lives (SPEC 9, V45).
+LEDGER = _ROOT / "results" / "experiments.csv"
+
+#: V25's threshold. Written once, here, so it can never be quietly relaxed at a call site.
+OVERFIT_PSNR_TARGET_DB: float = 40.0
 
 
+# ======================================================================================
+# CLI
+# ======================================================================================
 def build_argparser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Train the restoration model.")
     ap.add_argument("--config", required=True)
-    ap.add_argument("--data_root", default=None)
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--smoke", action="store_true", help="few steps only; used by the verifier")
-    ap.add_argument("--resume", default=None)
+    ap.add_argument("--data_root", default=None,
+                    help="dataset root; else $KLA_DATA_ROOT, else docs/DATA_LOCATION.md")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="overrides train.seed in the config; recorded in the checkpoint")
+    ap.add_argument("--smoke", action="store_true",
+                    help="few steps only; used by the verifier (V34). No checkpoint, no ledger")
+    ap.add_argument("--smoke_iters", type=int, default=12)
+    ap.add_argument("--overfit", type=int, default=0, metavar="N",
+                    help="V25 gate: overfit N fixed training pairs and require PSNR > 40 dB")
+    ap.add_argument("--overfit_iters", type=int, default=6000,
+                    help="MEASURED on this dataset (RTX 4060, pairs 000004/000005): a "
+                         "6000-iter budget reaches 43.33 dB, crossing 40 dB at ~3000. A "
+                         "4000-iter budget stalls at 39.78 dB because the cosine schedule "
+                         "decays proportionally to the budget, so do not shorten it and then "
+                         "read the result as a failure of alignment")
+    ap.add_argument("--resume", default=None, help="checkpoint to warm-start model+EMA from")
+    ap.add_argument("--out", default=None,
+                    help="checkpoint path (default weights/best.pt)")
+    ap.add_argument("--iters", type=int, default=None, help="override optim.total_iters")
+    ap.add_argument("--val_every", type=int, default=None, help="override train.val_every")
+    ap.add_argument("--val_limit", type=int, default=100,
+                    help="held-out images used for in-run model selection; the final report "
+                         "always uses the whole committed split")
+    ap.add_argument("--workers", type=int, default=0,
+                    help="DataLoader workers. 0 is the default: measured 0.72 ms/item against "
+                         "a ~220 ms train step, and 0 keeps the run bit-reproducible")
+    ap.add_argument("--device", default=None)
+    ap.add_argument("--deterministic", dest="deterministic", action="store_true", default=None)
+    ap.add_argument("--no_deterministic", dest="deterministic", action="store_false")
+    ap.add_argument("--no_ledger", action="store_true", help="do not append to experiments.csv")
+    ap.add_argument("--tag", default="", help="free-text note recorded in the ledger row")
+    ap.add_argument("--verbose", action="store_true", help="per-step logging")
     return ap
 
 
+def _repo_relative(p: Path) -> str:
+    """Repo-relative POSIX path when possible, absolute otherwise. Never CWD-relative."""
+    try:
+        return str(p.resolve().relative_to(_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(p).replace("\\", "/")
+
+
+def _log(msg: str) -> None:
+    sys.stdout.write(msg + "\n")
+    sys.stdout.flush()
+
+
+# ======================================================================================
+# CONFIG PLUMBING
+# ======================================================================================
+def _section(cfg: Mapping[str, Any], name: str) -> dict[str, Any]:
+    blk = cfg.get(name)
+    return dict(blk) if isinstance(blk, Mapping) else {}
+
+
+def _data_config(cfg: Mapping[str, Any], seed: int, *, preload: Any = None,
+                 crops_per_image: int | None = None) -> DataConfig:
+    """Build the ``DataConfig`` and force the run seed into it.
+
+    ``DataConfig.from_mapping`` rejects unknown keys on purpose, so overrides are applied
+    with ``dataclasses.replace`` after parsing rather than by mutating the YAML mapping.
+    """
+    dc = DataConfig.from_mapping(cfg)
+    kw: dict[str, Any] = {"seed": int(seed)}
+    if preload is not None:
+        kw["preload"] = preload
+    if crops_per_image is not None:
+        kw["crops_per_image"] = int(crops_per_image)
+    return dataclasses.replace(dc, **kw)
+
+
+def _autocast(device: torch.device, amp: str):
+    """bf16 autocast on CUDA; a no-op context anywhere else.
+
+    fp16+GradScaler is deliberately not implemented: the target card supports bf16 (verified)
+    and a GradScaler is a second source of run-to-run divergence for no benefit here.
+    """
+    if device.type == "cuda" and str(amp).lower() in ("bf16", "bfloat16", "true", "auto"):
+        return torch.autocast("cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
+# ======================================================================================
+# VALIDATION  -- held-out only, EMA weights, clipped exactly as inference.py saves
+# ======================================================================================
+@torch.no_grad()
+def _predict(model: torch.nn.Module, lr: torch.Tensor, device: torch.device, amp: str,
+             channels_last: bool) -> torch.Tensor:
+    x = lr.to(device, non_blocking=True)
+    if channels_last:
+        x = x.contiguous(memory_format=torch.channels_last)
+    with _autocast(device, amp):
+        y = model(x)
+    return y.float()
+
+
+@torch.no_grad()
+def validate(model: torch.nn.Module, ds: PairedRestorationDataset, device: torch.device, *,
+             amp: str = "bf16", channels_last: bool = True, limit: int | None = None,
+             batch_size: int = 8, with_lpips: bool = False) -> dict[str, Any]:
+    """Score held-out pairs with the pinned SPEC 10 metrics on the CLIPPED prediction.
+
+    The prediction is clipped (never renormalised -- docs/decisions.md D3) and cast to
+    float32 before scoring, which is exactly what ``inference.py`` writes to disk, so these
+    numbers are directly comparable to ``scripts/evaluate.py``'s reloaded-from-disk figures.
+    """
+    was_training = model.training
+    model.eval()
+    n = len(ds) if limit is None else min(int(limit), len(ds))
+    ps: list[float] = []
+    ss: list[float] = []
+    lp: list[float] = []
+    for start in range(0, n, batch_size):
+        idx = list(range(start, min(start + batch_size, n)))
+        lr = torch.stack([ds[i]["lr"] for i in idx])
+        gt = torch.stack([ds[i]["gt"] for i in idx])
+        out = _predict(model, lr, device, amp, channels_last).cpu()
+        for b in range(len(idx)):
+            pred = clip_prediction(out[b, 0].numpy().astype(np.float32))
+            ref = gt[b, 0].numpy().astype(np.float32)
+            ps.append(float(psnr(pred, ref)))
+            ss.append(float(ssim(pred, ref)))
+            if with_lpips:
+                lp.append(float(lpips_score(pred, ref, device=str(device))))
+    if was_training:
+        model.train()
+    res: dict[str, Any] = {
+        "n": int(n),
+        "psnr": float(np.mean(ps)) if ps else float("nan"),
+        "psnr_std": float(np.std(ps)) if ps else float("nan"),
+        "ssim": float(np.mean(ss)) if ss else float("nan"),
+        "ssim_std": float(np.std(ss)) if ss else float("nan"),
+    }
+    if with_lpips and lp:
+        res["lpips"] = float(np.mean(lp))
+        res["lpips_std"] = float(np.std(lp))
+    return res
+
+
+# ======================================================================================
+# V25 -- THE OVERFIT GATE
+# ======================================================================================
+def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int:
+    """Train on ``args.overfit`` fixed real pairs and require PSNR > 40 dB on them.
+
+    Deliberate choices, because this check is a diagnostic and not a benchmark:
+
+    * The pairs come from the **training** half of the committed split, so the gate never
+      touches validation data even though it reports on its own training pairs.
+    * Whole images (128 LR -> 256 GT), the real measured LR, no augmentation, no synthetic
+      degradation, no CutBlur.  The only thing under test is whether the model *can*
+      reproduce a target it has seen -- i.e. whether the pair is aligned, the normalisation
+      consistent and the loss pointed the right way.
+    * Both the raw and the EMA weights are scored; the gate passes on the better of the two,
+      because at a few thousand steps the EMA is still catching up and failing the gate on
+      EMA lag alone would be a false alarm.
+    """
+    device = resolve_device(args.device)
+    backend = configure_backends(deterministic=True)
+    n_pairs = max(1, int(args.overfit))
+    root = resolve_data_root(args.data_root)
+    train_names, _ = train_val_names(root)
+    names = train_names[:n_pairs]
+
+    dcfg = _data_config(cfg, seed, preload=True)
+    dcfg = dataclasses.replace(dcfg, synth_ratio=0.0, cutblur_prob=0.0, dihedral=False)
+    ds = PairedRestorationDataset(root, dcfg, "val", names=names)   # "val" = whole image, no aug
+
+    lr = torch.stack([ds[i]["lr"] for i in range(len(ds))]).to(device)
+    gt = torch.stack([ds[i]["gt"] for i in range(len(ds))]).to(device)
+
+    tcfg = _section(cfg, "train")
+    ocfg = _section(cfg, "optim")
+    channels_last = bool(tcfg.get("channels_last", True))
+    amp = str(tcfg.get("amp", "bf16"))
+    if channels_last:
+        lr = lr.contiguous(memory_format=torch.channels_last)
+        gt = gt.contiguous(memory_format=torch.channels_last)
+
+    model = build_model(cfg).to(device)
+    if channels_last:
+        model = model.to(memory_format=torch.channels_last)
+    ema = EMA(model, decay=float(tcfg.get("ema_decay", 0.999)))
+    crit = build_loss(_section(cfg, "loss"))
+    opt = torch.optim.AdamW(model.parameters(), lr=float(ocfg.get("lr", 1e-3)),
+                            betas=tuple(ocfg.get("betas", (0.9, 0.9))),
+                            weight_decay=float(ocfg.get("weight_decay", 0.0)))
+
+    total = int(args.overfit_iters)
+    warm = min(50, max(1, total // 20))
+    base_lr = float(ocfg.get("lr", 1e-3))
+    min_lr = float(ocfg.get("min_lr", 1e-6))
+    grad_clip = float(tcfg.get("grad_clip", 1.0))
+
+    shadow = build_model(cfg).to(device)          # built once; EMA weights are copied in
+    if channels_last:
+        shadow = shadow.to(memory_format=torch.channels_last)
+
+    history: list[dict[str, float]] = []
+    best = {"psnr": float("-inf"), "iter": -1, "weights": "none"}
+    t0 = time.perf_counter()
+    model.train()
+    for it in range(total):
+        for g in opt.param_groups:
+            g["lr"] = cosine_warmup_lr(it, base_lr, min_lr, warm, total)
+        with _autocast(device, amp):
+            pred = model(lr)
+        loss, logs = crit(pred.float(), gt, progress=it / max(1, total))
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        opt.step()
+        ema.update(model)
+
+        last = (it == total - 1)
+        if last or (it + 1) % max(1, total // 12) == 0:
+            raw = _score_pairs(model, lr, gt, device, amp, channels_last)
+            ema.copy_to(shadow)
+            ema_psnr = _score_pairs(shadow, lr, gt, device, amp, channels_last)
+            history.append({"iter": it + 1, "loss": float(logs["total"]),
+                            "psnr_raw": raw, "psnr_ema": ema_psnr})
+            if max(raw, ema_psnr) > best["psnr"]:
+                best = {"psnr": max(raw, ema_psnr), "iter": it + 1,
+                        "weights": "raw" if raw >= ema_psnr else "ema"}
+            if args.verbose:
+                _log(f"  overfit it={it+1:5d} loss={logs['total']:.6f} "
+                     f"psnr_raw={raw:.3f} psnr_ema={ema_psnr:.3f}")
+
+    dt = time.perf_counter() - t0
+    passed = bool(best["psnr"] > OVERFIT_PSNR_TARGET_DB)
+    report = {
+        "check": "V25",
+        "pass": passed,
+        "target_db": OVERFIT_PSNR_TARGET_DB,
+        "n_pairs": n_pairs,
+        "pair_names": names,
+        "split_of_pairs": "train",
+        "iters": total,
+        "best_psnr_db": round(float(best["psnr"]), 4),
+        "best_at_iter": int(best["iter"]),
+        "best_weights": best["weights"],
+        "final_psnr_raw_db": round(float(history[-1]["psnr_raw"]), 4) if history else None,
+        "final_psnr_ema_db": round(float(history[-1]["psnr_ema"]), 4) if history else None,
+        "final_loss": round(float(history[-1]["loss"]), 8) if history else None,
+        "structural_kind": crit_kind(crit, gt),
+        "seed": int(seed),
+        "device": str(device),
+        "backend": backend,
+        "wall_clock_s": round(dt, 2),
+        "history": history,
+    }
+    if not passed:
+        report["diagnosis"] = (
+            "PSNR did not clear 40 dB on pairs the model was trained on. That is NOT a "
+            "hyper-parameter problem: it means the LR/GT crop is misaligned, the "
+            "normalisation differs between input and target, or the loss is not pointed at "
+            "the target. Fix the cause before trusting any downstream metric."
+        )
+    _log(json.dumps(report, indent=2))
+    return 0 if passed else 1
+
+
+def crit_kind(crit: Any, target: torch.Tensor) -> str:
+    """Which structural term the loss will actually use at this spatial size."""
+    from src.losses import supports_ms_ssim
+    h, w = int(target.shape[-2]), int(target.shape[-1])
+    return "ms_ssim" if (crit.allow_ms_ssim and supports_ms_ssim(h, w)) else "ssim"
+
+
+@torch.no_grad()
+def _score_pairs(model: torch.nn.Module, lr: torch.Tensor, gt: torch.Tensor,
+                 device: torch.device, amp: str, channels_last: bool) -> float:
+    """Mean PSNR over an in-memory batch, scored on the clipped float32 prediction."""
+    was_training = model.training
+    model.eval()
+    with _autocast(device, amp):
+        out = model(lr)
+    out = out.float().cpu()
+    ref = gt.float().cpu()
+    vals = [float(psnr(clip_prediction(out[b, 0].numpy().astype(np.float32)),
+                       ref[b, 0].numpy().astype(np.float32)))
+            for b in range(out.shape[0])]
+    if was_training:
+        model.train()
+    return float(np.mean(vals))
+
+
+# ======================================================================================
+# THE TRAINING RUN
+# ======================================================================================
+def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int:
+    smoke = bool(args.smoke)
+    device = resolve_device(args.device)
+    deterministic = args.deterministic if args.deterministic is not None else smoke
+    backend = configure_backends(deterministic=deterministic)
+
+    tcfg = _section(cfg, "train")
+    ocfg = _section(cfg, "optim")
+    dblk = _section(cfg, "data")
+
+    batch_size = int(dblk.get("batch_size", 32))
+    total_iters = int(args.iters if args.iters is not None else ocfg.get("total_iters", 20000))
+    warmup = int(ocfg.get("warmup_iters", 500))
+    base_lr = float(ocfg.get("lr", 1e-3))
+    min_lr = float(ocfg.get("min_lr", 1e-6))
+    grad_clip = float(tcfg.get("grad_clip", 1.0))
+    amp = str(tcfg.get("amp", "bf16"))
+    channels_last = bool(tcfg.get("channels_last", True))
+    val_every = int(args.val_every if args.val_every is not None
+                    else tcfg.get("val_every", 1000))
+
+    if smoke:
+        # Small, memory-mapped and short: the verifier runs this twice and both runs must
+        # finish quickly AND agree exactly.
+        total_iters = int(args.smoke_iters)
+        warmup = max(1, total_iters // 4)
+        batch_size = min(batch_size, 4)
+        val_every = 0
+
+    root = resolve_data_root(args.data_root)
+    # One epoch is stretched to at least ~1000 optimiser steps via crops_per_image so that a
+    # 20k-iteration run re-enters the DataLoader ~20 times rather than ~230 times. With
+    # workers=0 this costs nothing; with workers>0 it is the difference between amortising
+    # and paying Windows process spawn on every 87 steps.
+    n_train_names = len(train_val_names(root)[0])
+    cpi = 1 if smoke else max(1, math.ceil(1000 * batch_size / max(1, n_train_names)))
+    dcfg = _data_config(cfg, seed, preload=(False if smoke else None), crops_per_image=cpi)
+
+    t_build = time.perf_counter()
+    train_ds, val_ds = build_datasets(root, dcfg)
+    build_s = time.perf_counter() - t_build
+
+    gen = torch.Generator()
+    gen.manual_seed(seed)
+    loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, drop_last=True,
+        num_workers=int(args.workers), generator=gen,
+        pin_memory=(device.type == "cuda"),
+        persistent_workers=False,
+    )
+
+    model = build_model(cfg).to(device)
+    if channels_last:
+        model = model.to(memory_format=torch.channels_last)
+    n_params = count_parameters(model)
+    ema = EMA(model, decay=float(tcfg.get("ema_decay", 0.999)))
+    shadow = build_model(cfg).to(device)          # built once; EMA weights are copied in
+    if channels_last:
+        shadow = shadow.to(memory_format=torch.channels_last)
+    start_iter = 0
+    if args.resume:
+        ck = torch.load(args.resume, map_location="cpu", weights_only=True)
+        model.load_state_dict(ck["model"], strict=True)
+        if ck.get("ema"):
+            ema.load_state_dict(ck["ema"])
+        start_iter = int(ck.get("iter", 0))
+        _log(f"resumed {args.resume} at iter {start_iter}")
+
+    crit = build_loss(_section(cfg, "loss"))
+    opt = torch.optim.AdamW(model.parameters(), lr=base_lr,
+                            betas=tuple(ocfg.get("betas", (0.9, 0.9))),
+                            weight_decay=float(ocfg.get("weight_decay", 0.0)))
+
+    out_path = Path(args.out) if args.out else (_ROOT / "weights" / "best.pt")
+    if not out_path.is_absolute():
+        out_path = _ROOT / out_path
+
+    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-" \
+             f"{Path(args.config).stem}-s{seed}"
+    sha = git_sha()
+    _log(json.dumps({
+        "run_id": run_id, "git": sha, "config": args.config, "seed": seed,
+        "model": str(_section(cfg, "model").get("name", "?")), "params": n_params,
+        "iters": total_iters, "batch_size": batch_size, "lr_patch": dcfg.lr_patch,
+        "crops_per_image": cpi, "n_train": len(train_ds), "n_val": len(val_ds),
+        "preloaded": bool(train_ds.preloaded), "dataset_build_s": round(build_s, 2),
+        "device": str(device), "backend": backend, "amp": amp,
+        "channels_last": channels_last, "smoke": smoke, "out": str(out_path),
+    }))
+
+    best = {"psnr": float("-inf"), "ssim": float("nan"), "iter": -1}
+    structural_kind = ""
+    smoke_lines: list[str] = []
+    loss_hist: list[float] = []
+    t0 = time.perf_counter()
+    it = start_iter
+    epoch = 0
+    model.train()
+
+    while it < total_iters:
+        train_ds.set_epoch(epoch)
+        for batch in loader:
+            if it >= total_iters:
+                break
+            lr_b = batch["lr"].to(device, non_blocking=True)
+            gt_b = batch["gt"].to(device, non_blocking=True)
+            if channels_last:
+                lr_b = lr_b.contiguous(memory_format=torch.channels_last)
+                gt_b = gt_b.contiguous(memory_format=torch.channels_last)
+
+            cur_lr = cosine_warmup_lr(it, base_lr, min_lr, warmup, total_iters)
+            for g in opt.param_groups:
+                g["lr"] = cur_lr
+
+            with _autocast(device, amp):
+                pred = model(lr_b)
+            # UNCLIPPED output into the loss (SPEC 8): clipping here would zero the gradient
+            # of every saturated pixel, and ~3% of real pixels legitimately exceed 1.0.
+            loss, logs = crit(pred.float(), gt_b, progress=it / max(1, total_iters))
+            if not math.isfinite(float(logs["total"])):
+                _log(f"FATAL: non-finite loss at iter {it}: {logs}")
+                return 2
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            opt.step()
+            ema.update(model)
+            structural_kind = str(logs["structural_kind"])
+            loss_hist.append(float(logs["total"]))
+            it += 1
+
+            if smoke:
+                line = (f"SMOKE step={it:04d} lr={cur_lr:.12e} total={logs['total']:.12e} "
+                        f"charbonnier={logs['charbonnier']:.12e} "
+                        f"structural={logs['structural']:.12e} fft={logs['fft']:.12e} "
+                        f"kind={structural_kind} gnorm={float(gnorm):.12e}")
+                smoke_lines.append(line)
+                _log(line)
+            elif args.verbose or it % 100 == 0 or it == 1:
+                el = time.perf_counter() - t0
+                ips = (it - start_iter) / max(el, 1e-9)
+                eta = (total_iters - it) / max(ips, 1e-9)
+                _log(f"it {it}/{total_iters} loss {logs['total']:.5f} "
+                     f"(charb {logs['charbonnier']:.5f} {structural_kind} "
+                     f"{logs['structural']:.5f} fft {logs['fft']:.5f}) "
+                     f"lr {cur_lr:.3e} {ips:.2f} it/s elapsed {format_hms(el)} "
+                     f"eta {format_hms(eta)}")
+
+            if val_every and (it % val_every == 0 or it == total_iters):
+                ema.copy_to(shadow)
+                v = validate(shadow, val_ds, device, amp=amp, channels_last=channels_last,
+                             limit=args.val_limit)
+                _log(f"  [val ema] it {it} psnr {v['psnr']:.4f} ssim {v['ssim']:.5f} "
+                     f"(n={v['n']}, held-out)")
+                if v["psnr"] > best["psnr"]:
+                    best = {"psnr": v["psnr"], "ssim": v["ssim"], "iter": it}
+                    save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
+                                    metrics={"val_psnr": v["psnr"], "val_ssim": v["ssim"],
+                                             "val_n": v["n"], "selection": "ema/psnr",
+                                             "split": "configs/split_val.txt",
+                                             "structural_kind": structural_kind},
+                                    git=sha)
+                    _log(f"  [ckpt] new best {v['psnr']:.4f} dB -> {out_path}")
+        epoch += 1
+
+    wall = time.perf_counter() - t0
+
+    if smoke:
+        digest = hashlib.sha256("\n".join(smoke_lines).encode("utf-8")).hexdigest()
+        _log("SMOKE_LOSSES " + json.dumps([f"{v:.12e}" for v in loss_hist]))
+        _log("SMOKE_DIGEST " + digest)
+        _log("SMOKE_OK steps=%d seed=%d deterministic=%s"
+             % (len(loss_hist), seed, backend["cudnn_deterministic"]))
+        return 0
+
+    # ---- final report: full committed split, EMA weights, LPIPS included ---------------
+    if best["iter"] < 0:
+        # no validation happened (e.g. --val_every 0): still ship something reproducible
+        save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
+                        metrics={"note": "no validation performed"}, git=sha)
+    ck = torch.load(out_path, map_location="cpu", weights_only=True)
+    final_model = build_model(ck["config"]).to(device)
+    if channels_last:
+        final_model = final_model.to(memory_format=torch.channels_last)
+    final_model.load_state_dict(ck["ema"] or ck["model"], strict=True)
+    full = validate(final_model, val_ds, device, amp=amp, channels_last=channels_last,
+                    limit=None, with_lpips=True)
+    _log(f"[final val, EMA, full committed split] psnr {full['psnr']:.4f} +/- "
+         f"{full['psnr_std']:.4f}  ssim {full['ssim']:.5f} +/- {full['ssim_std']:.5f}  "
+         f"lpips {full.get('lpips', float('nan')):.5f}  n={full['n']}")
+
+    metrics = {
+        "val_psnr": full["psnr"], "val_psnr_std": full["psnr_std"],
+        "val_ssim": full["ssim"], "val_ssim_std": full["ssim_std"],
+        "val_lpips": full.get("lpips"), "val_lpips_std": full.get("lpips_std"),
+        "val_n": full["n"], "selection": "ema/psnr",
+        "selection_n": int(args.val_limit),
+        "split": "configs/split_val.txt",
+        "structural_kind": structural_kind,
+        "best_iter": int(best["iter"]),
+        "total_iters_run": int(it),
+        "wall_clock_s": round(wall, 2),
+    }
+    # ONLY the metrics block is rewritten. The tensors stay the best-on-held-out ones that
+    # were saved during the run; re-saving the live model here would ship the last weights.
+    update_checkpoint_metrics(out_path, metrics)
+
+    if not args.no_ledger:
+        append_experiment(LEDGER, {
+            "run_id": run_id,
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "git_sha": sha,
+            "config": args.config.replace("\\", "/"),
+            "seed": seed,
+            "model": str(_section(cfg, "model").get("name", "?")),
+            "params": n_params,
+            "iters": it,
+            "batch_size": batch_size,
+            "lr_patch": dcfg.lr_patch,
+            "structural_kind": structural_kind,
+            "best_iter": int(best["iter"]),
+            "best_psnr": round(float(full["psnr"]), 4),
+            "best_ssim": round(float(full["ssim"]), 5),
+            "best_lpips": (round(float(full["lpips"]), 5) if "lpips" in full else ""),
+            "val_n": int(full["n"]),
+            "weights_used": "ema",
+            "wall_clock_s": round(wall, 1),
+            "wall_clock_hms": format_hms(wall),
+            "checkpoint": _repo_relative(out_path),
+            "device": torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu",
+            "notes": args.tag,
+        })
+        _log(f"[ledger] appended {run_id} to {LEDGER}")
+    return 0
+
+
+# ======================================================================================
 def main(argv: list[str] | None = None) -> int:
-    _ = build_argparser().parse_args(argv)
-    raise NotImplementedError("train.main: not implemented yet")
+    args = build_argparser().parse_args(argv)
+    cfg = load_config(args.config)
+    seed = int(args.seed if args.seed is not None else _section(cfg, "train").get("seed", 42))
+    # The seed that was actually used is written back into the config that gets embedded in
+    # the checkpoint, so a checkpoint always states the seed that produced it.
+    cfg.setdefault("train", {})
+    cfg["train"]["seed"] = seed
+    seed_everything(seed)
+
+    if args.overfit:
+        return run_overfit(cfg, args, seed)
+    return run_training(cfg, args, seed)
 
 
 if __name__ == "__main__":
