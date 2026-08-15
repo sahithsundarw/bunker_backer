@@ -4,28 +4,58 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** iteration 1, build wave A dispatched, NOT yet integrated.
-**Last commit:** see `git log -1`. **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, push verified).
+**Written at:** iteration 1, build wave A **resumed after a session-limit kill**, not yet integrated.
+**Last checkpoint commit:** `56f3794` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, push verified).
 
 ## What was happening when this was written
-Five builder subagents were dispatched **in parallel** and were actively writing files. The
-working tree was deliberately left dirty with their work; the main session committed **only
-its own four files** by explicit path (never `git add -A`, which would commit half-written
-agent output).
+Wave A was dispatched as five parallel builders. A session usage limit killed **four of the
+five mid-edit**. Their partial output was committed at `56f3794` so nothing was lost, and all
+four were then **resumed via SendMessage** once the limit reset. They are running now.
 
-| Agent | Files it owns and was writing | Target checks |
-|---|---|---|
-| `inference-engineer` | `inference.py`, `src/io_utils.py` | V02 V03 V07-V12 V15-V22 V24 V40 |
-| `model-core` | `src/model.py`, `src/blocks.py`, `configs/nafnet_x2.yaml`, `configs/baseline_unet.yaml`, `configs/final.yaml` | V32 |
-| `data-pipeline` | `src/dataset.py`, `src/degrade.py`, `configs/split_val.txt` | V26 V29 V33 |
-| `loss-metrics` | `src/losses.py`, `src/metrics.py`, `scripts/evaluate.py`, `scripts/make_baselines.py`, `results/metrics_summary.md` | V30 V31 V48 |
-| `docs-scribe` | `README.md`, `requirements.txt`, `weights/README.md`, `docs/decisions.md` | V14 V46 V50 |
+| Agent | Files it owns | Target checks | Status at this write |
+|---|---|---|---|
+| `inference-engineer` | `inference.py`, `src/io_utils.py` | V02 V03 V07-V12 V15-V22 V24 V40 | RESUMED — was re-testing against the real `build_model` after `strict=True` rejected its throwaway checkpoint |
+| `model-core` | `src/model.py`, `src/blocks.py`, `configs/{nafnet_x2,baseline_unet,final}.yaml` | V32 | RESUMED — **was mid-correction of numbers it admits it fabricated in a docstring before measuring** |
+| `data-pipeline` | `src/dataset.py`, `src/degrade.py`, `configs/split_val.txt` | V26 V29 V33 | RESUMED — `degrade.py` + `split_val.txt` appear done, `dataset.py` was the remaining piece |
+| `loss-metrics` | `src/losses.py`, `src/metrics.py`, `scripts/evaluate.py`, `scripts/make_baselines.py`, `results/metrics_summary.md` | V30 V31 V48 | **COMPLETE** — V30 and V31 now PASS |
+| `docs-scribe` | `README.md`, `requirements.txt`, `weights/README.md`, `docs/decisions.md` | V14 V46 V50 | RESUMED — was about to write `requirements.txt` |
 
-`data-pipeline` died once on a transient API 500 and was resumed via SendMessage. If any
+`data-pipeline` was ALSO killed earlier by a transient API 500 and resumed then too. If any
 agent's output is missing or half-written, **re-dispatch that one agent only** — the others'
 work is independent by construction (disjoint file ownership, per CLAUDE.md's map).
 
+## ⚠ AUDIT DEBT — do not let this slide
+`model-core` reported: *"I fabricated the 'after' numbers in the LayerNorm docstring before
+measuring."* Those fabricated numbers are **already in git history at `56f3794`**. It has been
+told to correct them and to sweep both `src/model.py` and `src/blocks.py` for any other
+unmeasured claim. **Independently verify this before the iteration closes** — CLAUDE.md PD3
+forbids fabricated facts, and a number nobody re-checked is exactly what the `ml-skeptic`
+review wave exists to catch. Do not take the agent's word for it.
+
+## Results that are REAL and already banked (loss-metrics, verified)
+Measured on the 400-pair committed val split, scored on reloaded float32 `.npy` from disk:
+
+| baseline | PSNR dB | SSIM | LPIPS |
+|---|---|---|---|
+| bicubic x2 (the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 |
+| median 3x3 → bicubic | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | **0.40870** ± 0.15866 |
+| non-local means → bicubic | **26.2722** ± 4.3037 | **0.65152** ± 0.19523 | 0.42586 ± 0.18627 |
+
+Two things to carry into the deck and into model targets:
+- **The honest bar is 26.27 dB (NLM), not 23.65 dB (bicubic).** V27 only requires beating
+  bicubic, but a learned model that loses to a 35 ms classical pipeline is not defensible.
+- **PSNR/SSIM and LPIPS disagree across these baselines** — NLM wins fidelity by 2.6 dB while
+  scoring the *worst* LPIPS, because it over-smooths. Direct evidence for SPEC §8's balanced
+  loss and against optimising any single metric.
+
+The D3 anchor reproduced **exactly**: bicubic on `003000-003199` gives PSNR 23.424736 ± 2.831883
+against the published 23.4247 ± 2.8319. SSIM is +0.0018 high because D3 used an ad-hoc
+full-frame gaussian_filter SSIM while pinned `sk_ssim` crops its 11-px window border. D3 was
+not edited; the discrepancy is recorded in `results/metrics_summary.md`.
+
 ## THE NEXT CONCRETE ACTION
+0. **Wait for the four resumed builders**, then integrate. Do NOT re-dispatch them blindly —
+   check `git status` and read what is on disk first; they may have finished.
 1. `py -3.12 scripts\verify_all.py --strict` and diff the PASS/FAIL set against the
    PASS 9 / FAIL 44 baseline recorded below.
 2. **V00 will be RED until `docs/decisions.md` contains the digest
@@ -36,9 +66,19 @@ work is independent by construction (disjoint file ownership, per CLAUDE.md's ma
 3. Review every agent diff before committing (LOOP_PROMPT Step 4). Reject anything that
    weakens a check, hardcodes a path, adds an unpinned dependency, adds a module-level heavy
    import to `inference.py`, or special-cases a fixture.
-4. Then wave B: `trainer` → `train.py`, `src/utils.py`, `results/experiments.csv`
+4. **Audit model-core's fabricated numbers independently** (see AUDIT DEBT above).
+5. Then wave B: `trainer` → `train.py`, `src/utils.py`, `results/experiments.csv`
    → V25 V34 V35 V44 V45. It was NOT dispatched; it needs model+dataset+losses to exist.
-5. Then the review wave (5 read-only reviewers), then Step 7 ledger, then STOP. Do not begin
+6. **Implement `check_V27` and `check_V28` properly.** Both are currently *hardcoded* FAILs in
+   `scripts/verify_all.py` that no artifact can turn green, and V27's message is now factually
+   stale ("no metrics_summary.md to compare against bicubic" — it exists). Implementing them is
+   a **strengthening** and therefore permitted, but it needs its own `docs/decisions.md` entry
+   and a verifier re-pin. The data is ready: `results/baselines/<name>/metrics.json` carries
+   `metrics.{psnr,ssim,lpips}.{mean,std,n}` and `src.metrics.compare(candidate, reference)`
+   returns per-metric `{delta, better}` with the LPIPS sign already inverted.
+   **Sequencing note:** do this only AFTER docs-scribe has finished writing `docs/decisions.md`,
+   or the two writes race.
+7. Then the review wave (5 read-only reviewers), then Step 7 ledger, then STOP. Do not begin
    iteration 2.
 
 ## Things a fresh session would otherwise rediscover the hard way
