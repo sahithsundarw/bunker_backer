@@ -693,3 +693,278 @@ reason than SPEC anticipated: there is no sparse structure to reconstruct, so no
 
 Use `000984.npy` as the honest failure case, and describe it accurately as broadband texture
 rather than mislabelling it periodic aliasing.
+
+## D15 — V51 reconciled with V47; net stricter (HUMAN-AUTHORISED, 2026-08-15)
+
+`scripts/verify_all.py` `check_V51` was edited by the main session and `docs/VERIFIER_SHA256`
+re-pinned. V00 fails on an undocumented verifier change, so this entry is the required
+audit trail. Digests:
+
+```
+new sha256 of scripts/verify_all.py: cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d
+prior pin:                           d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13
+```
+
+### The conflict
+
+V51 banned **every** tracked `.npy`. SPEC §12 requires `sample_inputs/`, and V47 runs
+`inference.py` against `sample_inputs/` **from a clean clone** — which means those files must
+be *in* the clone. As implemented, V47 and V51 were mutually exclusive and the Definition of
+Done was unreachable: any state satisfying one failed the other.
+
+The human explicitly authorised committing 4–6 real `.npy` files to `sample_inputs/` in this
+session. That is the same human-issued-amendment mechanism used for D6 and D10; the agent did
+not originate it and may not originate it.
+
+### Resolution
+
+A **deliberately narrow** exemption for `sample_inputs/*.npy`, bounded at **≤8 files** and
+**≤512 KB** in total (actual: 6 files, 393,984 B), plus **four new assertions** that make V51
+net stricter than it was:
+
+1. the blob-extension ban widened from 4 extensions to 20 — `.npz .pt .pth .zip .env .tar
+   .gz .7z .ckpt .onnx .safetensors .bin .raw .dat .h5 .hdf5 .parquet .mat .pkl .pickle` —
+   plus `.DS_Store`;
+2. any tracked path containing a dataset directory token (`/GT/`, `/NoisyLR/`,
+   `/ground_truth/`, `/test_NoisyLR/`) is a FAIL, which catches a committed slice of the
+   dataset tree under **any** extension;
+3. a **5 MB per-tracked-file** cap;
+4. a **25 MB total-tracked-tree** cap.
+
+(3) and (4) catch a dataset dump regardless of extension, which an extension blacklist
+provably cannot.
+
+Measured after the change: **77 tracked files, 7,271,202 B total**, largest single file
+`results/eda/pairs_grid.png` at 2,500,869 B. V51 PASSES.
+
+**Stated honestly:** the `sample_inputs` exemption is, in isolation, a *loosening* with
+respect to those six paths, and it exists only because a human authorised it. The four new
+assertions are unambiguous strengthenings. The net effect is stricter, but the loosening is
+recorded rather than buried.
+
+## D16 — The transferable asset is the measured degradation, not any content prior
+
+**Standing note for all future model and hardening work.**
+
+The provided data is grayscale natural photographs (D4). KLA's hidden test set may be actual
+semiconductor imagery — F7 explicitly promises out-of-distribution content. What survives
+that gap is the **measured degradation**:
+
+- the recovered 4×4 sharpening downsample kernel (D1),
+- shot noise (`a·x`) rather than a Gaussian floor (D2, D12),
+- noise applied **after** decimation (D2).
+
+What does **not** survive is any content prior learned from photographs.
+
+**Therefore: prefer wide degradation randomisation over squeezing in-distribution dB.**
+
+A hardening iteration that buys +0.2 dB in-distribution by *narrowing* the degradation range
+is a **regression against the actual objective** and must be rejected on those grounds even
+though the in-distribution number improved. Recorded so a future iteration does not optimise
+the wrong thing and then defend it with the metric it improved.
+
+## D17 — `results/restored_test_outputs/` delivery: NOT Git LFS (mechanism decided, size PENDING)
+
+F12 requires the folder to hold real model outputs and V13 asserts it is non-empty. 400
+outputs at 256×256 float32 is ≈105 MB raw — over GitHub's file limit if bundled, and caught
+by the `*.npy` rule in `.gitignore`.
+
+**Git LFS is ruled out by human instruction.** Unresolved LFS pointer stubs on a fresh clone
+are a known way to fail V06, whose own text names *"not an LFS pointer stub"* as a failure
+mode. A stub that looks like a file is worse than an honest external link.
+
+**Decision:** compress all 400 outputs into a single `.npz` via `np.savez_compressed` and
+commit it **if** the measured artifact is under ~40 MB; otherwise host it externally with a
+published sha256 and a link verified from a logged-out session.
+
+**The measured size is not yet known — no trained model exists — so this entry is the
+DECIDED MECHANISM with the MEASUREMENT PENDING.** The measured byte size must be written into
+this entry once the outputs exist. No size is estimated here on purpose.
+
+### Open decision for the human — flagged, not resolved
+
+The mechanism collides with two rules that are currently in force:
+
+- `.gitignore` bans `*.npz`;
+- the newly strengthened V51 (D15) bans `.npz` outright **and** caps any tracked file at
+  5 MB and the whole tracked tree at 25 MB.
+
+So shipping a ~40 MB `.npz` requires **another human-authorised V51 amendment**, or the
+external-hosting route. This is not resolved here. Weakening V51 to fit an artifact would be
+a Prime Directive 1 violation if the agent did it unilaterally.
+
+## D18 — Environment pinned, and how `requirements.txt` forces a CUDA build
+
+**Pinned environment** (real `pip freeze` output, not remembered versions):
+
+| component | version |
+|---|---|
+| Python | 3.12.10 (Windows 11) |
+| torch | **2.11.0+cu128** (`torch.version.cuda == '12.8'`, `torch.cuda.is_available()` True, `is_bf16_supported()` True) |
+| torchvision | **0.26.0+cu128** (a real dependency — `lpips` imports it) |
+| lpips | 0.1.4 |
+| scikit-image | 0.26.0 |
+| PyYAML | 6.0.3 |
+| pytorch-msssim | 1.0.0 |
+| numpy | 2.5.2 |
+| scipy | 1.18.0 |
+| matplotlib | 3.11.1 |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU (8 GB) |
+
+### The failure this pin exists to prevent
+
+`pip install lpips` with no index specified resolved torch **from PyPI** and replaced
+`torch==2.11.0+cu128` with a CPU-only build. Observed directly in this session, mid-repair:
+`torch.__version__` reported `2.13.0+cpu`, `torch.version.cuda` was `None`, and
+`torch.cuda.is_available()` was `False`, with `torchvision==0.28.0`. Nothing failed and
+nothing was logged. Recovered with
+`pip install --force-reinstall --index-url https://download.pytorch.org/whl/cu128 torch torchvision`.
+Full write-up: `docs/BLOCKERS.md` B8.
+
+**Why it is load-bearing:** V04 installs a fresh venv from `requirements.txt` **alone**. If
+that file does not force the PyTorch index, the clean-room install silently yields a CPU-only
+torch — the run exits 0, V04 *passes*, and on KLA's H100 the GPU sits unused while the
+throughput score collapses with no error anywhere.
+
+### Mechanism chosen
+
+`requirements.txt` line 1 is
+`--extra-index-url https://download.pytorch.org/whl/cu128`, paired with the pins
+`torch==2.11.0+cu128` and `torchvision==0.26.0+cu128`.
+
+The **local version `+cu128` is the safety catch**, not the directive. PyPI cannot host a
+local version, so once `+cu128` is in the pin there is no CPU candidate for the resolver to
+fall back to — `lpips` cannot pull a PyPI torch during resolution because no PyPI torch
+satisfies the requirement. Either the CUDA wheel installs or the install fails **loudly**,
+which is the desired behaviour. Two flags that were considered and rejected: an
+`--index-url` override (would hide all of PyPI, breaking the other 31 pins) and a documented
+post-install step (V04 forbids extra steps).
+
+**Verified, 2026-08-15, unattended:** unauthenticated `git clone` of the public repo →
+`py -3.12 -m venv .venv` → `.venv/Scripts/python.exe -m pip install -r requirements.txt`
+(no other flags, no env vars) → `torch 2.11.0+cu128 | cuda 12.8 | available True`,
+`torchvision 0.26.0+cu128`.
+
+### H100 discipline
+
+Training and every timing measurement happen on the RTX 4060 Laptop GPU. **Any H100 number
+in the deck or README is a projection, not a measurement, and must be labelled as such.**
+The 4060 figures do not extrapolate linearly — see D21: NAFSR is memory-bandwidth bound, not
+compute bound.
+
+## D19 — Architecture: NAFSR, with a plain U-Net as the learned baseline
+
+*(measurements by `model-core`, RTX 4060 Laptop GPU)*
+
+**Decision.** NAFNet-style body at LR resolution + PixelShuffle ×2 head + global bilinear
+skip (`NAFSR`), with a plain U-Net (`UNetSR`) as the learned baseline required by the rubric.
+Both live in `src/model.py`, selected by `cfg["name"]`, behind one frozen entry point
+`build_model(cfg: dict) -> nn.Module`.
+
+| model | params | GMAC / 128×128 img | GFLOP |
+|---|---|---|---|
+| NAFSR w48 n16 | **388,225** | 5.584 | 11.169 |
+| UNetSR w32 L4 | **2,970,401** | 4.478 | 8.956 |
+
+The comparison is roughly **FLOP-matched (0.80×)** with NAFSR at **0.13× the parameters**, so
+NAFSR is given no parameter advantage over the baseline it has to beat (V28).
+
+Flat body ⇒ required size multiple **1**; `UNetSR` reflect-pads internally and crops back so
+its external multiple is also 1. Verified: 128→256, 256→512, 61×97→122×194, 1×1→2×2. No
+BatchNorm, no dropout, bit-identical repeats in `eval()`. Checkpoint is **3.14 MiB** for
+model + EMA, far under V43's 100 MB cap.
+
+## D20 — Stayed at 0.388 M params rather than SPEC §7.1's 1–3 M band
+
+*(measurements by `model-core`, RTX 4060 Laptop, bf16 + channels_last, batch 32 at 64 px patches)*
+
+**The binding constraint is training throughput on the 8 GB dev GPU, not inference cost.**
+
+| config | params | ms/step | 20k iters | peak VRAM |
+|---|---|---|---|---|
+| w48 n16 (chosen) | 0.388 M | 221 | **73.7 min** | 3765 MiB |
+| w64 n16 | — | — | 87.1 min | — |
+| w80 n16 | 1.049 M | — | 135.5 min | 6255 MiB |
+| w96 n16 | 1.500 M | — | 141.1 min | — |
+| w64 n28 | 1.048 M | **2766** | — | **7925 MiB — does not fit** |
+
+`w64 n28` spills the allocator at 7925 MiB of 8 GB and collapses to 2766 ms/step.
+
+Entering SPEC's 1–3 M band costs **1.8–1.9× training wall-clock for an unmeasured quality
+gain**. On a one-day budget the number of training runs that fit is the deciding constraint.
+
+**Revisit with a measured PSNR delta once a training run exists — raising width is the first
+thing to try once there is a quality number.**
+
+## D21 — `LayerNorm2d` via `F.layer_norm` on an NHWC view, not a hand-rolled channel reduction
+
+*(measurements by `model-core`; interleaved A/B, 5 repeats, medians)*
+
+| variant | training | inference | VRAM |
+|---|---|---|---|
+| manual channel reduction | 4939 ms | 305 ms | 4970 MiB |
+| fused `F.layer_norm` on NHWC view | **4233 ms** | **208 ms** | **3486 MiB** |
+
+⇒ **1.17× inference, 1.46× training, 1.43× less VRAM**, with non-overlapping ranges.
+
+**Correction on the record.** An earlier single-shot version of this measurement reported
+1.09× inference. That was inside the ~9% run-to-run variance and should not have been quoted
+as a win. It is superseded by the 5-repeat median above. Recorded rather than quietly
+replaced.
+
+**NAFSR is memory-bandwidth bound, not compute bound.** Profile: 32.8% `layer_norm`, 17.9%
+conv bias-add — the bias adds cost as much as the convolutions themselves — 16.2%
+convolution. Two consequences:
+
+1. It explains why SPEC §11.2's optimisation table matters so little here (D7): `channels_last`
+   and bf16 each move it under 20%.
+2. **These 4060 timings do not extrapolate linearly to an H100** and must never be presented
+   as if they do.
+
+## D22 — Seven placeholder V-checks implemented; V09's conflict with V20 fixed. Strengthening.
+
+`scripts/verify_all.py` sha256 is now
+`590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
+(prior `cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d`, D15; original
+BOOTSTRAP pin `d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13`, D14).
+This is the second edit to the verifier after the D15 change and is the required PD1 audit
+trail for it.
+
+**V26, V27, V28, V29, V32, V33 and V35 were BOOTSTRAP placeholders that returned an
+unconditional FAIL no artifact could ever turn green.** A check that cannot pass is not a
+strict check — it is an *absent* check wearing a red badge, and it hides real regressions
+because it looks identical before and after a defect is introduced. All seven now test their
+subject:
+
+- **V26** runs the marker-based paired-crop self-test and fails if it reports pass while
+  checking zero crops.
+- **V27** compares final vs bicubic and enforces "a margin, not noise" **statistically** — the
+  PSNR gain must exceed two standard errors of the mean — rather than with an invented
+  constant. It also fails if the standard deviation is not reported, which the contract
+  requires.
+- **V28** implements the contract's negative-result escape hatch exactly as narrowly as
+  written: a loss to the U-Net baseline converts to PASS only when an honest negative result
+  is documented in this file.
+- **V29** intersects the committed validation list against the train list the module actually
+  reports, and additionally rejects duplicates, a degenerate empty side, and a `dataset.py`
+  that never references `split_val.txt`. Without the dataset present it FAILS honestly instead
+  of passing on file-only invariants.
+- **V32** asserts 1 channel in / 1 channel out **and that a 3-channel input is rejected** — a
+  model that silently accepts 3 channels would let an accidental BGR/RGB path through without
+  ever raising.
+- **V33** recomputes the degradation-fidelity report live against the real pairs when the
+  dataset is present, falling back to the committed JSON only when it is not, and states which
+  in its detail so an artifact is never mistaken for a live measurement.
+- **V35** asserts the six required checkpoint keys and `strict=True` loading of **both**
+  `model` and `ema`, using `weights_only=True` — the same load path `inference.py` uses, so a
+  checkpoint requiring arbitrary unpickling can no longer pass V35 and then break the shipped
+  script.
+
+**V09 fix.** `check_V09` treated an unreadable *input* as a scale violation. A corrupt file
+forms no `(in, out)` pair, the contract's wording is *"for every pair"*, and V20 explicitly
+declares corrupt inputs survivable — so V09 as written was in **direct conflict with V20** and
+no implementation could satisfy both. Unreadable inputs are now excluded and reported in
+evidence rather than silently dropped, and a new anti-vacuity guard fails V09 if that
+exclusion leaves zero pairs checked.
+
+Measured effect on the suite: **PASS 9 → 35, FAIL 44 → 18, Tier 1 fully green (9/9).**

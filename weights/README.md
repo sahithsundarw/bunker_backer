@@ -1,24 +1,86 @@
 # Model weights
 
-`best.pt` is the final checkpoint: EMA weights, config, iteration, metrics and git SHA
-(V35). It is loaded automatically by `inference.py` via `Path(__file__).parent` — no
-user action required (V05).
+`best.pt` is the checkpoint `inference.py` loads. It is resolved as
+`Path(__file__).resolve().parent / "weights" / "best.pt"` — relative to the **script**, never
+to the current working directory and never an absolute literal (V05). A reviewer does not
+have to pass `--weights`, set an environment variable, or edit anything.
 
-## Status
+Per SPEC §9 the checkpoint self-describes (V35): it carries `model`, `ema`, `config`, `iter`,
+`metrics` and `git` keys, so weights can never be silently paired with the wrong
+architecture. `inference.py` prefers the **EMA** weights when present.
 
-**Not yet produced.** Training has not been run. V06 will FAIL until either the file is
-present in the clone (Git LFS resolved, >1 KB, not a pointer stub) or this file carries a
-download URL returning HTTP 200 from a logged-out session plus a matching `sha256`.
+---
 
-## Download
+## Status — 2026-08-15, iteration 1
 
-<!-- TODO(docs-scribe): URL + sha256 once the checkpoint exists. -->
+**No checkpoint exists yet. Training has not been run.**
+
+`weights/best.pt` is absent from this repository, and `weights/*.pt` is currently in
+`.gitignore`. **V06 is therefore FAILING, correctly.** It will stay red until one of the two
+routes below is complete. Nothing in this file is a placeholder standing in for a value that
+was measured and then omitted — the values are genuinely not yet known.
+
+### What `inference.py` does in the meantime
+
+If the checkpoint cannot be found or cannot be loaded, `inference.py` prints
+
+```
+inference.py: checkpoint not found at <path>; falling back to bicubic x2 upsample
+```
+
+on stderr and completes with **exit code 0**, producing a parameter-free bicubic ×2 upsample
+of each input. That is a deliberate degradation-not-crash policy: a script that runs and
+scores badly is scored, and a script that crashes is not (CLAUDE.md PD4). It is **not** a
+model result and must never be reported as one. Pass `--require_weights` to turn the fallback
+into a hard failure — use that flag in any run whose output you intend to score.
+
+---
+
+## Download — to be completed when the checkpoint exists
+
+Exactly one of these two routes must be satisfied before submission:
+
+**Route A — commit the file.** The checkpoint is small enough for plain git: D19 measures a
+constructed NAFSR w48 n16 checkpoint (model + EMA, 388,225 parameters) at **3.14 MiB**, far
+under GitHub's 100 MB limit and under V43's cap. This is the preferred route because it has
+no external dependency and no link to rot. It requires removing the `*.pt` line from
+`.gitignore` for this one path, which is a `.gitignore` change the main session owns.
+
+**Route B — external hosting.** Publish the file, then fill in the table below with a URL
+that returns **HTTP 200 from a logged-out session** (verify in a private browser window, not
+just in your own tab) and the sha256 of the exact bytes served.
+
+Git LFS is **ruled out** — see `docs/decisions.md` D17. An unresolved LFS pointer stub on a
+fresh clone is a known way to fail V06, and V06's own text names that failure mode.
 
 | field | value |
 |---|---|
-| URL | _pending_ |
-| sha256 | _pending_ |
-| size | _pending_ |
+| URL | *pending — no checkpoint yet; do not fabricate* |
+| sha256 | *pending — must be the sha256 of the served bytes, not of a local copy* |
+| file size (bytes) | *pending* |
+| parameter count | *pending — 388,225 for NAFSR w48 n16 if that config ships unchanged (D19)* |
+| architecture / config | *pending — mirrors `configs/final.yaml`, also embedded in the checkpoint* |
+| training seed | *pending — 42 unless the shipped run says otherwise* |
+| git SHA of the training run | *pending — embedded in the checkpoint under `git`* |
 
-Checkpoint must stay under 100 MB or be hosted via Git LFS / an external link (V43,
-SPEC 18 pitfall 8). Test any link from a logged-out browser before submission.
+Compute the digest with:
+
+```
+py -3.12 -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('weights/best.pt').read_bytes()).hexdigest())"
+```
+
+> Recorded here rather than in the root `README.md` because there is no file for it to hash
+> yet, and V46 executes every fenced shell command in `README.md`. The same one-liner,
+> pointed at `scripts/verify_all.py`, is what produced the digest pinned in
+> `docs/VERIFIER_SHA256`.
+
+## Checklist before submission
+
+- [ ] `best.pt` present in a **fresh clone** (Route A) **or** the table above complete and the
+      URL fetched successfully from a logged-out session (Route B)
+- [ ] file > 1 KB and not an LFS pointer stub (V06)
+- [ ] checkpoint < 100 MB (V43)
+- [ ] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35)
+- [ ] `inference.py --require_weights` succeeds against it — i.e. the bicubic fallback is
+      *not* silently in play
+- [ ] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43)

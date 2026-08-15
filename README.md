@@ -1,131 +1,347 @@
-# KLA PS01 — AI-Based Restoration of Degraded Images
+# KLA PS01 — AI-Based Restoration of Degraded Images for Semiconductor Inspection
 
-SEMICON India Hackathon 2026, Track 1 · Problem Statement PS01
+SEMICON India Hackathon 2026 · Track 1 · Problem Statement PS01
+Public repository: `https://github.com/sahithsundarw/semicon-kla-image-restoration`
 
-> ## ⚠ SCAFFOLD — NOT YET SUBMITTABLE
+Restores a degraded grayscale image — noisy and downsampled by exactly ×2 — to a clean
+estimate at full resolution, in one blind pass, with the whole model running at low
+resolution and a single PixelShuffle ×2 head.
+
+---
+
+> ## ⚠ STATUS — 2026-08-15, iteration 1: NO TRAINED CHECKPOINT YET
 >
-> This README is a **bootstrap stub**. The model has not been built or trained, and
-> `inference.py` currently raises `NotImplementedError`. Every number below is marked
-> _pending_ rather than filled with a placeholder, because a placeholder that looks like a
-> result is worse than an obvious gap (V48 requires the table to match a real run).
+> `inference.py` runs end to end from a clean clone and honours the full I/O contract, but
+> **`weights/best.pt` does not exist yet**, so it currently falls back to a parameter-free
+> bicubic ×2 upsample and says so on stderr. `train.py` is implemented but **no training run
+> has completed**, so there is no checkpoint to load and no model number to report.
 >
-> Owner: `docs-scribe`. Current status: `docs/STATE.md`.
+> Consequently the results table below reports **only measured classical baselines**. There
+> is no "ours" row, and none has been invented. Every unmeasured quantity in this README is
+> marked *not yet measured* rather than filled with a plausible-looking number.
+>
+> Live check status: `results/verification_report.json`. Ledger: `docs/STATE.md`.
 
-## About the data
+---
 
-The problem domain is **semiconductor inspection**. The **released dataset is grayscale
-natural photographs** — architecture, animals, foliage, landmarks — not semiconductor
-imagery. We treat it as a **proxy**: the degradation (×2 decimation plus signal-dependent
-noise) is what transfers to inspection imagery, so we characterised the degradation
-empirically and optimise for degradation robustness rather than content-specific priors.
+## About the released data — read this first
 
-Evidence: `results/eda/content_train_gt.png`, `results/eda/content_test_inputs.png`.
-Full analysis: `docs/SPEC_ADDENDUM.md` (headline finding, §7, §11).
+**The problem domain is semiconductor inspection. The released dataset is grayscale natural
+photographs.** Both statements are true and this repository holds them at once.
+
+> The released dataset is 3200 training pairs and 400 test inputs of grayscale **natural
+> photographs** — architecture, animals, foliage, landmarks — not semiconductor imagery. We
+> treat it as a **proxy**: the *degradation* — ×2 decimation plus signal-dependent noise — is
+> what transfers to inspection imagery, so we characterised the degradation empirically and
+> optimised for degradation robustness rather than fitting content-specific priors.
+
+Verified over 96 samples spanning both splits. Evidence: `results/eda/content_train_gt.png`
+and `results/eda/content_test_inputs.png`. Full analysis: `docs/SPEC_ADDENDUM.md` (headline
+finding, §7, §11) and `docs/decisions.md` D4.
+
+We do **not** speculate about why the released data is natural imagery — deliberate proxy,
+placeholder or packaging error are all consistent with what we measured. We report the
+measurement, not a motive.
 
 ## Result summary
 
-| Method | PSNR (dB) ↑ | SSIM ↑ | LPIPS ↓ | End-to-end (img/s) |
-|---|---|---|---|---|
-| Bicubic ×2 (no denoise) | **23.4247 ± 2.8319** | **0.54284 ± 0.20225** | _pending_ | _pending_ |
-| Classical denoise + bicubic | _pending_ | _pending_ | _pending_ | _pending_ |
-| U-Net baseline | _pending_ | _pending_ | _pending_ | _pending_ |
-| **Ours (NAFSR-x2)** | _pending_ | _pending_ | _pending_ | _pending_ |
+Held-out validation split of `train/`, **n = 400 pairs**, listed explicitly in
+`configs/split_val.txt`. There is no `test_GT` — the released test set ships inputs only — so
+no score can be computed locally against the official test set. Scores are computed on the
+**reloaded on-disk `.npy` artifacts**, not on in-memory tensors, so any dtype loss is included
+(SPEC §10, V30).
 
-The bicubic row is measured on 200 held-out training pairs with clip-to-[0,1]
-(`docs/decisions.md` D3). It is low by natural-image SR standards because the input is
-genuinely noisy — expected, not a bug.
+| Method | PSNR dB ↑ | SSIM ↑ | LPIPS ↓ | End-to-end throughput |
+|---|---|---|---|---|
+| Bicubic ×2 (raw NoisyLR, the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 | not yet measured |
+| Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not yet measured |
+| Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not yet measured |
+| U-Net baseline (UNetSR w32 L4) | **not yet trained** | — | — | — |
+| **Ours (NAFSR ×2, w48 n16)** | **not yet trained** | — | — | — |
+
+Values are `mean ± population standard deviation`. Source: `results/metrics_summary.md`,
+which is machine-generated by `scripts/evaluate.py`.
+
+Metric implementations are pinned, because library defaults differ by non-trivial margins:
+
+- PSNR — `skimage.metrics.peak_signal_noise_ratio(gt, pred, data_range=1.0)`
+- SSIM — `skimage.metrics.structural_similarity(gt, pred, data_range=1.0,
+  gaussian_weights=True, sigma=1.5, use_sample_covariance=False)` (Wang et al. 2004 settings)
+- LPIPS — `lpips.LPIPS(net='alex')`, grayscale replicated to 3 channels, rescaled to [-1,1]
+
+The bicubic floor is low by natural-image super-resolution standards because the input is
+genuinely noisy. That is expected, not a bug.
 
 ## Environment
 
-- Windows 11 dev machine; NVIDIA GeForce RTX 4060 Laptop (8 GB), driver 610.47
-- Python 3.12.10 (`py -3.12`); PyTorch **not yet installed**
-- KLA scores on an H100 — local timings are labelled as local and never presented as H100 numbers
+| | |
+|---|---|
+| OS | Windows 11 |
+| Python | 3.12.10 |
+| PyTorch | 2.11.0+cu128 (`torch.version.cuda == '12.8'`) |
+| torchvision | 0.26.0+cu128 |
+| GPU (training + all timings) | NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB |
+| Scoring GPU | NVIDIA H100 (KLA's) — **no H100 number appears in this repo; any future H100 figure will be labelled a projection, not a measurement** |
+
+Clone the repository:
 
 ```bash
-python -m venv .venv
-python -m pip install -r requirements.txt
+git clone https://github.com/sahithsundarw/semicon-kla-image-restoration.git
+cd semicon-kla-image-restoration
 ```
 
-## Inference (the command KLA will run)
+Create the environment and install the pinned dependencies:
 
 ```bash
-python inference.py --input_dir <degraded_images_dir> --output_dir <restored_output_dir>
+py -3.12 -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-Weights load automatically from `weights/best.pt`, resolved relative to the script. No edits
-required. **Not yet functional** — see the scaffold notice above.
+*(The commands above are the Windows form, which is what was executed to verify them. On
+Linux/macOS the equivalents are `python3.12 -m venv .venv` and `.venv/bin/python`; nothing
+else changes. Activating the venv and calling plain `python` works identically — the explicit
+interpreter path is used here only so the commands are copy-pasteable with no shell state.)*
+
+Confirm you got a CUDA build — this matters, see the note below:
+
+```bash
+.venv/Scripts/python.exe -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
+On the reference machine this prints `2.11.0+cu128 12.8 True`. On a machine with no NVIDIA
+GPU the same wheels install and the last field is `False`; `inference.py` then runs on CPU
+without any change.
+
+> **Why `requirements.txt` starts with `--extra-index-url`.** `torch==2.11.0+cu128` is
+> published only on `download.pytorch.org`, never on PyPI. Installing `lpips` without that
+> directive silently resolved torch **from PyPI** and replaced the CUDA build with a CPU-only
+> wheel on this machine — nothing failed, nothing was logged, and `torch.cuda.is_available()`
+> quietly became `False`. The `+cu128` local version in the pin is the safety catch: PyPI
+> cannot host a local version, so there is no CPU candidate to fall back to and a broken
+> install fails loudly instead of silently costing the entire throughput score. See
+> `docs/decisions.md` D18 and `docs/BLOCKERS.md` B8.
+
+## Inference — the command KLA runs
+
+```bash
+.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs
+```
+
+`sample_inputs/` holds 6 real degraded 128×128 inputs (394 KB total) so a reviewer can verify
+the script without downloading the dataset. Point `--input_dir` at any directory of degraded
+`.npy` files and `--output_dir` anywhere you like — those two arguments are the entire
+interface (SPEC F11). No other argument is required, no file needs editing, and weights are
+resolved relative to the script file, never to the working directory, so the script runs
+correctly from any CWD.
+
+Until a checkpoint exists the run prints this on stderr and still exits 0:
+
+```
+inference.py: checkpoint not found at ...\weights\best.pt; falling back to bicubic x2 upsample
+```
+
+That fallback is deliberate — a script that runs and scores poorly is scored; one that
+crashes is not — but its output is **not** a model result. Pass `--require_weights` to make a
+missing checkpoint a hard error instead.
+
+Optional flags, all with defaults that make the two-argument invocation correct:
+`--weights`, `--batch_size`, `--device`, `--precision {auto,bf16,fp16,fp32}`, `--compile`,
+`--tta`, `--num_workers`, `--write_threads`, `--require_weights`, `--verbose`.
+`--compile` and `--tta` are **off by default**: at 400 images, 30–120 s of compilation never
+amortises, and an 8× self-ensemble cannot be justified against a fixed cost it does not
+amortise (`docs/decisions.md` D7).
 
 ## Input / output contract
 
-Derived from the real files; full detail in `docs/io_contract.md` (FINAL).
+Derived from the real files and final: `docs/io_contract.md`.
 
-- **Input:** `.npy`, `float32`, 2-D `(H, W)`, grayscale, values **may lie outside [0,1]**
-  (observed `[-0.28, 2.16]`). Inputs are **not** clipped — out-of-range values are
-  intentional and carry information (SPEC F5).
-- **Output:** `.npy`, `float32`, exactly **2× the input** in both axes, clipped to `[0,1]`,
-  **no renormalisation**, filename **byte-identical** to the input, subdirectory structure
-  mirrored.
+**Input**
+- `.npy` NumPy binary, read with `np.load(path, allow_pickle=False)`
+- `float32`, 2-D `(H, W)`, grayscale, **no channel axis**
+- values **may lie outside [0,1]** — observed range `[-0.28, 2.16]`, with ~3% of pixels above
+  1.0 and ~0.5% below 0.0
+- **inputs are never clipped.** The out-of-range values are intentional and carry information
+  (SPEC F5); clipping them destroys it
 
-No image library is used anywhere in the inference path — the data is `.npy` end to end.
-That is deliberate: an image library is dead weight on a timed run and several `cv2` paths
-silently convert to 8-bit or clip to [0,1].
+**Output**
+- `.npy`, `float32`, written with `np.save`
+- exactly **2× the input** in both axes — `(2H, 2W)`
+- **clipped to [0,1]**, and **no renormalisation**: per-image min–max renormalisation was
+  measured at **−4.66 dB PSNR** and is permanently rejected (`docs/decisions.md` D3)
+- filename **byte-identical** to the input filename, same extension, no `_restored` suffix
+- subdirectory structure mirrored from input to output; one output per input
+
+Demonstrate the contract on the sample data:
+
+```bash
+.venv/Scripts/python.exe -c "import numpy as np; a=np.load('sample_inputs/000000.npy'); b=np.load('results/sample_outputs/000000.npy'); print('in ', a.shape, a.dtype, round(float(a.min()),4), round(float(a.max()),4)); print('out', b.shape, b.dtype, round(float(b.min()),4), round(float(b.max()),4))"
+```
+
+which prints, for that file:
+
+```
+in  (128, 128) float32 0.001 1.5406
+out (256, 256) float32 0.0 1.0
+```
+
+— input above 1.0 and untouched, output exactly doubled and clipped.
+
+**No image library is used anywhere in the inference path.** The data is `.npy` end to end, so
+`cv2`, `tifffile` and `PIL` are absent by design, not by oversight: they are dead weight on a
+timed run, and several `cv2` paths silently convert to 8-bit or clip to [0,1], which would
+corrupt inputs that legitimately reach 2.16. `inference.py`'s module-level imports are exactly
+`argparse os sys time pathlib concurrent.futures numpy torch`, enforced statically by a
+submission-blocking check.
 
 ## Training
 
-```bash
-python train.py --config configs/nafnet_x2.yaml --data_root <dataset_root>
-```
+`train.py` is implemented, but **no training run has completed yet**, so this section carries
+no wall-clock and no result. The invocation is
+`python train.py --config configs/nafnet_x2.yaml --data_root <dataset_root>`, with seed 42
+from the config. It is deliberately **not** presented as a fenced command: no command appears
+in this README that has not been executed successfully, and this one has not been run to
+completion here.
 
-Seed 42. Dataset lives outside the repo (`C:\kla-data`) and is never committed.
-**Not yet functional.**
+Useful flags for checking the pipeline before committing GPU hours: `--smoke` (a handful of
+steps, used by the verifier), `--overfit N` (deliberately overfit N pairs — the pipeline
+sanity gate; if it cannot reach a high PSNR on 2 pairs, alignment, normalisation or the loss
+is broken and nothing downstream is trustworthy), `--iters`, `--seed`, `--tag`. Every run
+appends a row to `results/experiments.csv` with the git SHA, config, seed, metrics and
+wall-clock.
 
-## Verification
+The dataset lives outside the repository (`C:\kla-data` on the dev machine) and is never
+committed. `configs/split_val.txt` is the committed, explicit validation file list — it is
+never regenerated randomly at run time, which would leak.
 
-```bash
-python scripts/verify_all.py
-```
-
-Runs all 53 checks from `docs/VERIFICATION_CONTRACT.md` (V00 + V01–V52) and writes
-`results/verification_report.json`. Near-total failure is the correct state at iteration 0.
+This section will be completed with the real iteration count, wall-clock and hardware once a
+training run finishes. Projected training cost from measured step time: **73.7 min for 20k
+iterations** at batch 32 / 64 px patches on the RTX 4060 (`docs/decisions.md` D20) — that is a
+measured step time extrapolated to an iteration count, not a completed run.
 
 ## Repository map
 
 | Path | Contents |
 |---|---|
-| `inference.py` | the evaluation script KLA runs |
-| `train.py` | reproduces the submitted checkpoint |
-| `src/` | model, blocks, dataset, degradation, losses, metrics, IO helpers |
-| `scripts/` | dataset forensics, degradation fitting, verifier, evaluation, benchmarking |
-| `configs/` | training configs and the committed validation split |
-| `docs/` | SPEC, addendum (governs on conflict), verification contract, findings, decisions |
-| `results/eda/` | dataset figures and the degradation fit |
-| `weights/` | checkpoint (pending) |
+| `inference.py` | the evaluation script KLA runs; standalone, two required arguments |
+| `train.py` | reproduces the submitted checkpoint (implemented; **no run completed yet**) |
+| `requirements.txt` | complete `pip freeze`, every line `==` pinned |
+| `sample_inputs/` | 6 real degraded inputs so inference can be verified without the dataset |
+| `src/` | `model.py` `blocks.py` `dataset.py` `degrade.py` `losses.py` `metrics.py` `io_utils.py` `utils.py` |
+| `configs/` | `nafnet_x2.yaml`, `baseline_unet.yaml`, `final.yaml`, `split_val.txt` |
+| `scripts/` | dataset forensics, degradation fitting, baselines, evaluation, benchmarking, `verify_all.py` |
+| `docs/` | SPEC, SPEC addendum (governs on conflict), verification contract, dataset findings, I/O contract, decisions, blockers, state |
+| `results/eda/` | dataset figures, degradation fit, content contact sheets |
+| `results/metrics_summary.md` | machine-generated results table |
+| `results/restored_test_outputs/` | mandatory model outputs (**empty — no model yet**; delivery mechanism decided in `docs/decisions.md` D17) |
+| `weights/` | checkpoint location + `README.md` (**no checkpoint yet**) |
 
 ## Method summary
 
-_Pending — written once the model exists._ Degradation analysis is complete and recorded in
-`docs/decisions.md` D1/D2: the downsample is a sharpening kernel (not a box), noise is applied
-after decimation, and the noise is signal-dependent with **no additive Gaussian floor**
-(three-parameter fit: σ=0, a=0.011253, v=0.015745).
+1. **Degradation forensics first.** The GT→LR downsample was recovered by least squares over
+   3,125,000 equations: a 4×4 **sharpening** kernel with centre weights ≈0.320 and negative
+   surround lobes ≈−0.045 — provably not a box filter, which has no negative lobes.
+   `bicubic(antialias=False)` sits within **1.22e−05** residual std of that optimum and is
+   used as the working model.
+2. **Noise is applied after decimation**, from residual autocorrelation (≈0 or slightly
+   negative at every tested lag; pre-decimation noise would be strongly positive).
+3. **There is no additive Gaussian floor.** The σ²+v·x² form the brief suggests overshoots the
+   darkest intensity bin by 12.5×. A three-parameter fit drives σ to exactly 0 and splits the
+   variance into a shot/Poisson term and a speckle term: **σ = 0, a = 0.011253, v = 0.015745**.
+   The simulator implements that, not a pure speckle model.
+4. **Architecture — NAFSR:** a flat NAFNet-style body at LR resolution, a PixelShuffle ×2
+   head, and a global bilinear-upsample skip so the network only learns residual detail. All
+   heavy compute stays at LR, where it is 4× cheaper. **388,225 parameters, 5.584 GMAC per
+   128×128 image.** Fully convolutional with a required size multiple of 1, verified on
+   128→256, 256→512, 61×97→122×194 and 1×1→2×2.
+5. **Learned baseline — UNetSR:** 2,970,401 parameters, 4.478 GMAC. The comparison is roughly
+   FLOP-matched (0.80×) with NAFSR at 0.13× the parameters, so the proposed model gets no
+   parameter advantage over the baseline it has to beat.
+6. **Loss** is balanced because the scoring blend is undisclosed: Charbonnier + (1−MS-SSIM) +
+   an FFT-magnitude term, with LPIPS available but **off by default**. **No adversarial
+   loss** — hallucinating a structure that is not there is the worst possible failure in an
+   inspection context.
+7. **Throughput** is treated as a startup problem, not a kernel problem: the test set is 400
+   files / 25.05 MB and the forward pass is sub-millisecond per image, so fixed startup is
+   ~85–95% of the scored wall-clock (`docs/decisions.md` D7). Import hygiene therefore
+   outranks every micro-optimisation. Independently, NAFSR profiles as
+   **memory-bandwidth bound, not compute bound** (32.8% layer-norm, 17.9% conv bias-add,
+   16.2% convolution), which is why `channels_last` and bf16 each move it by under 20%.
 
 ## Assumptions
 
-- Downsample kernel modelled as `bicubic(antialias=False)`, within 1.22e−05 residual std of
-  the least-squares optimum recovered over 3.125 M equations.
-- Noise applied after downsampling, per residual autocorrelation.
-- An additive Gaussian term is retained in augmentation, randomised over `U(0, 0.02)`
-  including zero, as a hedge for SPEC F3 even though it measures to zero.
+- The downsample kernel is modelled as `bicubic(antialias=False)`; the true support extends
+  slightly beyond 4×4 (a K=6 recovery finds max |weight| 0.01355 in the outermost ring), worth
+  ~1e−05 in residual std, so the model is close but not exact.
+- Noise is applied after downsampling and is signal-dependent with no additive floor. An
+  additive Gaussian term is nevertheless retained in augmentation, randomised over `U(0, 0.02)`
+  **including zero**, as a cheap hedge because the brief names additive Gaussian as a
+  degradation and warns that test noise levels may vary.
+- GT is per-image min–max normalised to exactly [0,1] (all 3200 files attain both endpoints).
+  This licenses clipping the output and nothing more.
+- Train and test are treated as the same domain: measured spectral peakiness and gradient
+  anisotropy differ by only ×1.02–1.04.
+- The hidden test set may contain genuine semiconductor imagery. We assume the **degradation**
+  transfers and the **content prior** does not, and we optimise accordingly
+  (`docs/decisions.md` D16).
 
 ## External resources & licences
 
-**No external datasets or pretrained weights used.**
+**No external datasets or pretrained weights are used in the shipped model.** It is trained
+from scratch on the provided image pairs. One external pretrained network is used for
+*evaluation only* and never for training: LPIPS (Zhang et al., CVPR 2018) with its standard
+AlexNet backbone, which the `lpips` package downloads on first use. It contributes no gradient
+to the shipped checkpoint and is not required to run `inference.py`.
 
-Phase 1 trains from scratch. Rationale in `docs/decisions.md` D9/D13: every classical ×2 SR
-checkpoint assumes clean bicubic downsampling with no noise, so the pretrained prior points
-the wrong way for this degradation.
+| Resource | Role | Link | Licence (verified at source) | Paper / model card |
+|---|---|---|---|---|
+| **LPIPS** (`lpips` 0.1.4) — linear calibration weights, shipped inside the pip package (`lpips/weights/v0.1/alex.pth`, 6,009 B) | Evaluation metric only | `https://github.com/richzhang/PerceptualSimilarity` | **BSD-2-Clause** — read from `LICENSE` at that repository (HTTP 200, fetched 2026-08-15); PyPI metadata agrees (`License :: OSI Approved :: BSD License`) | Zhang, Isola, Efros, Shechtman, Wang, *The Unreasonable Effectiveness of Deep Features as a Perceptual Metric*, CVPR 2018 |
+| **AlexNet ImageNet-pretrained backbone**, pulled by LPIPS via `torchvision.models.alexnet(pretrained=True)` → `~/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth`, **244,408,911 B measured** | Evaluation metric only — the feature extractor inside LPIPS | `https://github.com/pytorch/vision` | **BSD-3-Clause** — read from `LICENSE` at that repository (HTTP 200, fetched 2026-08-15) | Krizhevsky, Sutskever, Hinton, *ImageNet Classification with Deep Convolutional Neural Networks*, NeurIPS 2012; distributed via the torchvision model zoo |
+| External training datasets (DIV2K, Flickr2K, BSD, SEM corpora, …) | **None used** | — | — | — |
+| Pretrained super-resolution or restoration checkpoints (SwinIR, EDSR, NAFNet, …) | **None used** | — | — | — |
+
+Rationale for training from scratch, with the alternatives costed, is in `docs/decisions.md`
+D9 and D13: every public ×2 SR checkpoint is trained on clean bicubic downsampling with no
+noise, so its prior points the wrong way for this degradation.
+
+> **The condition under which the statement above stops being true.** `src/losses.py` contains
+> an optional LPIPS loss term. It is **off by default** (`use_lpips=False`) and gated to the
+> last 50% of training, and it is off in every shipped config. If any future iteration trains
+> the shipped checkpoint with `use_lpips=True`, then ImageNet-pretrained AlexNet features
+> **will** have contributed gradient to the shipped weights, the "evaluation only" framing
+> above becomes false, and this section must be rewritten before submission. Stated plainly so
+> the change cannot happen silently.
+
+No confidential, unlicensed or access-restricted data is used. The provided dataset is not
+redistributed in this repository — only 6 degraded input files under `sample_inputs/`, and no
+ground truth of any kind.
 
 ## Runtime measurement
 
-_Pending._ Will report hardware, batch size, precision, timing method (external, around the
-whole process), image count, total seconds and images/second — with the device labelled.
-Startup cost is ~85–95% of end-to-end wall-clock at this scale (`docs/decisions.md` D7).
+**Not yet measured.** `results/runtime_report.md` does not exist yet; it will report hardware,
+batch size, precision, image count, total seconds, images/second and the timing method, with
+the device named.
+
+Two commitments about how it will be measured, both already binding:
+
+- timing is taken **externally around the whole process** (`time python inference.py …`), not
+  by an internal timer around the forward pass — an internal timer would report the ~0.4 s of
+  compute and hide the startup that dominates;
+- every number will be labelled with the device it was measured on. Training and timing happen
+  on an RTX 4060 Laptop GPU; **no H100 measurement exists and none will be presented as one.**
+
+## Verification
+
+Correctness for this project is defined by `docs/VERIFICATION_CONTRACT.md` (immutable) and
+executed by `scripts/verify_all.py`, which runs 53 checks and writes
+`results/verification_report.json`. Run it with
+`.venv/Scripts/python.exe scripts/verify_all.py --strict`, or add `--fresh-clone` for the
+clean-room checks. It is **not** listed as a fenced command here because it exits non-zero
+while the project is incomplete, and no command in this README exits non-zero.
+
+**The suite is not green, and this README does not claim it is.** What is red at this commit
+is red for one honest reason — the artifact does not exist yet: no checkpoint (V06), no
+`results/restored_test_outputs/` (V13), no completed training run and therefore no model to
+score (V25, V27, V28, V35, V45, V48), no runtime report (V37–V39, V43), no qualitative
+figures (V49). The authoritative per-check status is `results/verification_report.json`,
+regenerated on every run; `docs/STATE.md` carries the rolling ledger and `docs/BLOCKERS.md`
+the things that could not be resolved.
