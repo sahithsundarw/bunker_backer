@@ -31,6 +31,46 @@ Every remaining failure is honest and traceable to a missing artifact, not a bro
 
 ---
 
+## REVIEWER FINDINGS — `ml-skeptic` earned its place this iteration
+
+It re-derived every headline number rather than reading the prose. **Nine of ten claims
+reproduced to the published decimal** — including the bicubic 23.6524 ± 3.0236, the NLM
+26.2722, and D3's anchor at 23.424736 ± 2.831883. One did not, and two structural problems
+turned up that no check would have caught.
+
+**F1 (HIGH) — a claim retracted, its conclusion was backwards.** `data-pipeline` reported that
+synthetic LR has "1.33% of pixels > 1.0 against real 3.03%, so the simulator is 2.3× less
+likely to exceed 1.0". Those 1.33% figures were measured on an **artificial sine-plus-noise
+test tile**, then compared against real-dataset percentages — two different corpora. Re-derived
+on the same 2800 pairs: synthetic **3.2523%** vs real **3.1437%**. The simulator *matches* the
+bright tail; it **over**-produces the dark tail by 2.4×.
+The real finding underneath is more useful and I kept it: the simulator under-produces the
+**extreme** upper tail — synthetic max **1.7177** vs real max **2.0735** (dataset-wide 2.1580).
+Gaussian shot+speckle has no mass at 4–5σ the way the real sensor does. A model never shown
+inputs above ~1.72 will meet 2.158 in the released test data, and this project's entire transfer
+argument rests on the degradation rather than on content. Queued for hardening as a measured
+experiment. Logged as D25.
+
+**F2 (MEDIUM/HIGH) — V33 was grading its own homework. This is the one I care about.**
+`check_V33` asserted only `res["pass"]`, and every threshold lived in
+`src/degrade.py::FIDELITY_TOLERANCE` — a file `VERIFIER_SHA256` does **not** pin. A future
+iteration could have widened the bar until V33 went green **without touching a pinned file and
+without tripping Prime Directive 1**. The subject under test owned its own pass mark. Fixed:
+thresholds now live inside the pinned verifier and are applied *on top of* the module's flag,
+so acceptance is the AND of both. Tightened while there — the worst-bin gain limit had 97%
+headroom and was near-vacuous, now 3.0 → 4.5 (still 24% headroom against measured seed noise
+of <0.003). Logged as D24.
+
+**F3 (MEDIUM) — the verifier mutated what it verifies.** `fidelity_report()` writes its JSON
+unconditionally, so *running the verifier* left `git status` dirty — breaking Definition-of-Done
+criterion 5. Worse, V33's committed evidence was silently overwritten by whatever ran last, so
+the artifact could never disagree with the code and was not independent evidence at all. The
+check now snapshots and restores it byte-for-byte.
+
+**Process note:** that is the second unfounded number caught in one iteration (the first was
+`model-core`'s fabricated benchmark table). Both were caught by re-derivation, neither by
+reading the claim. It is the argument for keeping `ml-skeptic` in every wave.
+
 ## DECISIONS I MADE UNDER YOUR AUTHORISATION
 
 **1. B9 resolved: GitHub Release, not Git LFS, not a committed blob.**
