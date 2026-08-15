@@ -1676,3 +1676,19 @@ Reverted byte-exact, V57 green again.
 - **Do not delete or "simplify" V12 now that V57 exists.** V12 is cheap, still correct, and
   catches a different failure mode (the loader itself clipping). V57 subsumes it for the
   purpose of the contract's actual wording; it does not replace it.
+
+---
+
+## D36 — `train.py --no_ledger` restricted to `--smoke` runs (M-1)
+
+**Date:** 2026-08-16, iteration 2. **Source:** `requirements-auditor` M-1.
+
+`--no_ledger` let any run — including a full 20k-iteration training run — skip
+`results/experiments.csv` entirely, an undocumented escape hatch around SPEC §9's "log every
+run" and V45's row-count gate. Restricted to genuine smoke tests: `--no_ledger` now only takes
+effect when `--smoke` is also set; a non-smoke run passing `--no_ledger` gets a stderr warning
+and is logged anyway. A smoke test legitimately should not pollute the ledger with a
+12-iteration row, so that path is preserved. Traced through all four `(no_ledger, smoke)`
+combinations by hand rather than by a live run, since the GPU was reserved by a running
+benchmark at the time; low risk given the change is a single added condition around an
+existing, unchanged `append_experiment` call.

@@ -598,7 +598,15 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     # were saved during the run; re-saving the live model here would ship the last weights.
     update_checkpoint_metrics(out_path, metrics)
 
-    if not args.no_ledger:
+    # --no_ledger is an escape hatch around SPEC 9's "log every run" and V45's row-count
+    # gate, and it was unconditional -- any real training run could skip the ledger
+    # entirely (requirements-auditor M-1). Restricted to --smoke: a genuine smoke test
+    # legitimately should not pollute the ledger with a 12-iteration row, but nothing else
+    # gets to opt out silently.
+    if args.no_ledger and not smoke:
+        print(f"train.py: --no_ledger ignored for a non-smoke run ({run_id}); "
+              f"SPEC 9 requires every real run to be logged", file=sys.stderr)
+    if not (args.no_ledger and smoke):
         append_experiment(LEDGER, {
             "run_id": run_id,
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
