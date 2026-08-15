@@ -4,204 +4,150 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**A prior halt in this session (safety classifier blocking Bash) resolved itself** — shell
-access returned and every item that was flagged mid-halt has since been independently
-confirmed. Nothing below is carried over on trust; each line was re-verified against a live
-check run or a re-executed negative control just now. Record kept because the resolution
-mechanism (SSRF guard, clone-hole fix, self-grading fix) is worth knowing about even though
-none of it is still open:
+**Written at:** iteration 2, after the adversarial-review response batch. **Last verified
+commit:** `<pending — commit this file>`. **Verifier SHA:** re-pinned four times this batch,
+currently `001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf` — confirm against
+`docs/VERIFIER_SHA256` before trusting this number, it moves often right now.
 
-- **SSRF guard on `_fetch_digest` (D33): PROVEN, not just written.** Re-ran the 14-case
-  negative control (`<scratchpad>/test_url_guard.py`) just now: 11/11 malicious vectors
-  refused (`file://`, loopback, link-local, ftp, path-position spoof, host-suffix spoof,
-  subdomain-suffix spoof, embedded credentials, non-443 port, plain http), 3/3 legitimate URLs
-  accepted (the real asset, an uppercase host, the githubusercontent redirect target).
-  **0 incorrect.** `docs/VERIFIER_SHA256` is pinned to `160bc228...` and V00 passes.
-- **V45/V48 fresh-clone hole: fixed.** `.gitignore` now tracks `results/experiments.csv` and
-  `results/baselines/*/metrics.json` (NOT the 2000 `.npy` predictions per baseline, which stay
-  ignored to respect V51's 25 MB cap). Confirmed: `V45 PASS "2 runs logged"`,
-  `V48 PASS "table reconciles against all 5 evaluation records"`.
-- **`scripts/evaluate.py`'s self-graded V28 line: fixed** (commit `9e0771d`). It was declaring
-  its own PASS/FAIL from unpaired mean deltas — the exact defect D31 removed from the verifier,
-  reintroduced one layer down. Now uses `paired_compare()` in `src/metrics.py`, confirmed
-  byte-for-byte parity with `verify_all.py --only V28`'s own win/loss/tie counts.
-- **README.md: rewritten and committed** (`4d64a82`), 12 false/contradictory claims fixed,
-  4 of 5 fenced commands executed in a genuine fresh anonymous clone as part of the fix.
-- **Confirmed live, this instant:** `V00 V06 V45 V48 V56 V59` all PASS. `V28` correctly
-  **FAIL** — 1 win (LPIPS) / 1 loss (PSNR) / 1 tie (SSIM), escape hatch not satisfied. That is
-  the check working, not a defect.
+## Checks: 62 defined (was 57 at the top of this iteration)
 
-## What is actually still open (verified moments ago, not carried over)
-- **`results/runtime_report.md` does not exist.** `scripts/benchmark_runtime.py` is written
-  (+769 lines, a full stage pipeline: scaling/variants/sweep/divergence) but has never been
-  run to completion — no output file, and the two `python.exe` processes still alive are
-  near-idle (18 KB / 5 KB RSS), not mid-benchmark. **The GPU is free right now.**
-  V37, V38, V39, V43 remain red on this alone.
-- **V61 (U-1, size-agnosticism) and V62 (U-8, order-randomisation) were drafted but never
-  applied** — `grep -c "check_V61\|check_V62" scripts/verify_all.py` is 0. Patch script:
-  `<scratchpad>/patch_new_checks.py`. Still the right design (V61 forwards {NAFSR, UNetSR} x 5
-  shapes asserting exactly `(1,1,2H,2W)` and finite; V62 measures degradation randomisation and
-  counts the pre-downsample branch by wrapping `src.degrade.downsample`) — apply, test, pin.
-- **V22** (bf16 max-abs-diff 1.27e-02 vs 1e-02) is still unfixed. Real bug, not an artifact gap.
-- **`adversarial-reviewer`** still never delivered (killed in iteration 1).
-- U-5 (deck), U-6, U-9, U-10, M-1 of the 7 originally-uncovered requirements remain open.
+Added since the last full tally: **V57** (U-6, real input-clip path), **V58** (U-10, SPEC 2.3
+link freshness), **V60** (adversarial H2/H3, destructive output-dir guard), **V61** (U-1,
+size-agnosticism forwarded), **V62** (U-8, degradation order-randomisation measured). Every one
+negative-controlled at add time — see D34/D35/D37/D38 for the exact mutation and the exact
+green→red→green sequence.
 
----
+**No full `--strict` run has happened since these landed.** Every PASS/FAIL claim below is from
+a targeted `--only` re-run at the moment it's stated, not from a suite-wide pass. **Do not trust
+any tally in this file as a whole-suite number — run `--strict` fresh before believing one.**
+It has been deliberately deferred because `check_V07`/`V17`/etc. default to CUDA and a
+`perf-analyst` runtime benchmark has held the GPU continuously (still running at time of
+writing — see "IN FLIGHT" below).
 
+## What changed this batch, in commit order (all pushed to `origin/main`)
 
+1. **`c209cd2`→`ba22f70`**: checkpoint + outputs published to Release `artifacts-v1`,
+   evaluation record written, V27/V48/V56 closed, V00/V28/V48 strengthened (V28's escape hatch
+   was permanently unlocked — see D31, the single worst thing found this iteration), V06/V56/V59
+   made to fetch-verify for real (D32), SSRF-guarded (D33).
+2. **`4d64a82`**: README rewritten, 12 false/contradictory claims fixed (`docs-scribe`).
+3. **`9e0771d`**: `scripts/evaluate.py`'s self-graded V28 line fixed — it was declaring its own
+   PASS/FAIL from unpaired mean deltas, the exact defect D31 removed from the verifier,
+   reintroduced one layer down.
+4. **V57, V58, V60, V61, V62 added** (D35, D37, D38, D34, D34) — closes U-1, U-6, U-8, U-10,
+   and adds a permanent regression guard for the adversarial H2/H3 finding.
+5. **`--no_ledger` restricted to `--smoke` runs** (D36, M-1 closed).
+6. **Four real bugs fixed in `inference.py`** from `adversarial-reviewer`'s first delivered
+   report (D38): H2/H3 destructive output-dir (data loss, now refused), H4 (partial write
+   failure exited 0), H1 (`--require_weights` didn't cover a shape-mismatched-checkpoint
+   fallback), plus a README fix for C1 (the documented "command KLA runs" produced silent
+   bicubic on a fresh clone). 1 critical + 3 of 4 highs fixed; H4 has no dedicated V-check yet
+   (needs a filesystem-blocking fixture); 5 mediums + 7 lows logged in
+   `reviews/adversarial-1.md` (gitignored, local) for a later pass.
 
-**Written at:** iteration 2, mid-flight. **Last verified commit:** `3e230c6`.
-**Verifier SHA:** `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b` — matches
-the pin, V00 green.
-**Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous
-clone verified).
+## The measured V28 result — use these numbers, they are the honest ones
 
-## Tally: PASS 47 / FAIL 10 of 57
+Paired per-image test, same 400 images, both models:
 
-Last full `--strict` run measured **PASS 43 / FAIL 14** at `c209cd2`. Four have gone green
-since, each confirmed by a targeted re-run: **V00** (see the CRLF note below), **V27**, **V48**,
-**V56**. Nothing has gone red. 47 + 10 = 57.
+    psnr   mean diff -0.0943 dB   t=-6.11   better on  93/400   -> LOSS to U-Net
+    ssim   mean diff +0.000135    t=+0.29   better on 172/400   -> TIE (not a win)
+    lpips  mean diff -0.0120      t=-5.55   better on 235/400   -> WIN
 
-**FAIL (10):** V04 V22 V28 V37 V38 V39 V43 V45 V46 V49
-
-| Check | Why it is red | Owner of the fix |
-|---|---|---|
-| **V22** | **The only genuine engineering defect left.** See its own section below. | `inference-engineer`, needs GPU |
-| V28 | needs a *learned* baseline at equal budget | U-Net run **in flight now** |
-| V45 | ledger needs >= 2 data rows; has 1 | same U-Net run closes it |
-| V49 | `results/qualitative/` empty | `loss-metrics`, dispatched |
-| V37 V38 V39 V43 | no `results/runtime_report.md` exists | `perf-analyst`, needs exclusive GPU |
-| V04 V46 | require `--fresh-clone`, not yet run | main session, after the above |
+**1 win / 1 loss / 1 tie. V28 is correctly FAIL.** Naive unpaired-mean counting (what
+`evaluate.py` did before D-earlier's fix) would have called this "2 of 3" and been wrong — the
+SSIM "win" was noise, not signal.
 
 ## ⚙ IN FLIGHT RIGHT NOW
-- **U-Net baseline training**, PID **32828**, detached (NOT a tool-managed background job, so
-  the 10-minute Bash timeout cannot kill it). Run id `20260815T174833Z-baseline_unet-s42`,
-  UNetSR 2,970,401 params, 20,000 iters, seed 42, `--out weights/baseline_unet.pt`.
-  Log: `<scratchpad>/unet_train.log`, stderr `<scratchpad>/unet_train.err`. Expect 60-90 min.
-  **`--out` matters: without it this run would overwrite `weights/best.pt`.**
-- `loss-metrics` agent building `results/qualitative/` (CPU-only, told not to touch the GPU).
-- `requirements-auditor` agent doing a static re-audit into `reviews/requirements-audit-2.md`.
+- **`perf-analyst`'s runtime benchmark**, launched via `scripts/benchmark_runtime.py all
+  --sweep_divergence`, PID **30608** (parent orchestrator; spawns short-lived `inference.py`
+  subprocesses as children — the parent's own near-zero CPU/RSS is expected, it's just
+  `subprocess.wait()`-ing). Log: `<scratchpad>/bench_runtime.log`, stderr
+  `<scratchpad>/bench_runtime.err` (empty — no crash). Stuck on the `e2e` stage (scaling series
+  1/25/50/100/200/400 x 5 repeats, plus 12 variants x ~5 repeats including a slow
+  `cpu_fp32_bs32` pass) for **45+ minutes** as of this writing. Not hung — confirmed via live
+  child `python.exe` processes cycling — just genuinely slow. `results/runtime_report.md` does
+  not exist yet. **This is what decision A (which model ships) is waiting on.**
 
-## What iteration 2 has banked so far
-
-**1. The checkpoint is deliverable (V59).** Release `artifacts-v1`, asset `best.pt`,
-3288805 B, sha256 `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313`.
-The digest is of the **served** bytes — re-fetched with `GITHUB_TOKEN`/`GH_TOKEN` cleared,
-HTTP 200. D30. Route A (committing the 3.14 MiB file) was rejected: it fits V51's caps, but
-taking it means editing `.gitignore` and V51 to admit a `.pt`.
-
-**2. The evaluation record exists (V27, V48).** `results/baselines/final/metrics.json`:
-
-    final   n=400   psnr 28.7865 +/- 4.5329   ssim 0.78287 +/- 0.14169   lpips 0.25324 +/- 0.13193
-
-V27 passes by **+5.1341 dB** over bicubic, clearing its two-standard-error bar rather than
-merely being positive.
-
-**3. The 400 restored outputs are published (V56).** Produced by the shipped `inference.py`
-with `--require_weights` (log line `loaded weights/best.pt (ema weights)`), 400 in 20.09 s
-(19.9 img/s), cuda/bf16/batch 32, 0 unreadable, 0 write errors. All 400 re-loaded from disk:
-float32, ndim 2, (256,256), finite, global range exactly [0.0, 1.0], filenames identical to the
-inputs — **0 violations**. Archive `restored_test_outputs.zip`, 91069597 B, sha256
-`fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`, also verified anonymously
-at HTTP 200. `manifest.json` + `sha256sums.txt` committed.
-
-## ⚠ THREE NUMBERS THAT WERE WRONG IN THE DOCS — use these instead
-
-1. **Quote `28.7865 / 0.78287 / 0.25324`, not `28.7851 / 0.78279 / 0.25233`.** The old triple
-   came from `train.py`'s in-run validation. The new one is `scripts/evaluate.py` scoring
-   float32 `.npy` **reloaded from disk** after clipping. Fourth-decimal differences, but the
-   evaluation record is the authority and it is what V27/V48 read.
-2. **The 20k NAFSR run took `1:11:43`, not `1:11:41`.** `results/experiments.csv` records
-   `wall_clock_s = 4303.5`. Caught by review.
-3. **Still never quote `30.3944`** — that is the 100-image checkpoint-selection subset.
-
-## V22 — the one real defect left, and how NOT to fix it
+## ⚠ V22 — the one real defect, still unfixed
+Unchanged from before this batch:
 
     V22  FAIL  bf16 vs fp32 diverge: mean 5.99e-04, max 1.27e-02
 
-Tolerance is mean < 1e-3 **and** max < 1e-2. **The mean passes comfortably; only the max
-fails**, at 1.27x the limit. This is the failure STATE predicted would appear the moment a real
-checkpoint existed — previously it read `0.00e+00` only because both precision arms took the
-bicubic fallback.
+Mean passes (limit 1e-3); only max fails, at 1.27x the 1e-2 limit. Root-cause investigation
+was done (not yet applied): `LayerNorm2d` is **already** fp32 under autocast policy per
+PyTorch's own promotion rules (its docstring says so), so the previously-suggested "keep
+LayerNorm in fp32" remedy is likely a no-op. `SCA`'s `x.mean(dim=(2,3))` over 16384 elements is
+the more plausible culprit — spatial mean is not in autocast's fp32-promote list the way
+`layer_norm` is. A per-layer diagnostic script is ready but unrun:
+`<scratchpad>/diag_v22.py` — hooks every leaf module, compares bf16-autocast vs fp32 output per
+layer on a real input, ranks by max abs diff. **Run this on the GPU before choosing a fix**,
+rather than guessing between "force SCA to fp32" and "switch default to fp16" — the
+`perf-analyst` sweep already includes an `fp16_bs32` and `fp32_bs32` timing variant, so the
+throughput half of that decision will exist once `e2e` finishes.
 
-Cause is bf16's 8 mantissa bits: at an output near 1.0 the representable step is ~2^-8 = 0.0039,
-and error accumulates across 16 blocks. Remedies, in preference order:
+## Remaining plan, in order (unchanged from the user's explicit ordering)
+1. `perf-analyst` finishes → **decide which model ships** (paired numbers above; user's stated
+   prior is "prefer the model winning more of the three metrics if close" and "report both,
+   state the reasoning in decisions.md") → write the D-numbered negative-result entry V28's
+   escape hatch actually requires (structured heading, all six measured means quoted,
+   `SHIPPED MODEL: <name>` matching `weights/best.pt`'s embedded config) → V28 resolves either
+   way honestly.
+2. Fix V22 — root-cause via `diag_v22.py`, not guessing.
+3. `adversarial-reviewer`'s findings: H4 still needs a V-check; the 5 mediums + 7 lows in
+   `reviews/adversarial-1.md` need triage.
+4. Full `--strict` run — first one since this whole batch landed. Then `ml-skeptic` re-run
+   (paired stats, U-Net comparison — new territory since its last pass), `cleanroom-tester`.
+5. **Two consecutive clean `--strict --fresh-clone` runs** (Definition of Done #2). Note
+   `check_V46` still doesn't literally execute README's fenced commands (H-4b, open) — a
+   fresh-clone pass proves the hardcoded fixture path, not literally what a reviewer would
+   copy-paste.
+6. Tag `v0.1-submittable`.
+7. **Only after that**: the deck (U-5, `docs/SPEC_ADDENDUM.md` section 11's mandatory verbatim
+   proxy sentence, 9 slides max, `TeamName_KLA_PS01.pdf`). Deliberately last per explicit
+   instruction — no check can catch its absence, so it doesn't gate anything else.
 
-1. Keep the numerically sensitive ops (LayerNorm / SCA / SimpleGate) and/or the model tail in
-   fp32 under autocast.
-2. Switch the CUDA default to **fp16** — 10 mantissa bits vs bf16's 8, same tensor-core
-   throughput, and our activation scale carries no overflow risk.
+U-9 (proxy-OOD report, `V63`) is the one remaining SPEC gap with no plan yet — needs GPU
+evaluation on an OOD image subset; slot it in whenever the GPU is free and nothing higher up
+this list needs it.
 
-**Widening V22's tolerance is NOT an option** — that is the Prime Directive 1 violation, and
-the contract's own wording ("guards against a silently broken AMP path") is the reason.
-
-**Open question worth measuring while fixing it:** the shipped restored outputs were generated
-in **bf16**, but the 28.7865 dB evaluation record was computed in **fp32**
-(`make_baselines.py` runs the model directly, without autocast). Nobody has measured what bf16
-costs in dB. Measure bf16 vs fp16 vs fp32 PSNR/SSIM/LPIPS on the val split before choosing the
-fix, and if bf16 costs real quality, regenerate the published outputs.
-
-## ⚠ NEW GOTCHA: V00 can go red from line endings alone
-
-V00 hashes `scripts/verify_all.py`'s **raw** bytes. `.gitattributes` says `* text=auto eol=lf`
-and the committed blob is LF, but an editing tool had rewritten the working copy as **CRLF**,
-so the on-disk hash was `966431a4...` against a pin of `4e78dbca...` and V00 failed. **Nothing
-was tampered with and the repo was never wrong** — `git diff` was empty. Fixed by rewriting the
-working copies of 10 tracked text files CRLF -> LF; `git add -A` then staged **zero** content
-changes, proving it was a working-copy artifact only. If V00 goes red, check line endings
-before believing anything else. This is `docs/BLOCKERS.md` B3 biting in a new way: B3
-anticipated it in a fresh clone, not from a local editor.
-
-## Agents — status
-COMPLETE, do not re-dispatch: `inference-engineer`, `model-core`, `data-pipeline`,
-`loss-metrics` (iter 1), `docs-scribe`, `trainer`, `ml-skeptic`, `requirements-auditor` (iter 1).
-**Still owed: `adversarial-reviewer`** — killed by a usage limit before it wrote its file, so
-`reviews/adversarial-1.md` does not exist. It needs the GPU, so it is queued behind training.
-Also queued: `perf-analyst` (exclusive GPU), `cleanroom-tester` (after the README is final).
-
-## Remaining plan, in order
-1. U-Net finishes -> score it -> **V28**, **V45**.
-2. `inference-engineer` on **V22**, measurement-first (bf16 vs fp16 vs fp32 quality AND
-   throughput) before changing the default.
-3. `perf-analyst` -> `results/runtime_report.md` -> **V37 V38 V39 V43**. Must have the GPU to
-   itself or the timings are worthless.
-4. `adversarial-reviewer` and `cleanroom-tester`.
-5. `--strict --fresh-clone` -> **V04 V46**. Definition of Done needs this green on **two
-   consecutive** iterations, from a fresh clone in a fresh venv.
-6. Tag `v0.1-submittable` once Tier 0 is green.
-7. Then the LOOP_PROMPT section 3 hardening loop. Quality first, throughput second.
-
-## Standing authorisation — unchanged
+## Standing authorisation — unchanged, restated for a fresh session
 **Pre-authorised:** making a check STRICTER (log + re-pin); new V-checks for reviewer findings;
 installing packages, venvs, training runs, GitHub Releases, commit and push; rejecting an
 experiment that does not improve a measured number (log it in Do-NOT-retry with the number);
 architecture/hyperparameter/loss choices within SPEC sections 7-9 guided by measurement.
+**Human-authorised this session, standing:** decision A (model-selection framework — prefer
+more metric wins if close, report both, reason in `decisions.md`) and decision B (V06 must
+fetch-verify for real — done, D32/D33).
 **NEVER without the human:** weaken, delete, skip or widen the tolerance of any check; edit
 `VERIFICATION_CONTRACT.md` except to add or tighten; train/fit on `test_NoisyLR`; download DIV2K
 or attempt source identification; commit dataset files, weights, or anything over the V51 caps.
-**If I reason toward any of these because it would unblock progress: STOP, write it to
-BLOCKERS.md, work something else. That reasoning is the signal, not the justification.**
 
 ## Things a fresh session would otherwise rediscover the hard way
-- **`pip install lpips` silently replaces CUDA torch with a CPU-only build.** Verified twice.
-  Reinstall from the cu128 index and re-check `torch.cuda.is_available()`. Good state:
-  torch 2.11.0+cu128, torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
-- **Tool-managed background Bash caps at a 10-minute timeout.** A 60-90 minute training run
-  launched that way gets killed. Launch it detached (PowerShell `Start-Process ... -PassThru`
-  with redirected stdout/stderr) and watch the log.
+- **`pip install lpips` silently replaces CUDA torch with a CPU-only build.** Reinstall from
+  the cu128 index and re-check `torch.cuda.is_available()`. Good state: torch 2.11.0+cu128,
+  torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
+- **Tool-managed background Bash caps at a 10-minute timeout.** A long-running benchmark or
+  training run launched that way gets killed silently. Launch detached (PowerShell
+  `Start-Process ... -PassThru` with redirected stdout/stderr) and poll the log file.
 - **`train.py` defaults `--out` to `weights/best.pt`.** Any baseline run without an explicit
-  `--out` destroys the shipped checkpoint.
-- **A new V-check is code like any other.** V54 shipped a false positive and V55 an SSRF hole,
-  both the day they were written. Verify every absence-check with a **negative control**.
-  Done for V56 this iteration: stripping `--require_weights` from the manifest turned it red,
-  `n_files=399` turned it red, and the byte-exact restore turned it green again.
-- **`sample_inputs/` is populated and committed** (6 real inputs, 393,984 B). `.gitignore`
-  carries deliberate negations for it, for `results/metrics_summary.md`,
-  `results/degrade_fidelity/` and `results/restored_test_outputs/`. Do not "tidy up" those
-  rules — several checks read those paths from a fresh clone.
-- **V23 is intermittent on a loaded box** — measured 1.60 s this iteration against a 3.0 s
-  budget, but 3.14 s once under load. The entire budget is `import torch`.
-- **Nothing is currently blocked on the human.** `docs/BLOCKERS.md` has no open items.
+  `--out` destroys the shipped checkpoint. (Now also: `--no_ledger` only skips the ledger under
+  `--smoke`, D36.)
+- **A new V-check is code like any other, and this project has shipped several broken ones on
+  day one** (V54 false positive, V55 SSRF, and this batch's own V62-sigma bug — see D34's "do
+  NOT retry" note on testing a continuous draw's minimum against an absolute epsilon). Every
+  addition in this batch was negative-controlled before being trusted; keep doing that.
+- **`check_V46` does not literally execute README's fenced commands** — it checks they exist,
+  then runs a separate hardcoded fixture sequence (H-4b). A README fix (like C1's) is not
+  proven by a green V46; verify it by hand.
+- **`inference.py`'s `require_weights` guarantee had a real gap** (H1): loading successfully is
+  not the same as the architecture being correct. If touching checkpoint-loading code again,
+  re-run the scale-mismatch repro in D38 rather than assuming `strict=True` is sufficient
+  coverage.
+- **Verifying a fetch-based check (V06/V56/V58/V59) costs real time and bandwidth** — a full
+  `--strict` run now downloads ~94 MB (checkpoint + outputs archive) and hits 9 external URLs
+  for V58. Budget for that; it is not a bug.
+- **Nothing is currently blocked on the human**, except decision A's final write-up (waiting on
+  the benchmark) and U-5/U-9, both explicitly sequenced for later.
 
 ---
 
