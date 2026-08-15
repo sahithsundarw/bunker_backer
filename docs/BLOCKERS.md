@@ -141,7 +141,28 @@ caught by reading the file.
 ordering hazard. Assigned to `docs-scribe` (owner of `requirements.txt`). Not yet verified
 end to end in a fresh venv — that is V04's job and V04 is still red.
 
-## B9 — the D17 `.npz` route collides with the V51 strengthening from B7
+## B9 — RESOLVED 2026-08-15 by standing authorisation: GitHub Release + sha256
+
+**Resolution.** The human's standing authorisation pre-approves GitHub Releases. The 400
+restored test outputs ship as a **Release asset** with a published sha256, and
+`results/restored_test_outputs/` carries a committed manifest with per-file hashes so the
+folder is non-empty and independently verifiable.
+
+This needs **no contract change**: it reuses exactly the mechanism V06 already permits for
+weights. Option 2 below — a second human-authorised V51 amendment to admit a ~40 MB `.npz` —
+was explicitly **rejected**, because it would have gutted the 5 MB / 25 MB size caps added
+one commit earlier, and "loosen the check I just tightened, because it blocks me" is the
+exact reasoning pattern the authorisation names as a stop signal.
+
+Recorded honestly: the committed folder holds a **verified pointer and manifest, not the raw
+output bytes**. That is stated in the folder's README rather than glossed over, so a reviewer
+is never misled about what is in the repository.
+
+Original analysis retained below.
+
+---
+
+## B9 (original) — the D17 `.npz` route collides with the V51 strengthening from B7
 
 `docs/decisions.md` D17 selects a single `np.savez_compressed` archive as the delivery
 mechanism for `results/restored_test_outputs/`. The V51 rewrite in B7 bans `.npz` outright
