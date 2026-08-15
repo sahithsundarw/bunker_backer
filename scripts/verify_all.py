@@ -60,6 +60,16 @@ for _i in range(37, 44):
 for _i in range(44, 53):
     TIERS[f"V{_i:02d}"] = 4
 
+# Checks added from iteration-1 reviewer findings. Adding checks is a strengthening.
+# V54 F17 training-side (V36 covered inference.py only)  — disqualifying if violated
+# V55 repo is genuinely PUBLIC, proven with credentials stripped (V13 accepted any remote)
+# V56 restored outputs are ACTUAL outputs, not documentation (V13 accepted any file)
+# V59 the checkpoint is genuinely obtainable, not silently ignored-and-untracked
+TIERS["V54"] = 2
+TIERS["V55"] = 0
+TIERS["V56"] = 0
+TIERS["V59"] = 0
+
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
 SKIP_WHITELIST: dict[str, str] = {
@@ -488,6 +498,11 @@ def check_V10(ctx: Ctx) -> CheckResult:
             continue
         if a.dtype != np.float32:
             bad.append({"file": q.name, "why": f"dtype {a.dtype}, expected float32"})
+        # F1: grayscale, single channel, 2-D. A (2H,2W,1) or (1,2H,2W) write would slip past
+        # a dtype-only check, and V09 reads so[0]/so[1] — the wrong axes for a channel-last
+        # array — so it would pass there too. Reported by requirements-auditor (U-7).
+        if a.ndim != 2:
+            bad.append({"file": q.name, "why": f"ndim {a.ndim}, expected 2 (H,W)"})
     if bad:
         return CheckResult("V10", FAIL, "format/dtype mismatch vs docs/io_contract.md",
                            {"violations": bad[:5]})
@@ -1714,6 +1729,253 @@ def check_V52(ctx: Ctx) -> CheckResult:
         return CheckResult("V52", FAIL, f"U-items neither answered nor in BLOCKERS: {unanswered}",
                            {"unanswered": unanswered})
     return CheckResult("V52", PASS, "docs current; U1-U9 all accounted for")
+
+
+# ======================================================================================
+# CHECKS ADDED FROM REVIEWER FINDINGS (iteration 1, requirements-auditor)
+# Adding checks is a strengthening and is pre-authorised. Each one closes a requirement
+# that NO existing check could ever have turned red.
+# ======================================================================================
+
+#: Training-path modules. F17 forbids fitting anything on the hidden test inputs, and a
+#: violation here is disqualifying, so the scan is deliberately broad.
+_F17_TRAIN_MODULES = ("train.py", "src/dataset.py", "src/degrade.py", "src/losses.py",
+                      "src/metrics.py", "src/utils.py", "scripts/evaluate.py",
+                      "scripts/make_baselines.py")
+_F17_FORBIDDEN = ("test_noisylr", "test_gt")
+#: Calls that can actually reach the filesystem. A forbidden literal handed to one of these
+#: is a violation whatever its shape.
+_FS_CALLS = frozenset({
+    "open", "load", "save", "Path", "PurePath", "glob", "rglob", "iglob", "iterdir",
+    "listdir", "scandir", "walk", "joinpath", "read_bytes", "read_text", "memmap",
+    "load_array", "imread", "fromfile", "genfromtxt", "loadtxt",
+})
+
+
+def check_V54(ctx: Ctx) -> CheckResult:
+    """F17: nothing in the TRAINING path may read the hidden test inputs.
+
+    V36 only scans inference.py. The training side — the side that could actually fit on
+    test data — was covered by no check at all (requirements-auditor U-2/H-1). This is the
+    one rule whose violation is disqualifying, so it gets a real check.
+
+    Comments are invisible to the AST, so prose mentions of the path are correctly exempt;
+    only executable string constants count.
+    """
+    findings = []
+    scanned = 0
+    for rel in _F17_TRAIN_MODULES:
+        p = ctx.p(*rel.split("/"))
+        if not p.exists():
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError as e:
+            return CheckResult("V54", FAIL, f"{rel} does not parse: {e}")
+        scanned += 1
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                d = ast.get_docstring(node, clean=False)
+                if d:
+                    docstrings.add(d)
+
+        # Literals passed directly to a filesystem call are flagged regardless of shape —
+        # that is the actual violation, and prose cannot reach a file.
+        fs_literals: set[int] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            fname = (fn.attr if isinstance(fn, ast.Attribute)
+                     else fn.id if isinstance(fn, ast.Name) else "")
+            if fname not in _FS_CALLS:
+                continue
+            for arg in list(node.args) + [k.value for k in node.keywords]:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    fs_literals.add(id(arg))
+
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            if node.value in docstrings:
+                continue
+            low = node.value.lower()
+            if not any(tok in low for tok in _F17_FORBIDDEN):
+                continue
+            # A path-shaped literal has no whitespace, or carries a separator. English
+            # prose that merely NAMES the test split — e.g. a report line stating that no
+            # test_GT exists — is not a read and must not be flagged, or the check cries
+            # wolf and gets ignored. Narrowed after it fired on exactly that
+            # (scripts/evaluate.py, scripts/make_baselines.py report text).
+            # Whitespace is the discriminator, NOT the separator: the prose that triggered
+            # the false positive says "train/" and "test_NoisyLR/" and so contains slashes
+            # too. A real path literal contains no spaces.
+            path_shaped = not re.search(r"\s", node.value.strip())
+            if path_shaped or id(node) in fs_literals:
+                findings.append({"file": rel, "line": getattr(node, "lineno", -1),
+                                 "literal": node.value[:120],
+                                 "why": "filesystem call argument" if id(node) in fs_literals
+                                        else "path-shaped literal"})
+    if scanned == 0:
+        return not_impl("V54", "no training-path module exists yet")
+    if findings:
+        return CheckResult("V54", FAIL,
+                           f"F17 VIOLATION RISK: {len(findings)} executable reference(s) to the "
+                           "hidden test inputs in the training path",
+                           {"findings": findings[:10], "modules_scanned": scanned})
+    return CheckResult("V54", PASS,
+                       f"no training-path module references the hidden test inputs "
+                       f"({scanned} modules scanned)", {"modules_scanned": scanned})
+
+
+def check_V55(ctx: Ctx) -> CheckResult:
+    """F12: the repository must be PUBLIC, proven without credentials.
+
+    V13 accepted any non-empty `git remote -v`, which a private repo produces identically.
+    SPEC §18 pitfall 7 calls a private repo a common fatal failure (requirements-auditor
+    U-4/H-4).
+    """
+    rc, url, _ = ctx.run(["git", "remote", "get-url", "origin"])
+    if rc != 0 or not url.strip():
+        return CheckResult("V55", FAIL, "no origin remote configured")
+    url = url.strip()
+    m = re.search(r"github\.com[:/]+([^/]+)/([^/\s]+?)(?:\.git)?$", url)
+    if not m:
+        return CheckResult("V55", FAIL, f"cannot parse a GitHub owner/name from {url}",
+                           {"url": url})
+    owner, name = m.group(1), m.group(2)
+    # Strip every credential source: a pass here must mean genuinely public.
+    anon = {"GITHUB_TOKEN": "", "GH_TOKEN": "", "GIT_ASKPASS": "",
+            "GIT_TERMINAL_PROMPT": "0"}
+    tmp = Path(tempfile.mkdtemp(prefix="v55_"))
+    try:
+        rc2, _, se2 = ctx.run(["git", "-c", "credential.helper=", "clone", "--depth", "1",
+                               url, str(tmp / "clone")], env=anon, timeout=600)
+        if rc2 != 0:
+            return CheckResult("V55", FAIL,
+                               "unauthenticated clone FAILED — the repo is private or "
+                               "unreachable without credentials",
+                               {"url": url, "stderr": se2[-400:]})
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return CheckResult("V55", PASS,
+                       f"unauthenticated shallow clone of {owner}/{name} succeeded with all "
+                       "credentials stripped", {"url": url})
+
+
+def check_V56(ctx: Ctx) -> CheckResult:
+    """F12: results/restored_test_outputs/ must be ACTUAL model outputs.
+
+    V13 accepts any non-.gitkeep file, so a README alone satisfies it — which is exactly
+    the state the repo is in (requirements-auditor U-3/H-2). Either the outputs are
+    committed, or a manifest describes a published archive well enough to be verified.
+    """
+    import numpy as np
+
+    d = ctx.p("results", "restored_test_outputs")
+    if not d.is_dir():
+        return not_impl("V56", "results/restored_test_outputs/")
+    npys = sorted(p for p in d.rglob("*.npy"))
+    if npys:
+        bad = []
+        for q in npys[:16]:
+            try:
+                a = np.load(q, mmap_mode="r", allow_pickle=False)
+            except Exception as e:  # noqa: BLE001
+                bad.append({"file": q.name, "why": f"unreadable: {e}"})
+                continue
+            if a.dtype != np.float32:
+                bad.append({"file": q.name, "why": f"dtype {a.dtype}"})
+            elif a.ndim != 2:
+                bad.append({"file": q.name, "why": f"ndim {a.ndim}"})
+            elif a.shape[0] % 2 or a.shape[1] % 2:
+                bad.append({"file": q.name, "why": f"odd dims {a.shape}"})
+            else:
+                arr = np.asarray(a, dtype=np.float32)
+                if not np.isfinite(arr).all():
+                    bad.append({"file": q.name, "why": "non-finite"})
+                elif float(arr.min()) < 0.0 or float(arr.max()) > 1.0:
+                    bad.append({"file": q.name,
+                                "why": f"range [{arr.min():.4f}, {arr.max():.4f}]"})
+        if bad:
+            return CheckResult("V56", FAIL, f"{len(bad)} committed outputs are malformed",
+                               {"violations": bad[:5], "n_npy": len(npys)})
+        if len(npys) < 400:
+            return CheckResult("V56", FAIL,
+                               f"only {len(npys)} committed outputs; the released test set "
+                               "is 400 images", {"n_npy": len(npys)})
+        return CheckResult("V56", PASS, f"{len(npys)} committed outputs, sampled 16 all valid",
+                           {"n_npy": len(npys)})
+    man = None
+    for cand in ("manifest.json", "manifest.csv"):
+        if (d / cand).exists():
+            man = d / cand
+            break
+    if man is None:
+        return CheckResult("V56", FAIL,
+                           "results/restored_test_outputs/ holds no .npy outputs and no "
+                           "manifest — documentation alone is not 'actual model outputs' (F12)")
+    if man.suffix != ".json":
+        return CheckResult("V56", FAIL,
+                           f"{man.name} is not machine-checkable; V56 requires manifest.json")
+    try:
+        mj = json.loads(man.read_text(encoding="utf-8"))
+    except ValueError as e:
+        return CheckResult("V56", FAIL, f"manifest.json does not parse: {e}")
+    required = ["release_url", "archive_sha256", "n_files", "producing_git_sha",
+                "checkpoint_sha256", "command"]
+    missing = [k for k in required if not mj.get(k)]
+    if missing:
+        return CheckResult("V56", FAIL, f"manifest.json missing/empty: {missing}",
+                           {"present": sorted(mj.keys())})
+    if int(mj["n_files"]) != 400:
+        return CheckResult("V56", FAIL, f"manifest claims {mj['n_files']} files, expected 400")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(mj["archive_sha256"]).strip()):
+        return CheckResult("V56", FAIL, "archive_sha256 is not a 64-hex digest")
+    # The prohibition the folder README states in prose, enforced in code: outputs produced
+    # without --require_weights could be the bicubic fallback shipped as a model result.
+    if "--require_weights" not in str(mj["command"]):
+        return CheckResult("V56", FAIL,
+                           "manifest command lacks --require_weights, so these outputs could "
+                           "be the no-checkpoint bicubic fallback rather than model results",
+                           {"command": str(mj["command"])[:200]})
+    return CheckResult("V56", PASS,
+                       f"manifest describes {mj['n_files']} published outputs produced with "
+                       "--require_weights", {k: mj.get(k) for k in required})
+
+
+def check_V59(ctx: Ctx) -> CheckResult:
+    """The checkpoint must be genuinely obtainable, not silently ignored.
+
+    `.gitignore` blanket-bans `*.pt` AND V51 lists `.pt` as a forbidden blob, so
+    `weights/best.pt` can never be committed here — the hosted-URL branch of V06 is the
+    only valid route. The failure this catches is the silent one: best.pt sitting on the
+    author's disk, ignored and untracked, with no published URL, so it exists locally and
+    is absent for everyone else (requirements-auditor U-11/H-3).
+    """
+    ck = ctx.p("weights", "best.pt")
+    rd = ctx.p("weights", "README.md")
+    txt = rd.read_text(encoding="utf-8", errors="replace") if rd.exists() else ""
+    urls = re.findall(r"https?://\S+", txt)
+    sha = re.search(r"\b[0-9a-f]{64}\b", txt)
+    published = bool(urls) and sha is not None
+    rc, _, _ = ctx.run(["git", "ls-files", "--error-unmatch", "weights/best.pt"])
+    tracked = rc == 0
+    if tracked:
+        return CheckResult("V59", PASS, "weights/best.pt is tracked in the repository")
+    if published:
+        return CheckResult("V59", PASS,
+                           "checkpoint published via URL + sha256 in weights/README.md",
+                           {"sha256": sha.group(0), "urls": urls[:2]})
+    if ck.exists():
+        return CheckResult("V59", FAIL,
+                           f"weights/best.pt exists locally ({ck.stat().st_size} B) but is "
+                           "neither tracked nor published — it would be MISSING for everyone "
+                           "who clones this repo",
+                           {"ignored": True, "size": ck.stat().st_size})
+    return not_impl("V59", "weights/best.pt (not trained yet) or a published URL + sha256")
 
 
 # ======================================================================================

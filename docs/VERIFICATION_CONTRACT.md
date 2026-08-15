@@ -102,6 +102,25 @@
 
 ---
 
+## ADDED CHECKS — iteration 1, from `requirements-auditor` findings
+
+> These are **additions**, which this contract permits. Nothing existing was deleted,
+> loosened or renumbered. Each closes a requirement that **no existing check could ever have
+> turned red** — the auditor found eleven such gaps and these are the four that can cost the
+> submission outright. Rationale and evidence in `docs/decisions.md` D27.
+
+| ID | Tier | Check | Pass criterion |
+|---|---|---|---|
+| **V54** | 2 | **F17 on the TRAINING path.** V36 scans only `inference.py` — the side that *cannot* fit on test data. The training side was covered by nothing. | AST scan of `train.py`, `src/dataset.py`, `src/degrade.py`, `src/losses.py`, `src/metrics.py`, `src/utils.py`, `scripts/evaluate.py`, `scripts/make_baselines.py`. FAIL on any executable string literal naming `test_NoisyLR`/`test_GT` that is **path-shaped** (contains no whitespace) or is passed to a filesystem call. Docstrings and prose are exempt — they cannot read a file. Verified with a negative control: injecting `np.load("…/test_NoisyLR/000000.npy")` flips it red. |
+| **V55** | 0 | **The repo is genuinely PUBLIC.** V13 accepted any non-empty `git remote -v`, which a private repo produces identically. SPEC §18 pitfall 7 calls this a common fatal failure. | `git clone --depth 1` of `origin` succeeds with `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` cleared, `GIT_TERMINAL_PROMPT=0` and `credential.helper=` empty. A pass cannot come from cached credentials. |
+| **V56** | 0 | **`results/restored_test_outputs/` holds ACTUAL model outputs.** V13 accepts any non-`.gitkeep` file, so a README alone satisfies it. F12 and SPEC §15 say "actual model outputs, not placeholders". | Either ≥400 committed `.npy` (sample 16: `float32`, `ndim==2`, even dims, finite, within [0,1]), **or** a `manifest.json` carrying `release_url`, a 64-hex `archive_sha256`, `n_files == 400`, `producing_git_sha`, `checkpoint_sha256` and `command` — where `command` **must contain `--require_weights`**, so outputs produced by the no-checkpoint bicubic fallback can never be shipped as model results. |
+| **V59** | 0 | **The checkpoint is genuinely obtainable.** `.gitignore` blanket-bans `*.pt` and V51 lists `.pt` as a forbidden blob, so `weights/best.pt` can never be committed in this repo — the hosted-URL branch of V06 is the only valid route. | PASS if `weights/best.pt` is tracked, **or** `weights/README.md` carries a URL and a 64-hex sha256. FAIL specifically when `best.pt` exists on disk but is neither tracked nor published — the silent case where it works for the author and is missing for everyone who clones. |
+
+> **V10 was also strengthened in place** (no new ID): it now asserts `ndim == 2` on every
+> output, not just `.npy` + `float32`. A `(2H,2W,1)` or `(1,2H,2W)` write previously passed
+> V10, and passed V09 too, because V09 reads `so[0]`/`so[1]` — the wrong axes for a
+> channels-last array.
+
 ## WHITELIST FOR SKIPS
 
 A check may report SKIP **only** if listed here with a reason. The agent may append to this list only for genuine environmental impossibility (e.g. no GPU present), never for difficulty.

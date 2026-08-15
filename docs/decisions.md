@@ -1181,3 +1181,82 @@ crossing 40 dB at roughly iteration 3000. The cause is the cosine schedule decay
 learning rate faster throughout. **A short overfit run that lands just under 40 dB must not be
 read as an alignment failure** — that misdiagnosis would send someone hunting a geometry bug
 that does not exist. Recorded because the failure mode is convincing and wrong.
+
+## D27 — Four checks ADDED from the requirements audit; V10 strengthened
+
+**Authored by the main session.** `scripts/verify_all.py` →
+`dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a`
+(prior `24b4b1f1f6919502a84ffe2360a9dce53137d9f31bd6d46c7710219e277f6c7f`).
+`docs/VERIFICATION_CONTRACT.md` → `d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269`
+(prior `6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef`).
+
+The contract was amended **by addition only**. Nothing was deleted, loosened, renumbered or
+tolerance-widened. Adding checks for defects reviewers find is pre-authorised.
+
+`requirements-auditor` re-derived F1–F19 and §15 independently and found **eleven requirements
+that no check could ever have turned red**. These four are the ones that can cost the
+submission outright; the remaining seven are recorded in `docs/STATE.md` as backlog.
+
+### V54 — F17 on the training path (the auditor's H-1)
+
+V36 scans **only `inference.py`** — the side that structurally *cannot* fit on test data. The
+training side, the side that could, was covered by nothing at all. F17 is the one rule whose
+violation is disqualifying.
+
+The repository is clean today; the auditor classified every read of `test_NoisyLR` and all are
+read-only EDA. V54 exists so a *regression* cannot pass unnoticed.
+
+**It fired on its first run, and the defect was mine, not the repo's.** Three hits, all English
+prose emitted into report files — sentences stating that no `test_GT` exists. Prose cannot read
+a file. Narrowing the rule mattered: my first attempt keyed on path separators, which failed
+because the prose says `train/` and `test_NoisyLR/` and so contains slashes too.
+**Whitespace is the discriminator** — a real path literal has none. A literal handed to a
+filesystem call is flagged regardless of shape.
+
+Verified with a **negative control**, which is the only way to know an absence-check works:
+injecting `np.load("C:/kla-data/test_NoisyLR/000000.npy")` into `src/dataset.py` flipped V54
+red; removing it flipped it green; the tree was left clean. A check that has never been seen to
+fail is not known to work.
+
+### V55 — the repo is genuinely public (H-4)
+
+V13 accepted any non-empty `git remote -v`, and **a private repo produces an identical
+string**. SPEC §18 pitfall 7 names a private repo as a common fatal failure. V55 clones with
+`GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` cleared, `GIT_TERMINAL_PROMPT=0` and an empty
+credential helper, so a pass cannot come from cached credentials. Currently PASSES.
+
+### V56 — the outputs folder holds actual outputs (H-2)
+
+V13 accepts any non-`.gitkeep` file, so **a README alone satisfies it — which is exactly the
+state this repo is in.** F12 and SPEC §15 require "actual model outputs, not placeholders".
+
+The manifest branch enforces in code the prohibition the folder's README states only in prose:
+`command` must contain `--require_weights`. Without it, `inference.py` silently falls back to
+bicubic when no checkpoint is present, so a full set of plausible-looking outputs could ship as
+model results while the model never ran. Correctly FAILS today.
+
+### V59 — the checkpoint is genuinely obtainable (H-3)
+
+The auditor flagged that `.gitignore` blanket-bans `*.pt` with no negation and recommended
+adding `!weights/best.pt`. **That fix would have been wrong here**, and checking it is what
+found the real constraint: V51 also lists `.pt` as a forbidden blob, so committing the
+checkpoint would require loosening V51 — which is prohibited. The hosted-URL branch of V06 is
+therefore not a preference but **the only valid route**, consistent with D23's Release
+mechanism for the outputs.
+
+V59 catches the silent failure: `best.pt` on the author's disk, ignored and untracked, with no
+published URL — working locally, absent for everyone who clones. It fires right now, correctly:
+the training run has already written `weights/best.pt` (3,288,549 B) and it is invisible to git.
+
+### V10 strengthened in place (U-7, no new ID)
+
+V10 checked `.npy` and `float32` but not rank. A `(2H,2W,1)` or `(1,2H,2W)` write passed V10 —
+and passed V09 too, because V09 reads `so[0]`/`so[1]`, the wrong axes for a channels-last
+array. V10 now asserts `ndim == 2`.
+
+### Why this matters beyond the four fixes
+
+Nine checks were inert placeholders (D22, D26) and eleven requirements had no check at all. The
+suite's red count was never the useful signal; **what it was actually measuring** was. Both
+audits found this by re-deriving rather than reading, which is the argument for running
+`ml-skeptic` and `requirements-auditor` every wave rather than treating them as ceremony.
