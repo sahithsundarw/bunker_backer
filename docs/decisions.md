@@ -1309,3 +1309,41 @@ checkpoint's embedded `metrics` block was corrected post-hoc via
 No changes were made to `inference.py`, `src/model.py`'s `build_model` contract, or
 `weights/best.pt` — this is purely an additive experiment living under
 `results/residual_experiments/`.
+
+## D29 — Phase 4 (`r2_nb8_psnrloss`) beats r1_nb4 on all three metrics; new recommended checkpoint
+
+Following D28's Phase 2 result (27.7625 dB), Phase 4 tested whether more capacity plus a
+Charbonnier-heavier loss would push PSNR further, since r1_nb4's in-loop curve was still
+(slowly) rising at iteration 3000. `configs/phase4_psnr_focus.yaml` (new file; `configs/final.yaml`
+is untouched) sets `loss.weights = {charbonnier: 1.0, structural: 0.05, fft: 0.02, lpips: 0.02}`
+(down from the 0.15/0.05 defaults) with `lpips` still off. `scripts/train_residual.py` was run
+with `--num_blocks 8` (vs 4) and the same freeze/small-init scheme as D28, 4000 iters, batch 32,
+lr 2e-4, MPS, seed 42.
+
+**Operational note:** training throughput cratered to ~0.05 it/s (from ~1.3 it/s) for the first
+~19 minutes while a concurrent CPU-heavy `inference.py --tta` foreground job (the Phase 5
+measurement, same session) was running — Apple Silicon unified-memory contention between the
+MPS training process and a CPU-bound process. Recovered to 0.3-0.6 it/s once that job exited and
+stayed there for the rest of the ~2h33m run (wall_clock_s=9133.6), never dropping back under a
+0.1 it/s stop-rule floor that was in force for this run. Lesson recorded in `docs/STATE.md`'s
+Do-NOT-retry list: don't run heavy CPU-bound jobs concurrently with MPS training on this machine.
+
+**Result (disk-verified, V30 round-trip, full 400-image split), and it exactly matches the
+training script's own in-memory final number (28.0394 both times):**
+
+| Method | PSNR dB | SSIM | LPIPS |
+|---|---|---|---|
+| r1_nb4 (D28) | 27.7625 ± 4.0109 | 0.74462 ± 0.14524 | 0.30776 ± 0.16386 |
+| r2_nb8_psnrloss | **28.0394 ± 4.1881** | **0.74804 ± 0.15275** | **0.29571 ± 0.16672** |
+
+r2 wins on **all three metrics simultaneously** — not a PSNR-vs-perceptual-quality trade-off.
++1.7117 dB over the LS-5 floor (26.3277). **Decision: KEEP. r2_nb8_psnrloss supersedes r1_nb4 as
+the recommended checkpoint for this branch.** As with r1_nb4, the checkpoint's embedded
+`metrics` block was corrected post-hoc from the inflated in-loop n=100 number (29.5535) to the
+disk-verified full-split numbers, via `src.utils.update_checkpoint_metrics`.
+
+**Explicitly not done, to avoid fabricating a result:** Phase 3 (blend search) and Phase 5
+(TTA) were measured only against r1_nb4, not re-run against r2_nb8_psnrloss. Both conclusions
+(no blend helps; TTA not worth the runtime cost) are expected to transfer by the same structural
+argument (r2 also bakes the frozen LS-5 stem/head into its own forward pass), but this is an
+expectation, not a measurement, and is documented as such rather than presented as verified.

@@ -1,0 +1,55 @@
+# Phase 4 (codex/residual-ls5-refinement): PSNR-focused variant used only by
+# scripts/train_residual.py --config configs/phase4_psnr_focus.yaml.
+# NOT the submitted config -- configs/final.yaml (and weights/best.pt) are untouched by this
+# file. Data/optim/train blocks are copied from final.yaml; the only change from final.yaml is
+# the added `loss:` block, which shifts weight toward the Charbonnier (PSNR-driving) term and
+# away from structural/FFT. `model:` here is informational only -- train_residual.py builds the
+# actual model shape from its own --width/--num_blocks CLI flags, not from this block.
+model:
+  name: NAFSR
+  width: 48
+  num_blocks: 16
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+  padding_mode: replicate
+data:
+  lr_patch: 64
+  batch_size: 32
+  synth_ratio: 0.5
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 0.30
+    gauss_sigma_range: [0.0, 0.02]
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 500
+  total_iters: 20000
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 1000
+  save_best_on: psnr
+loss:
+  weights:
+    charbonnier: 1.0
+    structural: 0.05
+    fft: 0.02
+    lpips: 0.02
+  use_lpips: false

@@ -73,12 +73,64 @@ explicitly noted in its `notes` field as superseding the in-loop row for reporti
   decreases from 1.0; every alpha < 1.0 scores worse. Measured via `scripts/blend_search.py`
   full sweep. Do not re-attempt without a materially different refined model.
 
+## Phase 5 — TTA evaluation: DONE, negative result
+Ran the real `inference.py` entrypoint (not a custom script) against `r1_nb4/model.pt` on the
+400-image val-only input set, with and without `--tta` (8x dihedral self-ensemble, CPU,
+`--require_weights`):
+
+| | PSNR dB | SSIM | LPIPS | throughput |
+|---|---|---|---|---|
+| no TTA | 27.7625 ± 4.0109 | 0.74462 ± 0.14524 | 0.30776 ± 0.16386 | 4.1 img/s |
+| `--tta` | 27.7952 ± 4.0169 | 0.74598 ± 0.14555 | 0.31113 ± 0.16618 | 0.4 img/s |
+
++0.0327 dB PSNR, +0.00136 SSIM, but LPIPS got **worse** (+0.00337, higher=worse), for a **9.3x**
+runtime cost. Not worth it — do not enable `--tta` for the shipped recommendation.
+
+## Phase 4 — higher-capacity, PSNR-focused fine-tune: DONE, disk-verified, NEW BEST — KEEP
+Run `r2_nb8_psnrloss`: `num_blocks=8` (vs 4 in r1), `configs/phase4_psnr_focus.yaml` (new file,
+does NOT touch `configs/final.yaml`) shifts loss weights toward Charbonnier
+(`charbonnier=1.0, structural=0.05, fft=0.02`, `lpips` still off) since the r1_nb4 in-loop PSNR
+curve was still creeping up (slowly) at iter 3000 with the default weights. 4000 iters,
+`--layerscale_init 0.02 --body_tail_init_scale 0.02`, batch 32, lr 2e-4, warmup 150, MPS,
+seed 42. **Training rate cratered to ~0.05 it/s (from r1's 1.31 it/s) while a concurrent
+CPU-heavy `inference.py --tta` foreground job (Phase 5, above) was running** — Apple Silicon
+unified memory contention between the MPS training process and the CPU inference process.
+Recovered to ~0.3-0.6 it/s once the TTA job exited and stayed healthy (never dropped back below
+the 0.1 it/s stop-rule floor) for the remaining ~2h20m to completion (wall_clock_s=9133.6).
+
+**Disk-verified (V30 round-trip), full 400-image split — the authoritative number, and it
+matches the training script's own in-memory final number exactly (28.0394 both times):**
+
+| Method | PSNR dB | SSIM | LPIPS | n |
+|---|---|---|---|---|
+| LS-5 (Phase 1) | 26.3277 | 0.65999 | 0.39992 | 400 |
+| residual_ls5 r1_nb4 (Phase 2) | 27.7625 ± 4.0109 | 0.74462 ± 0.14524 | 0.30776 ± 0.16386 | 400 |
+| residual_ls5 r2_nb8_psnrloss (Phase 4) | **28.0394 ± 4.1881** | **0.74804 ± 0.15275** | **0.29571 ± 0.16672** | 400 |
+
+**r2_nb8_psnrloss beats r1_nb4 on all three metrics** (+0.2769 dB PSNR, +0.00342 SSIM, better
+LPIPS by 0.01205) — a clean win, not a metric trade-off. +1.7117 dB over LS-5. Crosses further
+into "Strong" (>28.0). **This is now the recommended checkpoint**, superseding r1_nb4.
+Checkpoint's embedded `metrics` corrected the same way as r1_nb4's (disk-verified numbers as
+`val_psnr`/`val_ssim`/`val_lpips`, in-loop n=100 number preserved under
+`in_loop_selection_val_psnr_n100` for provenance).
+
+**Not re-verified for r2 (documented gap, not fabricated):** Phase 3 (blend search) and Phase 5
+(TTA) were only run against r1_nb4, not r2_nb8_psnrloss. The blend-search conclusion (mixing in
+raw LS-5 only hurts) is expected to hold by the same structural argument — r2 also has the
+frozen LS-5 stem/head baked into its own forward pass — but this was **not separately
+measured** for r2. Do not cite a blend or TTA number for r2 without re-running it.
+
+## Do NOT retry (this branch), continued
+- **Running a CPU-heavy job (e.g. `inference.py --tta` over 400 images) concurrently with an
+  MPS training run on this machine.** Measured: training rate dropped from 1.31 it/s to
+  0.05 it/s (26x slower) during the overlap. Unified-memory contention on Apple Silicon. Run
+  CPU-bound and MPS-bound heavy jobs sequentially, not in parallel, on this hardware.
+
 ## Not yet done on this branch
-- Phase 4 (PSNR-focused fine-tune / more capacity or extended schedule) — not started.
-- Phase 5 (TTA evaluation) — not started.
-- First commit + push to `codex/residual-ls5-refinement` — overdue, in progress now.
-- `docs/decisions.md` D28 for the freeze/small-init design — pending.
-- Final deliverable summary (recommendation on replacing `weights/best.pt`) — pending.
+- Final deliverable summary (recommendation on replacing `weights/best.pt` with
+  `r2_nb8_psnrloss`) — pending.
+- Optionally: re-run blend search and/or TTA specifically against r2_nb8_psnrloss to confirm
+  the r1-derived conclusions transfer, if time allows (Phase 6 budget permitting).
 
 ---
 
