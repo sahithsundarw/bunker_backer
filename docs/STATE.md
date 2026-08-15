@@ -2,6 +2,88 @@
 
 ---
 
+# ⚠ CURRENT — branch `codex/residual-ls5-refinement` (2026-08-15)
+
+Everything below the next `---` (down to "END ARCHIVED SECTION") describes a **different,
+unrelated session context** (Windows/RTX-4060, a from-scratch 53-check verification framework)
+that does **not** match this repo's actual current state. It is kept for reference only —
+**do not act on it.** This section is authoritative for the current work stream.
+
+## Where this branch stands
+Base: `codex/train-first-model`. Verified-reproduced Phase-1 checkpoint `weights/best.pt`
+(closed-form ridge-regularized 5x5 LS filter embedded into a NAFSR carrier, SHA256
+`d5807dabad37b251f25d066838da9e3f73c164ec37ee777505a80e23cad9e90d`): val PSNR **26.3277 dB**,
+SSIM 0.65999, LPIPS 0.39992 (400-image split, disk-verified). NLM baseline is 26.2722 dB, so the
+LS-5 margin over classical is only +0.0555 dB — the reason this branch exists.
+
+## Phase 2 — residual refinement on top of frozen LS-5: DONE, disk-verified
+`scripts/train_residual.py` builds a **fresh, shallow** NAFSR (`num_blocks=4`, `width=48`),
+transplants the frozen LS-5 `stem`/`head.expand`/`head.project` weights in directly (these
+tensor shapes do not depend on `num_blocks`), freezes them, and trains only the new
+`body`/`body_tail` (91,632 trainable params) as an additive residual on top of the closed-form
+output — `NAFSR_output = LS5_output + learned_correction`. Small init
+(`layerscale_init=0.02`, `body_tail_init_scale=0.02`) avoids the double-zero dead-gradient trap
+that the raw LS-5 checkpoint's zeroed body would otherwise cause if gradient-resumed as-is.
+
+Run `r1_nb4` (3000 iters, batch 32, lr 2e-4, MPS, seed 42, ~38 min wall):
+```
+python scripts/train_residual.py \
+  --data_root /Users/shanmukhsai/Downloads \
+  --out results/residual_experiments/r1_nb4/model.pt \
+  --num_blocks 4 --layerscale_init 0.02 --body_tail_init_scale 0.02 \
+  --iters 3000 --val_every 300 --val_limit 100 --batch_size 32 --lr 2e-4 --warmup_iters 100 \
+  --device mps --seed 42 --tag phase2-r1-nb4-ls0.02-lr2e-4 --verbose
+```
+**Disk-verified (V30 round-trip via `make_baselines.py` + `evaluate.py`), full 400-image
+split — the only authoritative number:**
+
+| Method | PSNR dB | SSIM | LPIPS | n |
+|---|---|---|---|---|
+| LS-5 (Phase 1 baseline) | 26.3277 | 0.65999 | 0.39992 | 400 |
+| residual_ls5 r1_nb4 | **27.7625 ± 4.0109** | **0.74462 ± 0.14524** | **0.30776 ± 0.16386** | 400 |
+
+**+1.4348 dB over LS-5.** Clears "Good" (>27.0), approaching "Strong" (>28.0).
+
+**Important caveat, resolved:** the in-loop model-selection validation (n=100 fixed subset)
+climbed to 29.2597 dB during training — substantially higher than the true full-split number.
+This is subset composition, not a bug or leakage (subset is a fixed non-leaked slice of the
+committed val split, just smaller and easier-than-average). The checkpoint's embedded
+`metrics` block was corrected after training to report the disk-verified 27.7625/0.74462/0.30776
+as `val_psnr`/`val_ssim`/`val_lpips` (n=400), with the original in-loop number preserved under
+`in_loop_selection_val_psnr_n100` for provenance. **Only ever cite the disk-verified, full-split
+number.**
+
+## Phase 3 — blend search: DONE, negative result (informative)
+`scripts/blend_search.py` swept `alpha in {0.05, ..., 1.00}` for
+`clip(alpha*refined + (1-alpha)*LS5, 0, 1)`. PSNR increased **monotonically** with alpha; **best
+alpha = 1.00** (pure refined output), identical to the r1_nb4 result above. No blending helps —
+expected, since the residual model already has the LS-5 output baked into its own forward pass
+(frozen stem/head), so re-mixing raw LS-5 back in only dilutes the learned correction. No new
+checkpoint was produced by this phase.
+
+## Ledger
+`results/experiments.csv` rows: `20260815T081652Z-final-closed-form-s42` (Phase 1, 26.3277),
+`20260815T105016Z-residual-ls5-s42` (Phase 2 in-loop n=100 selection number, 29.2597 — kept
+as-is for training-time provenance, NOT the reportable number),
+`20260815T113000Z-residual-ls5-s42-diskverified` (Phase 2 authoritative, 27.7625, n=400,
+explicitly noted in its `notes` field as superseding the in-loop row for reporting purposes).
+
+## Do NOT retry (this branch)
+- **Blending refined output back down with raw LS-5 output.** Strictly monotonic loss as alpha
+  decreases from 1.0; every alpha < 1.0 scores worse. Measured via `scripts/blend_search.py`
+  full sweep. Do not re-attempt without a materially different refined model.
+
+## Not yet done on this branch
+- Phase 4 (PSNR-focused fine-tune / more capacity or extended schedule) — not started.
+- Phase 5 (TTA evaluation) — not started.
+- First commit + push to `codex/residual-ls5-refinement` — overdue, in progress now.
+- `docs/decisions.md` D28 for the freeze/small-init design — pending.
+- Final deliverable summary (recommendation on replacing `weights/best.pt`) — pending.
+
+---
+
+# ARCHIVED — unrelated prior session context (Windows/RTX-4060, 53-check framework). Ignore.
+
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
 **Written at:** iteration 1. Wave A + docs-scribe COMPLETE and committed. `trainer` and three

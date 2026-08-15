@@ -1260,3 +1260,52 @@ Nine checks were inert placeholders (D22, D26) and eleven requirements had no ch
 suite's red count was never the useful signal; **what it was actually measuring** was. Both
 audits found this by re-deriving rather than reading, which is the argument for running
 `ml-skeptic` and `requirements-auditor` every wave rather than treating them as ceremony.
+
+## D28 — residual refinement on top of frozen LS-5, on branch `codex/residual-ls5-refinement`
+
+The shipped `weights/best.pt` (closed-form ridge-regularized 5x5 LS filter, 26.3277 dB) only
+beats the NLM classical baseline by +0.0555 dB — too thin a margin to defend as a "learned
+model" result. Rather than discard LS-5 (SPEC/task instruction: it already beats NLM, so keep
+it as the floor), `scripts/train_residual.py` builds a **fresh, shallow** NAFSR
+(`num_blocks=4`, independent of the 16-block carrier the LS-5 filter was embedded into),
+transplants the LS-5 checkpoint's `stem`/`head.expand`/`head.project` weights directly (these
+tensor shapes depend only on `width`/`scale`/`in_ch`/`out_ch`, never on `num_blocks`) and
+freezes them, then trains only the new `body`/`body_tail` as an additive residual:
+`NAFSR_output = LS5_output + learned_correction(feat)`.
+
+**Why a fresh body instead of resuming gradient descent on the original checkpoint's body:**
+in the original LS-5 checkpoint every NAFBlock has both its layerscale (`beta`/`gamma`) AND its
+internal conv weights zeroed (by the `for prm in model.parameters(): prm.zero_()` in
+`train.py::_embed_linear_residual`). With both zero simultaneously, `dL/dbeta = dL/dy *
+branch_output` and `branch_output` is itself exactly 0, so every NAFBlock is a true gradient
+dead-end, not just an eval-mode identity fast path — resuming training from that exact state
+would never move the body weights at all. Fix: build the body fresh with small-but-nonzero
+init (`layerscale_init=0.02`, and `body_tail.weight` additionally scaled by 0.02 after
+construction) so gradients flow immediately without a large initial perturbation to the frozen
+LS-5 output.
+
+**Result (disk-verified, V30 round-trip, full 400-image split, run `r1_nb4`, 3000 iters,
+batch 32, lr 2e-4, MPS, seed 42):** PSNR 27.7625 +/- 4.0109 dB (+1.4348 dB over LS-5), SSIM
+0.74462 +/- 0.14524, LPIPS 0.30776 +/- 0.16386. Full detail in `docs/STATE.md`'s current
+section and `results/experiments.csv`.
+
+**Blend search (`scripts/blend_search.py`) was negative and is informative, not a failure:**
+sweeping `alpha` between the frozen LS-5 output and the refined output gave strictly
+monotonically increasing PSNR up to `alpha=1.0` (pure refined output) — mixing raw LS-5 back in
+only hurts. This makes sense in hindsight: the refined model's frozen stem/head already
+reproduce the LS-5 computation internally, so blending in a second copy of the same signal at
+full weight only dilutes the learned correction elsewhere in the image. Rejected: any
+`alpha < 1.0` blend. Do not retry without a materially different refined model.
+
+**In-loop (n=100 subset) validation numbers during training are NOT reportable.** They reached
+29.2597 dB, ~1.5 dB above the true full-split score, due to subset composition (not leakage —
+the subset is a fixed slice of the committed, non-leaked val split). Only the disk-verified,
+full-400-split number from `make_baselines.py` + `evaluate.py` is authoritative, per V30. The
+checkpoint's embedded `metrics` block was corrected post-hoc via
+`src.utils.update_checkpoint_metrics` to store the disk-verified numbers under
+`val_psnr`/`val_ssim`/`val_lpips`, keeping the original in-loop number under
+`in_loop_selection_val_psnr_n100` for provenance rather than deleting it.
+
+No changes were made to `inference.py`, `src/model.py`'s `build_model` contract, or
+`weights/best.pt` — this is purely an additive experiment living under
+`results/residual_experiments/`.
