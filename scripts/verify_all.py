@@ -241,6 +241,61 @@ PUBLISHED_FETCH_TIMEOUT_S = 300
 _FETCH_CACHE: dict[str, dict[str, Any]] = {}
 
 
+#: The ONLY hosts a published artifact may be fetched from. The URL is read out of a file in
+#: the repository, so it is untrusted input to this process: without an allowlist, that file
+#: can point the verifier at cloud metadata (169.254.169.254), at a service on localhost, or
+#: at file:///... . GitHub serves release assets by 302 from github.com to one of the
+#: githubusercontent hosts, so those hops must be permitted -- and validated (D33).
+PUBLISHED_ARTIFACT_HOSTS = frozenset({
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "raw.githubusercontent.com",
+})
+
+
+def _artifact_url_ok(url: str) -> tuple[bool, str]:
+    """Exact-match scheme/host validation. Anchored parsing, never a substring test."""
+    import urllib.parse
+
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError as e:
+        return False, f"unparseable URL ({e})"
+    if u.scheme != "https":
+        return False, (f"scheme {u.scheme!r} is not allowed; only https "
+                       f"(file/ftp/http would let a repo file read local paths or reach "
+                       f"internal services)")
+    if u.username or u.password:
+        return False, "URL embeds credentials"
+    host = (u.hostname or "").lower()
+    if host not in PUBLISHED_ARTIFACT_HOSTS:
+        return False, f"host {host!r} is not in the published-artifact allowlist"
+    try:
+        port = u.port
+    except ValueError:
+        return False, "invalid port"
+    if port not in (None, 443):
+        return False, f"port {port} is not 443"
+    return True, "ok"
+
+
+def _strict_opener():  # noqa: ANN202
+    """An opener with no auth/cookie handler that validates every redirect hop."""
+    import urllib.error
+    import urllib.request
+
+    class _StrictRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            ok, why = _artifact_url_ok(newurl)
+            if not ok:
+                raise urllib.error.HTTPError(
+                    newurl, code, f"blocked redirect to {newurl!r}: {why}", headers, fp)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(_StrictRedirect())
+
+
 def _fetch_digest(url: str) -> dict[str, Any]:
     """Download `url` with NO credentials and return the sha256 of the served bytes.
 
@@ -256,12 +311,17 @@ def _fetch_digest(url: str) -> dict[str, Any]:
     import urllib.request
 
     res: dict[str, Any] = {"url": url}
+    allowed, why = _artifact_url_ok(url)
+    if not allowed:
+        res["error"] = f"refused to fetch: {why}"
+        _FETCH_CACHE[url] = res
+        return res
     stripped = {k: os.environ.pop(k, None)
                 for k in ("GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN",
                           "GITHUB_USER", "GIT_ASKPASS")}
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
     try:
-        opener = urllib.request.build_opener()  # no auth/cookie handlers
+        opener = _strict_opener()  # no auth/cookie handlers; redirects re-validated
         req = urllib.request.Request(url, headers={"User-Agent": "kla-verifier/1.0"})
         with opener.open(req, timeout=PUBLISHED_FETCH_TIMEOUT_S) as r:
             res["status"] = int(getattr(r, "status", 0) or 0)

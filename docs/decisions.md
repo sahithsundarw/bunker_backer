@@ -1552,3 +1552,31 @@ that the evidence had already satisfied (V35, and `--require_weights` succeeding
   point of the check is that the *live* URL serves the right bytes today.
 - **Do not downgrade the fetch to a HEAD request or a Content-Length comparison.** A digest
   over the served bytes is the only thing that detects a replaced asset.
+
+## D33 — SSRF guard on `_fetch_digest` (the D32 helper)
+
+A background security review flagged two SSRF findings in `_fetch_digest`, added in D32, and
+they were right. Its URL is read out of a repository file (`weights/README.md`,
+`manifest.json`) — untrusted input to the verifier process. Unguarded, that file could point
+the verifier at `file:///...` (local read), at loopback or link-local addresses (internal
+services, cloud metadata), or place an allowed host in the URL's *path* rather than its host
+position; and a 302 from an allowed host could redirect anywhere.
+
+This is D28 repeating — the same bug class, in a helper written the same day, the third time
+this class has shipped.
+
+Fix: `_artifact_url_ok()` does anchored `urllib.parse.urlsplit` validation requiring `https`,
+no embedded credentials, port 443, and an **exact** host match against
+`PUBLISHED_ARTIFACT_HOSTS` (`github.com`, `objects.githubusercontent.com`,
+`release-assets.githubusercontent.com`, `raw.githubusercontent.com` — GitHub 302s release
+assets to the githubusercontent hosts, so those hops must be allowed *and* validated).
+`_strict_opener()` installs an `HTTPRedirectHandler` that re-validates *every* redirect hop,
+not just the initial request.
+
+Negative-controlled (see `docs/STATE.md` for the vector list: `file://`, loopback,
+link-local, host-suffix spoof, path-position spoof, embedded credentials, non-443 port, plain
+http all refused; the real asset URL and an uppercase-host variant both accepted), and
+`--only V06,V56,V59` re-confirmed green with the guard in place.
+
+Net stricter: closes an SSRF hole with no reduction in what the checks accept.
+prior pin: `d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4`

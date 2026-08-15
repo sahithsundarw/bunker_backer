@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4  scripts/verify_all.py
+160bc2289685ff20a829c54a2044cb33e31e2ba14623134e7479909085780224  scripts/verify_all.py
 d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -80,3 +80,12 @@ d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICAT
 #             digest, a wrong archive digest and a 404 URL each turned the relevant check red.
 #             Human-authorised (decision B, 2026-08-15). See docs/decisions.md D32.
 #             prior pin: 47dac07a929c56d4a8eafd6562e3f8f81017fdd8925ac218849cc4a8d9691aee
+# 2026-08-16  SECURITY: SSRF guard on the published-artifact fetch helper added in D32.
+#             `_fetch_digest`'s URL comes from a repo file (weights/README.md,
+#             manifest.json) -- untrusted input to the verifier process. Unguarded, it could
+#             point at file:///, loopback/link-local (cloud metadata), or ride a 302 to an
+#             unvalidated host. `_artifact_url_ok()` requires https, no embedded credentials,
+#             port 443, and an exact host match against PUBLISHED_ARTIFACT_HOSTS;
+#             `_strict_opener()` re-validates every redirect hop. Same bug class as D28, third
+#             occurrence. See docs/decisions.md D33.
+#             prior pin: d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4
