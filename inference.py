@@ -67,6 +67,19 @@ def _err(msg: str) -> None:
     sys.stderr.flush()
 
 
+def _brief(exc: BaseException, limit: int = 300) -> str:
+    """First line of an exception message, capped.
+
+    A ``load_state_dict(strict=True)`` mismatch lists every key in the architecture, which
+    is hundreds of lines. That is noise in KLA's log and can bury the line that matters, so
+    diagnostics are truncated -- the type and the first line identify the fault.
+    """
+    text = str(exc).strip().splitlines()
+    head = text[0] if text else ""
+    more = " [...]" if (len(text) > 1 or len(head) > limit) else ""
+    return head[:limit] + more
+
+
 def _say(verbose: bool, msg: str) -> None:
     """Diagnostics, gated behind --verbose (CLAUDE.md STYLE: no print debugging)."""
     if verbose:
@@ -133,11 +146,19 @@ def resolve_device(requested: str | None) -> torch.device:
     return torch.device("cuda" if cuda_usable() else "cpu")
 
 
-def tune_backends(dev: torch.device) -> None:
-    """Free throughput levers. Harmless when CUDA is absent (docs/decisions.md D7 point 2)."""
+def tune_backends(dev: torch.device, precision: str = "bf16") -> None:
+    """Free throughput levers. Harmless when CUDA is absent (docs/decisions.md D7 point 2).
+
+    TF32 is on for every path except an explicit ``--precision fp32``, where it is turned off
+    so that fp32 means fp32. TF32 carries a 10-bit mantissa, so leaving it on would make the
+    fp32 arm of the V22 comparison an approximation too -- measured at 6.9e-05 mean on real
+    inputs, i.e. comparing one approximation against another rather than against a reference.
+    The default path is unaffected, so the free lever is kept where it actually pays.
+    """
     torch.backends.cudnn.benchmark = True          # fixed shapes per group -> autotune pays
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cuda.matmul.allow_tf32 = True
+    tf32 = precision != "fp32"
+    torch.backends.cudnn.allow_tf32 = tf32
+    torch.backends.cuda.matmul.allow_tf32 = tf32
     if dev.type == "cuda":
         try:
             torch.cuda.init()
@@ -221,7 +242,7 @@ def load_net(weights: Path, dev: torch.device, verbose: bool) -> tuple[torch.nn.
         _say(verbose, f"loaded {weights} ({'ema' if ckpt.get('ema') else 'model'} weights)")
         return net, True
     except Exception as exc:  # noqa: BLE001 - never let a weights problem abort the run
-        _err(f"could not load {weights} ({type(exc).__name__}: {exc}); "
+        _err(f"could not load {weights} ({type(exc).__name__}: {_brief(exc)}); "
              f"falling back to bicubic x{SCALE} upsample")
         return BicubicUpsampler(), False
 
@@ -258,8 +279,7 @@ def try_compile(net: torch.nn.Module, probe_shape: tuple[int, int] | None, dev: 
         _say(verbose, f"torch.compile warm-up ok at {probe_shape}")
         return compiled
     except Exception as exc:  # noqa: BLE001 - an unusable toolchain must not abort the run
-        _err(f"torch.compile unusable ({type(exc).__name__}: "
-             f"{str(exc).splitlines()[0] if str(exc) else ''}); running eager")
+        _err(f"torch.compile unusable ({type(exc).__name__}: {_brief(exc)}); running eager")
         return net
 
 
@@ -353,8 +373,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dev = resolve_device(args.device)
-    tune_backends(dev)
     use_amp, amp_dtype, prec = resolve_precision(args.precision, dev)
+    tune_backends(dev, prec)
 
     net, weights_ok = load_net(Path(args.weights), dev, verbose)
     if args.require_weights and not weights_ok:
