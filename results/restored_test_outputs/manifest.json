@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "status": "archive_ready_release_upload_pending",
+  "release_url": "",
+  "archive_name": "semicon_final_outputs.zip",
+  "archive_sha256": "17fdeba4b8d19b5b4ddbe0b3d430851b9385200c8922964b354c70ba108d5eed",
+  "archive_size_bytes": 90992260,
+  "n_files": 400,
+  "producing_git_sha": "c9834fda713c136400651f60c20b0bd77a9d98c7",
+  "checkpoint": "weights/best.pt",
+  "checkpoint_sha256": "d5807dabad37b251f25d066838da9e3f73c164ec37ee777505a80e23cad9e90d",
+  "manifest_csv": "manifest.csv",
+  "manifest_csv_sha256": "cd7147d3c1876fd21ffcc802e46f4c0bb13f70e36f37d0e646f86bf309dbe83b",
+  "command": "python inference.py --input_dir /Users/shanmukhsai/Downloads/NoisyLR --output_dir /tmp/semicon_final_outputs --weights weights/best.pt --require_weights --batch_size 32 --device cpu --precision fp32 --verbose",
+  "output_contract": {
+    "shape": [256, 256],
+    "dtype": "float32",
+    "finite": true,
+    "range": [0.0, 1.0],
+    "filenames_match_inputs": true
+  },
+  "metrics": null,
+  "metrics_note": "The released final test set has no ground truth; PSNR, SSIM, and LPIPS are not computed for these outputs."
+}

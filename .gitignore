@@ -79,6 +79,7 @@ Thumbs.db
 !results/restored_test_outputs/
 !results/restored_test_outputs/.gitkeep
 !results/restored_test_outputs/manifest.json
+!results/restored_test_outputs/manifest.csv
 !results/experiments.csv
 !results/runtime_report.md
 # V48 reads results/metrics_summary.md from a FRESH CLONE, and Definition-of-Done #2 requires
