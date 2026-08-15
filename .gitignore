@@ -87,3 +87,6 @@ Thumbs.db
 # These are degraded INPUTS only -- no ground truth is committed anywhere in this repo.
 !sample_inputs/
 !sample_inputs/*.npy
+!results/degrade_fidelity/
+!results/degrade_fidelity/*.png
+!results/degrade_fidelity/*.json

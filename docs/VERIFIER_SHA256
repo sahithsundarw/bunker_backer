@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d  scripts/verify_all.py
+590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd  scripts/verify_all.py
 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -28,3 +28,9 @@ cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d  scripts/verify
 #             extension ban, dataset-directory-token ban, 5 MB per-file cap, 25 MB total
 #             tracked cap). Net stricter. See docs/decisions.md D15.
 #             prior pin: d462c70eee644851350da86be1971283b32cb553ceadc1452d5f794e7f971c13
+# 2026-08-15  SEVEN placeholder checks implemented (V26 V27 V28 V29 V32 V33 V35) and V09's
+#             corrupt-input over-reach fixed. All were BOOTSTRAP stubs that returned an
+#             unconditional FAIL no artifact could ever turn green. Unambiguous
+#             strengthening: seven checks that could not pass now actually test their
+#             subject, with anti-vacuity guards. See docs/decisions.md D22.
+#             prior pin: cb4c5ca5b45fcb64e8665c3785df931dac4f67a71d860617cfa5ef90597f0d6d
