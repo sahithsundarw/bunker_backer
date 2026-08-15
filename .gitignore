@@ -95,3 +95,10 @@ Thumbs.db
 !results/degrade_fidelity/*.png
 !results/degrade_fidelity/*.json
 !weights/best.pt
+# results/qualitative/ holds before/after evidence panels for the shipped checkpoint
+# (submission completeness evidence, not a required V-check item). PNGs + one manifest.json,
+# well under the V51 per-file/total-tree caps -- see results/qualitative/README.md.
+!results/qualitative/
+!results/qualitative/*.png
+!results/qualitative/*.json
+!results/qualitative/*.md
