@@ -10,8 +10,25 @@ effect — do not stop to ask; work to LOOP COMPLETE then the §3 hardening loop
 **Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
 **Verifier SHA:** `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
 
-## Tally: PASS 38 / FAIL 15 — Tier 0 is 14/16, only V04 and V06 left
-(37 measured at `c88fc33`, plus V13 from `99f70de`.)
+## Tally: PASS 41 / FAIL 12 — Tier 0 is 15/16, only V06 left
+V04, V13, V25, V34, V44 all flipped green since the last full run. **V25 — the hard gate —
+CLEARED at 43.3295 dB against a 40 dB bar.** Alignment, normalisation and the loss are
+confirmed end to end, so every quality number measured from here is trustworthy in a way
+nothing before it was.
+
+## ⚠ NINE of the 53 checks were inert placeholders
+V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact
+could ever turn green**. All nine are now implemented against their real subject. Worth
+remembering when reading any historical tally: the "44 FAIL" at iteration 0 looked like honest
+red when a fifth of the suite was measuring nothing at all.
+
+## Training run IN FLIGHT
+`py -3.12 train.py --config configs/final.yaml --seed 42 --iters 20000 --tag iter1-nafsr-20k`
+Background shell `b53yt7v63`. Expected ~74 min (measured 221 ms/step at batch 32 / 64px on the
+4060). On completion it writes `weights/best.pt` and appends to `results/experiments.csv`,
+which unblocks V06 V27 V28 V35 V43 V45 V48.
+**If it OOMs:** halve the batch size and retry, up to three times, logging each attempt. Never
+stall. 8 GB card.
 
 ## Live at this write
 | Agent / job | Owns | Status |

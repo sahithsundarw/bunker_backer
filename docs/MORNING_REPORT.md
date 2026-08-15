@@ -12,11 +12,35 @@ clone verified with credentials suppressed.
 
 | | start of iteration 1 | now |
 |---|---|---|
-| PASS | 9 | **35** |
-| FAIL | 44 | **18** |
+| PASS | 9 | **41** |
+| FAIL | 44 | **12** |
 | SKIP | 0 | 0 |
 
-Tier 1 is **fully green, 9/9**. Tier 0 is 12/16.
+Tier 1 is **fully green, 9/9**. Tier 0 is **15/16** — only V06 (weights) remains.
+
+## ✅ THE HARD GATE IS CLEARED — V25 = 43.3295 dB
+
+`train.py --overfit 2` reaches **43.3295 dB** against the contract's 40 dB bar. This is the one
+result that had to happen before any other number meant anything: a model that cannot overfit
+two pairs it was trained on has broken alignment, normalisation or loss. It clears by 3.33 dB,
+confirming the paired-crop geometry, the [0,1] convention, the unclipped-input handling and the
+loss end to end. **A full 20k-iteration training run is now in flight** (~74 min measured).
+
+A scheduling subtlety I recorded because the failure mode is convincing and wrong: a 4000-iter
+budget stalls at **39.78 dB** while 6000 reaches **43.33 dB**, because the cosine schedule decays
+*proportionally to the budget* rather than truncating. A short overfit run landing just under
+40 dB must not be read as an alignment failure — that misdiagnosis sends someone hunting a
+geometry bug that does not exist.
+
+## ⚠ NINE OF THE 53 CHECKS WERE INERT
+
+V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact could
+ever turn green**. They were BOOTSTRAP placeholders. All nine now test their real subject, with
+anti-vacuity guards so none can pass by checking nothing.
+
+This is worth your attention when reading any earlier tally from this project: the "44 FAIL" at
+iteration 0 looked like honest red, but roughly a fifth of the suite was measuring nothing at
+all. The checks that looked strictest were the ones certifying least.
 
 Every remaining failure is honest and traceable to a missing artifact, not a broken fix:
 
