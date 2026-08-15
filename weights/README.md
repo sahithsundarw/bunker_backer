@@ -89,7 +89,10 @@ verifiable from one place:
 | artifact | Release asset | sha256 |
 |---|---|---|
 | `best.pt` (checkpoint) | [`artifacts-v1/best.pt`](https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt) | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
-| restored test outputs archive (400 files) | *pending — see `results/restored_test_outputs/manifest.json` once generated* | *pending* |
+| restored test outputs archive (400 files) | [`artifacts-v1/restored_test_outputs.zip`](https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip) | `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750` |
+
+Both digests were taken from the **served** bytes after an anonymous re-fetch, not from the
+local copies. Provenance for the archive is in `results/restored_test_outputs/manifest.json`.
 
 Releases page (live, HTTP 200):
 `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
