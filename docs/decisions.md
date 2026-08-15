@@ -1828,3 +1828,26 @@ fixture is built and consumed by zero checks; M5 `scripts/evaluate.py` pairs wit
 - **Do not widen the `_RequireWeightsViolation` catch to a bare `except RuntimeError`.** That
   would silently convert unrelated genuine bugs into a clean exit(1), hiding them from the
   traceback PD4 relies on to make a broken run diagnosable.
+
+---
+
+## D39 — V64 ADDED: the regression guard adversarial finding H4 was left owing
+
+**Date:** 2026-08-16, iteration 2. **Source:** `adversarial-reviewer` H4, fixed in D38 but
+left without a permanent check (needed a filesystem-blocking fixture). Contract addition only.
+
+D38 fixed the bug — `n_ok == 0` already exited 1, but a *partial* write failure
+(`n_failed > 0` with `n_ok > 0`) did not, so a short output set was reported as a successful
+run — but did not add a regression guard for it. **V64** closes that gap: it uses the `mixed`
+fixture (four valid `.npy` files) and pre-occupies exactly one output path with a directory,
+forcing precisely one write to fail with a real `PermissionError`. It asserts the process
+exits non-zero, **and** confirms the other outputs still wrote successfully — the second
+assertion matters because a check that only proves total failure exits non-zero would not
+have caught the original bug at all.
+
+**Negative-controlled**: temporarily removed the D38 fix (the `if n_failed > 0:` block) —
+V64 correctly went red, *"a write failure on 1/4 outputs still exited 0"*. Restored
+byte-exact, green again with the other three outputs confirmed written.
+
+Forced `--device cpu`, no checkpoint needed — the bicubic fallback exercises the exact write
+path under test.

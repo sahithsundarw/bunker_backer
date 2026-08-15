@@ -80,6 +80,7 @@ TIERS["V58"] = 4
 TIERS["V60"] = 1
 TIERS["V61"] = 2
 TIERS["V62"] = 2
+TIERS["V64"] = 1
 
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
@@ -2680,6 +2681,55 @@ def check_V60(ctx: Ctx) -> CheckResult:
     return CheckResult("V60", PASS,
                        "same-dir and nested-dir --output_dir are both refused before any "
                        "write occurs")
+
+
+def check_V64(ctx: Ctx) -> CheckResult:
+    """A partial (or total) write failure must exit non-zero, not report success.
+
+    V07 requires exactly one output per input. n_ok == 0 already exited 1; n_failed > 0 with
+    n_ok > 0 did not -- a short output set was reported as a successful run, the worst
+    possible outcome on KLA's machine because nothing would flag it (adversarial review
+    finding H4). Forces --device cpu; no checkpoint needed since the bicubic fallback still
+    exercises the exact write path under test.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V64", "inference.py")
+
+    src_fixture = ctx.fixtures / "mixed"
+    if not src_fixture.exists():
+        return not_impl("V64", "tests/fixtures/mixed")
+
+    in_dir = ctx.tmpdir("v64_in")
+    in_dir.mkdir(parents=True, exist_ok=True)
+    valid = [f for f in src_fixture.glob("*.npy")]
+    if len(valid) < 2:
+        return not_impl("V64", "tests/fixtures/mixed with >= 2 valid .npy files")
+    for f in valid:
+        (in_dir / f.name).write_bytes(f.read_bytes())
+
+    out_dir = ctx.tmpdir("v64_out")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    blocked = sorted(valid, key=lambda f: f.name)[0].name
+    # Pre-occupy exactly one output path with a directory, so np.save on that one path
+    # raises (PermissionError / IsADirectoryError) while the others succeed normally.
+    (out_dir / blocked).mkdir(parents=True, exist_ok=True)
+
+    rc, so, se = ctx.run_inference(in_dir, out_dir, extra=["--device", "cpu"])
+    others_written = [f.name for f in out_dir.glob("*.npy") if f.name != blocked]
+    ev = {"blocked_file": blocked, "exit_code": rc, "others_written": others_written,
+         "n_valid_inputs": len(valid)}
+    if rc == 0:
+        return CheckResult("V64", FAIL,
+                           f"a write failure on 1/{len(valid)} outputs still exited 0 -- "
+                           f"the short output set was reported as success", ev)
+    if len(others_written) == 0:
+        return CheckResult("V64", FAIL,
+                           "exited non-zero, but no other output was written either -- "
+                           "this did not test a PARTIAL failure", ev)
+    return CheckResult("V64", PASS,
+                       f"a write failure on 1/{len(valid)} outputs correctly exited non-zero "
+                       f"while {len(others_written)} other output(s) still wrote successfully",
+                       ev)
 
 
 #: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and

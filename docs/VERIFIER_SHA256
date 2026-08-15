@@ -14,8 +14,8 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf  scripts/verify_all.py
-f4b954e95174ad6f9cda64e76caab3c7c5e7cfeb724d2879536c24da9bb8e0c4  docs/VERIFICATION_CONTRACT.md
+2595f92d3131b67b20f0c4e588c982c7a4b24ece59e475bcf184cf20ec6c3818  scripts/verify_all.py
+2ee1e32c4c568f42d02b4505c34be53c96d7bfdd35f31da30510de54c51a48d7  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
 # 2026-08-15  contract pinned after the two human-authorised edits (V39 replaced,
@@ -137,3 +137,14 @@ f4b954e95174ad6f9cda64e76caab3c7c5e7cfeb724d2879536c24da9bb8e0c4  docs/VERIFICAT
 #             which also records three other adversarial-review fixes to inference.py (H1,
 #             H4) and the README (C1) that are not yet covered by a dedicated V-check.
 #             prior pin: 2dc9d62585cadfcffd8ad8f1dfba04418c484724d9f6174985c41dfe8d1c1958
+# 2026-08-16  ADDED V64, the regression guard adversarial finding H4 was missing when it was
+#             fixed in inference.py (D38 left this open as follow-up). n_ok==0 already exited
+#             1; a PARTIAL write failure (n_failed>0, n_ok>0) did not, reporting a short
+#             output set as success -- the worst outcome on KLA's machine since nothing would
+#             flag it. V64 uses the 'mixed' fixture (4 valid .npy files), pre-occupies one
+#             output path with a directory to force exactly one write failure, and asserts
+#             exit non-zero while confirming the OTHER outputs still wrote (a genuine partial
+#             failure, not total). CPU-forced, no checkpoint needed. Negative-controlled by
+#             temporarily removing the H4 fix: V64 correctly went red ("still exited 0"); fix
+#             restored byte-exact, V64 green again. See docs/decisions.md D39.
+#             prior pin: 001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf
