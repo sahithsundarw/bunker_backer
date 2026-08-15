@@ -4,29 +4,58 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** iteration 1, wave A INTEGRATED and committed, wave B (`trainer`) in flight.
-**Last commit:** `530a8a0` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
+**Written at:** iteration 1. Wave A + docs-scribe COMPLETE and committed. `trainer` and three
+read-only reviewers in flight. **STANDING AUTHORISATION for an autonomous overnight run is in
+effect — do not stop to ask; work to LOOP COMPLETE then the §3 hardening loop.**
+**Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
 **Verifier SHA:** `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
 
-## Live agents at this write
-| Agent | Files | Status |
-|---|---|---|
-| `trainer` | `train.py`, `src/utils.py`, `results/experiments.csv`, `weights/*.pt` | RUNNING — wave B. Targets V25 V34 V44 V45, and produces the checkpoint that unblocks V06 V27 V28 V35 V43 V48 |
-| `docs-scribe` | `README.md`, `requirements.txt`, `weights/README.md`, `docs/decisions.md` | RUNNING — has already landed requirements.txt (V14 PASS) and the disclosure (V50 PASS); still owes D15-D22 |
+## Tally: PASS 38 / FAIL 15 — Tier 0 is 14/16, only V04 and V06 left
+(37 measured at `c88fc33`, plus V13 from `99f70de`.)
 
-Wave A builders `inference-engineer`, `model-core`, `data-pipeline`, `loss-metrics` are all
-**COMPLETE and committed**. Do not re-dispatch them.
+## Live at this write
+| Agent / job | Owns | Status |
+|---|---|---|
+| `trainer` | `train.py`, `src/utils.py`, `results/experiments.csv`, `weights/*.pt` | RUNNING — targets V25 V34 V44 V45; its checkpoint unblocks V06 V27 V28 V35 V43 V48 |
+| `adversarial-reviewer` | `reviews/adversarial-1.md` | RUNNING (read-only) |
+| `requirements-auditor` | `reviews/requirements-audit-1.md` | RUNNING (read-only) |
+| `ml-skeptic` | `reviews/ml-skeptic-1.md` | RUNNING (read-only) |
+| bg shell `bjlhu40kn` | — | `verify_all.py --fresh-clone --only V04,V46,V47`; slow (builds a venv and installs ~2.5 GB of torch) |
+
+COMPLETE and committed, do **not** re-dispatch: `inference-engineer`, `model-core`,
+`data-pipeline`, `loss-metrics`, `docs-scribe`.
 
 ## THE NEXT CONCRETE ACTION
-1. Wait for `trainer` and `docs-scribe`. Then `py -3.12 scripts\verify_all.py --strict`.
-2. **V00 is red until `docs/decisions.md` contains `590c8e33…09d5bd` verbatim** (entry D22,
-   assigned to docs-scribe). If docs-scribe did not deliver, write D22 yourself — full content
-   is in `docs/BLOCKERS.md` B7 and the commit message of `530a8a0`.
-3. Run the review wave: `adversarial-reviewer`, `requirements-auditor`, `cleanroom-tester`,
-   `perf-analyst`, `ml-skeptic` — all read-only, all write only to `reviews/`.
-4. `perf-analyst` also owns `scripts/benchmark_runtime.py` + `results/runtime_report.md`,
-   which is what V37 V38 V39 V43 need. Dispatch it once a checkpoint exists.
-5. Step 7 ledger, then STOP. **Do not begin iteration 2.**
+1. Collect the fresh-clone result for **V04** (the last Tier 0 item not waiting on weights).
+2. When `trainer` lands a checkpoint: check **V25 first** (overfit 2 pairs > 40 dB). It is the
+   hard gate — if it fails, alignment/normalisation/loss is broken and every downstream number
+   is meaningless. Do not proceed past it.
+3. **The moment Tier 0 is fully green, tag `v0.1-submittable` and push the tag.** Priority 2 of
+   the standing authorisation: a working fallback must always exist on the remote.
+4. Publish the outputs + checkpoint as a GitHub Release (pre-authorised), then send the real
+   numbers and digests to `docs-scribe`, which is waiting to fill in the README results table,
+   `weights/README.md` and the outputs manifest. It has been told not to guess them.
+5. Dispatch `perf-analyst` (owns `scripts/benchmark_runtime.py`, `results/runtime_report.md`)
+   for V37 V38 V39 V43, and `cleanroom-tester` once the README is final.
+6. Then Tiers 1-4, then the §3 hardening loop. Model quality first, throughput second.
+
+## Standing authorisation — what I may and may not do
+**Pre-authorised:** any change making a check STRICTER (log + re-pin); new V-checks for defects
+reviewers find; installing packages, venvs, training runs, GitHub Releases, commit and push;
+rejecting an experiment that does not improve a measured number (add it to Do-NOT-retry with the
+measurement); architecture/hyperparameter/augmentation/loss choices within SPEC §7-§9 guided by
+measurement.
+**NEVER without the human:** weaken, delete, skip or widen the tolerance of any check; edit
+`VERIFICATION_CONTRACT.md` except to add or tighten; train/fit anything on `test_NoisyLR`;
+download DIV2K or attempt source identification; commit dataset, weights, or anything over the
+V51 caps. **If I find myself reasoning toward any of these because it would unblock progress:
+STOP, write it to BLOCKERS.md, work something else. That reasoning is the signal, not the
+justification.**
+
+## Training guidance in force
+On CUDA OOM: halve batch size and retry up to three times, logging each. Never stall. The GPU is
+an RTX 4060 with 8 GB. Run the SPEC §16 gates in order. The bicubic baseline is already
+established (23.6524 dB), so every later number has a floor.
 
 ## Things a fresh session would otherwise rediscover the hard way
 - **`pip install lpips` silently replaces the CUDA torch with a CPU-only build.** Verified
