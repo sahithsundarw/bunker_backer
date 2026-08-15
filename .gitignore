@@ -90,3 +90,11 @@ Thumbs.db
 !results/degrade_fidelity/
 !results/degrade_fidelity/*.png
 !results/degrade_fidelity/*.json
+# V49 reads results/qualitative/ and Definition-of-Done #2 requires fresh-clone verification,
+# so the figures must be in the clone -- without these negations V49 passes on the author's
+# machine and fails for everyone else, which is the same class of defect V59 was added to
+# catch. 9 files, 2.13 MB total, against V51's 5 MB per-file and 25 MB whole-tree caps.
+!results/qualitative/
+!results/qualitative/*.png
+!results/qualitative/*.json
+!results/qualitative/*.md
