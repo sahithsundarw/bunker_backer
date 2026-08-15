@@ -14,8 +14,8 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-2dc9d62585cadfcffd8ad8f1dfba04418c484724d9f6174985c41dfe8d1c1958  scripts/verify_all.py
-214f1bf2e8d14805e322b41587f5456667f5acdaae0dfe72932d9821657c73fd  docs/VERIFICATION_CONTRACT.md
+001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf  scripts/verify_all.py
+f4b954e95174ad6f9cda64e76caab3c7c5e7cfeb724d2879536c24da9bb8e0c4  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
 # 2026-08-15  contract pinned after the two human-authorised edits (V39 replaced,
@@ -125,3 +125,15 @@
 #             deleted URL row, an injected 404, and a backdated timestamp each turned it red;
 #             all three reverted byte-exact and reconfirmed green. See docs/decisions.md D37.
 #             prior pin: d42f610cd5124c4d8992981493bcd8b88a98c327823c9024999277ad36a5ab8d
+# 2026-08-16  ADDED V60, from the first adversarial-reviewer pass (findings H2, H3).
+#             inference.py did not guard against --output_dir equal to or nested inside
+#             --input_dir: the former overwrites the degraded inputs with restored outputs
+#             IN PLACE, the latter makes a second invocation silently re-ingest the previous
+#             run's own output. Both were fixed in inference.py this iteration (a resolved-
+#             path comparison before out_dir.mkdir()); V60 is the permanent regression guard,
+#             CPU-forced, needing no checkpoint since the guard fires before the model loads.
+#             Negative-controlled by temporarily removing the fix: V60 correctly went red on
+#             both cases, fix restored byte-exact, V60 green again. See docs/decisions.md D38,
+#             which also records three other adversarial-review fixes to inference.py (H1,
+#             H4) and the README (C1) that are not yet covered by a dedicated V-check.
+#             prior pin: 2dc9d62585cadfcffd8ad8f1dfba04418c484724d9f6174985c41dfe8d1c1958

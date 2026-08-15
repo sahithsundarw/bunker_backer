@@ -305,12 +305,29 @@ def _is_oom(exc: BaseException) -> bool:
         isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower())
 
 
+class _RequireWeightsViolation(RuntimeError):
+    """Raised only by infer_chunk's require_weights guard; caught narrowly in main() and
+    turned into a clean exit(1) rather than an uncaught traceback. Any OTHER exception from
+    this pipeline is deliberately left to propagate uncaught (CLAUDE.md PD4: a crash is
+    preferable to a silent wrong answer), so this type exists to avoid widening that net."""
+
+
 def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.device,
-                use_amp: bool, amp_dtype: torch.dtype, tta: bool) -> np.ndarray:
+                use_amp: bool, amp_dtype: torch.dtype, tta: bool,
+                require_weights: bool = False) -> np.ndarray:
     """Run one same-shape batch and return a (B, 2H, 2W) float32 array, clipped to [0,1].
 
     On CUDA OOM the batch is split and retried, and a single image that still will not fit
-    is degraded to a CPU bicubic upsample rather than aborting the run.
+    is degraded to a CPU bicubic upsample rather than aborting the run -- that fallback is a
+    genuine resource-exhaustion recovery and is not gated by ``require_weights``.
+
+    A shape-mismatched model output is different: it means a checkpoint LOADED successfully
+    (``weights_ok=True``) but does not actually implement the task -- a corrupt or
+    architecture-mismatched config, for instance. Silently substituting bicubic there would
+    let ``--require_weights`` be satisfied by a checkpoint whose predictions are never
+    actually used, while the run summary still reports ``weights=best`` (adversarial review
+    finding H1; this is exactly the failure V56's ``--require_weights`` requirement exists to
+    rule out for published results). Under ``require_weights`` this raises instead.
     """
     h, w = arrays[0].shape
     x = np.stack(arrays)[:, None]                      # B,1,H,W float32, unclipped
@@ -331,16 +348,20 @@ def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.devic
         if len(arrays) > 1:
             mid = len(arrays) // 2
             _err(f"CUDA OOM at batch {len(arrays)}; retrying in two halves")
-            a = infer_chunk(net, arrays[:mid], dev, use_amp, amp_dtype, tta)
-            b = infer_chunk(net, arrays[mid:], dev, use_amp, amp_dtype, tta)
+            a = infer_chunk(net, arrays[:mid], dev, use_amp, amp_dtype, tta, require_weights)
+            b = infer_chunk(net, arrays[mid:], dev, use_amp, amp_dtype, tta, require_weights)
             return np.concatenate([a, b], axis=0)
         _err(f"CUDA OOM on a single {h}x{w} image; using CPU bicubic x{SCALE} for it")
         y = BicubicUpsampler()(torch.from_numpy(x))
     y = y.float()
     expect = (SCALE * h, SCALE * w)
     if tuple(y.shape[-2:]) != expect:
-        _err(f"model returned {tuple(y.shape[-2:])} for a {h}x{w} input, expected {expect}; "
-             f"using bicubic x{SCALE} for this batch")
+        msg = f"model returned {tuple(y.shape[-2:])} for a {h}x{w} input, expected {expect}"
+        if require_weights:
+            raise _RequireWeightsViolation(
+                f"{msg}; --require_weights forbids silently substituting bicubic for a "
+                f"loaded checkpoint's malformed output")
+        _err(f"{msg}; using bicubic x{SCALE} for this batch")
         y = BicubicUpsampler()(torch.from_numpy(x))
     y = y.clamp_(0.0, 1.0).contiguous()
     return y.detach().to("cpu").numpy()[:, 0]
@@ -357,6 +378,16 @@ def main(argv: list[str] | None = None) -> int:
     in_dir, out_dir = Path(args.input_dir), Path(args.output_dir)
     if not in_dir.is_dir():
         _err(f"--input_dir is not a directory: {in_dir}")
+        return 1
+    in_resolved, out_resolved = in_dir.resolve(), out_dir.resolve()
+    if out_resolved == in_resolved or out_resolved.is_relative_to(in_resolved):
+        # Unguarded, this either overwrites the degraded inputs with restored outputs IN
+        # PLACE (a second run then restores the already-restored output again), or makes a
+        # second invocation silently re-ingest the previous run's own output as new input
+        # (adversarial review findings H2/H3). The only destructive write in this program
+        # must not be reachable by accident.
+        _err(f"--output_dir ({out_resolved}) is --input_dir or nested inside it; use a "
+             f"separate directory for --output_dir")
         return 1
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -439,7 +470,13 @@ def main(argv: list[str] | None = None) -> int:
             batch_items = groups[shape]
             for i in range(0, len(batch_items), bs):
                 chunk = batch_items[i:i + bs]
-                y = infer_chunk(net, [a for _, a in chunk], dev, use_amp, amp_dtype, args.tta)
+                try:
+                    y = infer_chunk(net, [a for _, a in chunk], dev, use_amp, amp_dtype,
+                                    args.tta, args.require_weights)
+                except _RequireWeightsViolation as exc:
+                    pool.shutdown(wait=True)
+                    _err(str(exc))
+                    return 1
                 for (src, _), out in zip(chunk, y):
                     if not np.isfinite(out).all():
                         _err(f"non-finite prediction for {src.name}; neutralised on write")
@@ -463,6 +500,15 @@ def main(argv: list[str] | None = None) -> int:
         # masquerade as success -- exit 0 with an empty output dir is the worst possible
         # outcome on KLA's machine, because nothing would flag it.
         _err(f"produced no outputs for {len(files)} discovered input file(s) in {dt:.2f}s")
+        return 1
+    if n_failed > 0:
+        # V07 requires exactly one output per input; a WRITE failure (disk full, quota,
+        # permissions, a transient filesystem error) is not the "one corrupt input" case V20
+        # exists to tolerate -- it means the output set KLA will read back is short, and an
+        # exit 0 asserting success while that is true is the failure adversarial review
+        # finding H4 identified.
+        _err(f"{n_failed} of {n_written} outputs failed to write ({n_ok}/{len(files)} usable, "
+             f"{dt:.2f}s); exiting non-zero because the output set is incomplete")
         return 1
     _say(verbose,
          f"restored {n_written - n_failed}/{len(files)} in {dt:.2f}s "

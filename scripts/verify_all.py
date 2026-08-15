@@ -77,6 +77,7 @@ TIERS["V59"] = 0
 # V62 F4 degradation order-randomisation, actually measured (same band: data/degradation)
 TIERS["V57"] = 0
 TIERS["V58"] = 4
+TIERS["V60"] = 1
 TIERS["V61"] = 2
 TIERS["V62"] = 2
 
@@ -2627,6 +2628,58 @@ def check_V58(ctx: Ctx) -> CheckResult:
                        f"all {len(urls)} SPEC 2.3 links recorded at 200, oldest entry "
                        f"{age_h:.1f}h old (<= {LINK_CHECK_MAX_AGE_HOURS}h)",
                        {"n_urls": len(urls), "age_hours": age_h})
+
+
+def check_V60(ctx: Ctx) -> CheckResult:
+    """--output_dir must be refused when it equals or nests inside --input_dir.
+
+    Unguarded, this either overwrites the degraded inputs with restored outputs IN PLACE, or
+    makes a second invocation silently re-ingest the previous run's own output as new input
+    (adversarial review findings H2, H3). The guard fires before the model loads, so this
+    needs no checkpoint and no GPU -- forced to --device cpu regardless.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V60", "inference.py")
+    import numpy as np
+
+    src_fixture = ctx.fixtures / "single"
+    if not src_fixture.exists():
+        return not_impl("V60", "tests/fixtures/single")
+
+    probs: list[str] = []
+
+    # Case 1: --output_dir == --input_dir. A real (small) directory, never the fixture dir
+    # itself, so a bug here corrupts a throwaway copy, not the committed fixtures.
+    same = ctx.tmpdir("v60_same")
+    same.mkdir(parents=True, exist_ok=True)
+    for f in src_fixture.glob("*.npy"):
+        (same / f.name).write_bytes(f.read_bytes())
+    before = {f.name: np.load(f, allow_pickle=False).shape for f in same.glob("*.npy")}
+    rc, _, se = ctx.run_inference(same, same, extra=["--device", "cpu"])
+    after = {f.name: np.load(f, allow_pickle=False).shape for f in same.glob("*.npy")}
+    if rc == 0:
+        probs.append(f"--output_dir == --input_dir was NOT refused (exit 0): {se.strip()[:150]}")
+    elif before != after:
+        probs.append(f"--output_dir == --input_dir mutated the inputs despite a non-zero "
+                     f"exit: before={before} after={after}")
+
+    # Case 2: --output_dir nested inside --input_dir.
+    nest_root = ctx.tmpdir("v60_nest")
+    nest_in = nest_root / "in"
+    nest_in.mkdir(parents=True, exist_ok=True)
+    for f in src_fixture.glob("*.npy"):
+        (nest_in / f.name).write_bytes(f.read_bytes())
+    nest_out = nest_in / "restored"
+    rc2, _, se2 = ctx.run_inference(nest_in, nest_out, extra=["--device", "cpu"])
+    if rc2 == 0:
+        probs.append(f"--output_dir nested inside --input_dir was NOT refused (exit 0): "
+                     f"{se2.strip()[:150]}")
+
+    if probs:
+        return CheckResult("V60", FAIL, "; ".join(probs))
+    return CheckResult("V60", PASS,
+                       "same-dir and nested-dir --output_dir are both refused before any "
+                       "write occurs")
 
 
 #: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and

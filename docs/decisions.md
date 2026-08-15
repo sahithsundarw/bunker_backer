@@ -1729,3 +1729,102 @@ loudly rather than the check silently re-trusting an old fetch forever.
 ### Do NOT retry
 - **Do not make V58 re-fetch live on every run.** That trades a controllable, bounded
   staleness window for an uncontrollable dependency on nine external services' uptime.
+
+---
+
+## D38 — Four real bugs in `inference.py`, found by `adversarial-reviewer`'s first delivered run
+
+**Date:** 2026-08-16, iteration 2. **Source:** `reviews/adversarial-1.md` (local, gitignored).
+This agent was dispatched in iteration 1 and killed by a usage limit before writing a file;
+this is its first delivered report. 1 critical, 4 high, 5 medium, 7 low. The critical and all
+four highs are addressed here; mediums/lows are logged in the report for a later pass.
+
+`inference.py` is CLAUDE.md Prime Directive 4's highest-value file: KLA runs it as-is, and a
+broken script scores zero regardless of model quality. All four fixes below were verified with
+concrete repros, run with `--device cpu` throughout because a `perf-analyst` benchmark had the
+GPU at the time.
+
+### H2 + H3 (high) — the only destructive write in the program was unguarded
+
+`--output_dir` equal to `--input_dir` overwrote the degraded inputs with restored outputs IN
+PLACE (repro: run once, `000000.npy` goes from `(128,128)` to `(256,256)`; run again and it
+becomes `(512,512)` — the original degraded input is gone). `--output_dir` nested inside
+`--input_dir` (e.g. `--input_dir data/test --output_dir data/test/restored`, a natural
+evaluator layout) made a second invocation silently re-ingest the first run's own output as
+new input.
+
+Fixed with a single resolved-path comparison before `out_dir.mkdir()`:
+`out_resolved == in_resolved or out_resolved.is_relative_to(in_resolved)` — refuses both cases,
+exit 1, before anything is read or written. **V60 added** as the permanent regression guard
+(Tier 1, CPU-forced, needs no checkpoint since the guard fires before the model loads).
+Negative-controlled: removing the fix made V60 fail on both cases; restored byte-exact, green.
+
+### H4 (high) — a partial write failure exited 0
+
+`n_ok == 0` (total failure) already exited 1; `n_failed > 0 and n_ok > 0` (partial failure) did
+not. V07 requires exactly one output per input, so a short output set silently reported as
+success is the worst outcome on KLA's machine — nothing would flag it. Repro: 6 inputs, one
+output path blocked by a pre-existing directory of the same name → `5/6 usable` but exit 0
+before the fix, exit 1 after.
+
+Fixed: `if n_failed > 0:` now returns 1 with the failure count, alongside the pre-existing
+`n_ok == 0` branch. No dedicated V-check yet — the existing V07 fixture run never exercises a
+write failure, so a regression check would need its own filesystem-blocking fixture; logged as
+follow-up rather than blocking this fix.
+
+### H1 (high) — a loaded-but-malformed checkpoint could defeat `--require_weights`
+
+`load_net()` sets `weights_ok=True` for any checkpoint that loads with `strict=True` — that
+says nothing about whether the architecture actually implements the task. A checkpoint with a
+wrong `scale` in its config loads fine, and `infer_chunk`'s shape guard then silently
+substitutes `BicubicUpsampler` for the **entire output**, with `--require_weights` never
+firing and the run summary still printing `weights=best`. This defeats the exact guarantee
+V56 relies on `--require_weights` for. Repro: a genuine 7k-param checkpoint built with
+`build_model({"scale": 3, ...})`, otherwise valid, fed through `--require_weights` → previously
+exit 0, `weights=best`, 100% bicubic output; now exit 1 before the fix ships anything.
+
+Fixed: `infer_chunk` gained a `require_weights` parameter (threaded from `main()`). On a shape
+mismatch, if `require_weights` is set it raises a dedicated `_RequireWeightsViolation`
+(`RuntimeError` subclass) instead of silently degrading; `main()` catches **only** that type,
+shuts the write pool down cleanly, and exits 1 with a clear message. Deliberately narrow: every
+*other* exception in this pipeline is left to propagate uncaught, unchanged from before this
+fix, per PD4 ("a crash is preferable to a silent wrong answer") — this fix does not widen that.
+The CUDA-OOM single-image bicubic fallback in the same function is a genuine resource-recovery
+path, a different risk category, and is deliberately left ungated by `require_weights`.
+Confirmed both directions: with `--require_weights`, exits 1, no bicubic shipped; without it,
+still degrades gracefully to bicubic exactly as before (backward compatible).
+
+### C1 (critical) — the README's own example command produced bicubic on a fresh clone
+
+`weights/best.pt` is not tracked. The root README's section literally titled "the command KLA
+runs" was `inference.py --input_dir sample_inputs --output_dir results/sample_outputs` — no
+`--require_weights`. A reviewer following the README literally on a fresh clone, before
+downloading the checkpoint from the Release, gets a silent bicubic upsample at exit 0. Every
+existing check tolerates this: V04/V46's fresh-clone fixture run never asserts a real model
+ran, and V06/V59 both pass via the hosted-URL branch regardless of whether the URL was
+actually followed by whoever ran the command.
+
+Fixed: the documented command now includes `--require_weights`, with an explanation of why —
+so a reviewer who runs it literally either gets a real model result or a loud, diagnosable
+failure, never a silent floor score. Also documents the H2/H3 output-directory constraint
+inline, since it's the same section a reviewer is most likely to copy-paste from.
+
+**Not a V-check fix**, because `check_V46` does not actually execute the README's fenced
+commands — it only checks they exist, then runs a separate hardcoded fixture sequence
+(`requirements-audit-2` H-4b, still open, `docs/STATE.md`). This means C1's fix is currently
+verified only by manual re-run, the same limitation the whole README rewrite (D-earlier) was
+under. H-4b remains the right fix for that gap and is unchanged by this entry.
+
+### Not yet covered (from the same report, lower severity — tracked, not fixed here)
+
+M1 unguarded `out_dir.mkdir()` can leak an interpreter path in a raw traceback; M2 `EXTS`
+advertises four undecodable image formats and silently drops matching files from the output
+set; M3 a single NaN pixel poisons a whole prediction and is neutralised to 0.0, in tension
+with the file's own MMSE argument for `PLACEHOLDER_VALUE = 0.5`; M4 the `oddnames` verifier
+fixture is built and consumed by zero checks; M5 `scripts/evaluate.py` pairs with non-recursive
+`glob` while `inference.py` uses `rglob`. Seven lows, detailed in `reviews/adversarial-1.md`.
+
+### Do NOT retry
+- **Do not widen the `_RequireWeightsViolation` catch to a bare `except RuntimeError`.** That
+  would silently convert unrelated genuine bugs into a clean exit(1), hiding them from the
+  traceback PD4 relies on to make a broken run diagnosable.

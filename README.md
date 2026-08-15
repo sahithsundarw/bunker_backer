@@ -234,15 +234,24 @@ checkpoint a hard error instead, and use that flag for any run whose output you 
 ## Inference — the command KLA runs
 
 ```bash
-.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs
+.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs --require_weights
 ```
 
 `sample_inputs/` holds 6 real degraded 128×128 inputs (393,984 B total) so a reviewer can
 verify the script without downloading the dataset. Point `--input_dir` at any directory of
-degraded `.npy` files and `--output_dir` anywhere you like — those two arguments are the entire
-interface (SPEC F11). No other argument is required, no file needs editing, and weights are
-resolved relative to the script file, never to the working directory, so the script runs
-correctly from any CWD.
+degraded `.npy` files and `--output_dir` anywhere you like — `--input_dir` and `--output_dir`
+are the entire required interface (SPEC F11), and no file needs editing. Weights are resolved
+relative to the script file, never to the working directory, so the script runs correctly from
+any CWD.
+
+**`--require_weights` is included above deliberately.** Without it, a fresh clone that has not
+yet downloaded `weights/best.pt` (§Get the checkpoint, above) runs to **exit 0** and silently
+produces a bicubic ×2 upsample instead of a model result — the flag turns that into a loud,
+non-zero-exit failure instead (adversarial review finding C1: the example command previously
+shipped *without* this flag, which is exactly the invocation a reviewer following the README
+literally would run). `--output_dir` must also be a directory that is neither `--input_dir`
+itself nor nested inside it — `inference.py` refuses that combination rather than silently
+overwriting the degraded inputs in place (finding H2/H3).
 
 Optional flags, all with defaults that make the two-argument invocation correct:
 `--weights`, `--batch_size`, `--device`, `--precision {auto,bf16,fp16,fp32}`, `--compile`,
