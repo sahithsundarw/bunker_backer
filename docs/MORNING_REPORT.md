@@ -24,7 +24,8 @@ Tier 1 is **fully green, 9/9**. Tier 0 is **15/16** — only V06 (weights) remai
 result that had to happen before any other number meant anything: a model that cannot overfit
 two pairs it was trained on has broken alignment, normalisation or loss. It clears by 3.33 dB,
 confirming the paired-crop geometry, the [0,1] convention, the unclipped-input handling and the
-loss end to end. **A full 20k-iteration training run is now in flight** (~74 min measured).
+loss end to end. **The full 20k-iteration training run has since completed** — see the results
+table above.
 
 A scheduling subtlety I recorded because the failure mode is convincing and wrong: a 4000-iter
 budget stalls at **39.78 dB** while 6000 reaches **43.33 dB**, because the cosine schedule decays
@@ -46,13 +47,16 @@ Every remaining failure is honest and traceable to a missing artifact, not a bro
 
 | Cause | Checks |
 |---|---|
-| Needs the trained checkpoint — **training in flight now** | V06 V27 V28 V35 V43 V45 V48 |
-| Needs the runtime report (`perf-analyst`, queued behind the GPU) | V37 V38 V39 |
-| Needs qualitative figures, including the honest failure case | V49 |
+| Needs the checkpoint **published** as a Release with a sha256 | V06 V59 |
+| Needs `results/baselines/final/metrics.json` from `scripts/evaluate.py` — **not** the training log | V27 V28 V48 |
 | Needs the UNetSR baseline trained at equal budget | V28 |
+| Needs the 400 restored outputs, generated with `--require_weights` | V56 |
+| Needs the runtime report (`perf-analyst`, never dispatched) | V37 V38 V39 V43 |
+| Needs qualitative figures, including the honest failure case | V49 |
 
-Nothing is blocked on you, and nothing is blocked on a defect. Every one of the twelve is
-waiting on an artifact that a running job will produce.
+Nothing is blocked on you and nothing is blocked on a defect — every item is waiting on an
+artifact that a specific command produces. **Work is paused here at your instruction**;
+nothing is running.
 
 ---
 
@@ -147,7 +151,28 @@ Classical baselines, 400-pair val split, scored on **reloaded float32 `.npy` fro
 | bicubic ×2 (the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 |
 | median 3×3 → bicubic | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | **0.40870** ± 0.15866 |
 | non-local means → bicubic | **26.2722** ± 4.3037 | **0.65152** ± 0.19523 | 0.42586 ± 0.18627 |
-| **ours (NAFSR)** | training in flight | — | — |
+| **ours (NAFSR, EMA)** | **28.7851 ± 4.5324** | **0.78279 ± 0.14169** | **0.25233** |
+
+**The model beats every baseline on all three metrics.** Run completed in 1:11:41 at 4.65 it/s,
+20,000 iterations, seed 42, no OOM. Ledger row `20260815T062831Z-final-s42`.
+
+| vs | ΔPSNR | ΔSSIM | ΔLPIPS (lower better) |
+|---|---|---|---|
+| bicubic (the floor V27 asks for) | **+5.13 dB** | +0.235 | −0.160 |
+| non-local means (the honest bar) | **+2.51 dB** | +0.131 | −0.174 |
+
+Two things worth noting about the shape of this result:
+
+- **LPIPS improved alongside PSNR**, by a large margin (0.252 vs 0.409–0.426 for every
+  baseline). That matters because the classical baselines showed PSNR/SSIM and LPIPS pulling in
+  *opposite* directions — NLM won fidelity by 2.6 dB while scoring the worst LPIPS, by
+  over-smoothing. A model that improved PSNR while degrading LPIPS would have been buying the
+  scored blend with one hand and selling it with the other. This did not do that, which is
+  evidence the balanced loss (Charbonnier + SSIM + FFT) is doing its job.
+- **The in-run validation figure is higher than the headline.** Training logged
+  `psnr 30.3944` at iteration 20000, but that is a **100-image subset** used for checkpoint
+  selection. The headline **28.7851 is the full 400-image committed split**. The lower number
+  is the honest one and is what gets reported; the gap is subset variance, not a regression.
 
 **Two readings that change what we optimise:**
 - **The honest bar is 26.27 dB, not 23.65 dB.** V27 only formally requires beating bicubic. A
@@ -217,11 +242,26 @@ Two judgement calls I made that you may want to overrule later, both reversible:
 
 ---
 
-## THE THREE THINGS I WOULD DO NEXT
+## THE THREE THINGS TO DO NEXT — training is paused here at your instruction
 
-1. **Land a trained checkpoint.** It alone unblocks ten checks (V06 V25 V27 V28 V34 V35 V43 V44
-   V45 V48). The V25 overfit-to-40 dB gate runs first and gates everything after it.
-2. **Tag `v0.1-submittable` the moment Tier 0 is green**, so a working fallback always exists on
-   the remote regardless of what happens later.
-3. **Fresh-clone run** to close V04/V46 and prove B8's `requirements.txt` fix in a clean venv —
-   that is the one failure mode that passes locally and fails silently on the evaluator's machine.
+1. **Publish the checkpoint as a GitHub Release with a sha256, and record it in
+   `weights/README.md`.** This is the single highest-value remaining action and it needs no
+   GPU. `weights/best.pt` currently exists **only on this machine** — `.gitignore` and V51 both
+   refuse `*.pt`, so it is invisible to git and absent from every clone. Until it is uploaded,
+   a reviewer who clones this repo gets a bicubic upsampler, not the model. That closes V06 and
+   V59.
+2. **Run `scripts/evaluate.py` on the trained checkpoint** to write
+   `results/baselines/final/metrics.json`. V27, V28 and V48 read that file, **not** the training
+   log — so despite the model comfortably beating every baseline, those checks are still red and
+   will stay red until the evaluation record exists. Then generate the 400 restored outputs with
+   **`--require_weights`** (without it, `inference.py` silently falls back to bicubic and would
+   ship upsampler output as model results) and attach them to the same Release for V56.
+3. **Train the U-Net baseline at the same 20k budget** (`configs/baseline_unet.yaml`, ~60–90
+   min). This is the only remaining item that needs the GPU. V28 requires beating a *learned*
+   baseline trained under an equal budget; the three baselines measured so far are classical, so
+   the rubric's like-for-like comparison is genuinely missing right now.
+
+After those: `perf-analyst` for the runtime report (V37–V39, V43), qualitative triplets
+including the honest failure case `000984.npy` — described accurately as **broadband texture**,
+not the periodic aliasing SPEC predicted and the measurement refuted — and a `--fresh-clone`
+`--strict` run before tagging `v0.1-submittable`.

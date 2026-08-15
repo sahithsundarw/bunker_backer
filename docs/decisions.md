@@ -1260,3 +1260,103 @@ Nine checks were inert placeholders (D22, D26) and eleven requirements had no ch
 suite's red count was never the useful signal; **what it was actually measuring** was. Both
 audits found this by re-deriving rather than reading, which is the argument for running
 `ml-skeptic` and `requirements-auditor` every wave rather than treating them as ceremony.
+
+## D28 — SECURITY: V55's GitHub host validation was an unanchored substring match
+
+Found by an automated security review of the pushed commits, in code added **one commit
+earlier** (D27). `scripts/verify_all.py` →
+`4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b`
+(prior `dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a`).
+
+### The defect
+
+V55 derived owner/name with an unanchored `re.search` for `github.com[:/]+…`, so the host was
+never actually validated. Demonstrated:
+
+| remote URL | parsed as |
+|---|---|
+| `https://evil.example.com/github.com/attacker/payload.git` | `("attacker", "payload")` |
+| `https://notgithub.com/a/b` | `("a", "b")` |
+
+### Why it mattered, and why it was not waved away
+
+As written, V55 only clones the URL git already points at, so the immediate blast radius was
+small. But the owner/name it derives are precisely the values one would use to build an
+`api.github.com/repos/<owner>/<name>` request — which is exactly what the auditor's proposed
+V55 specified and what a later iteration would plausibly add. At that point the bypass becomes
+a live SSRF against an attacker-chosen host.
+
+Fixed at the **parser**, not the call site, so a future caller cannot reintroduce it.
+`_parse_github_remote()` uses `urllib.parse.urlsplit`, requires the scheme to be one of
+https/http/git/ssh, requires `hostname` to equal `github.com` or `www.github.com` **exactly**,
+and requires exactly two non-empty path segments. The scp-like `git@github.com:owner/repo`
+form is matched with `re.fullmatch`, never `re.search`.
+
+Verified against eight vectors: the two bypasses above, plus `github.com.attacker.net`,
+`file:///etc/passwd`, a single-segment path, the scp form, a mixed-case host, and the real
+remote. All eight behave correctly.
+
+### Process note
+
+This is the third defect this iteration found by something other than reading the code — after
+`ml-skeptic`'s re-derivation and `requirements-auditor`'s independent compliance pass. It is
+also a reminder that **newly added checks are code like any other**, and get no presumption of
+correctness for being freshly written or security-adjacent.
+
+## D29 — First trained model: NAFSR beats every baseline on all three metrics
+
+Run `20260815T062831Z-final-s42`, `train.py --config configs/final.yaml --seed 42 --iters 20000`.
+Completed in **1:11:41 at 4.65 it/s** on an RTX 4060 Laptop GPU (8 GB), no OOM, no batch-size
+reduction. Shipped weights are the **EMA** weights at best validation PSNR.
+
+### Result — full 400-image committed split, EMA, scored from reloaded `.npy` on disk
+
+| Method | PSNR dB ↑ | SSIM ↑ | LPIPS ↓ |
+|---|---|---|---|
+| bicubic ×2 (the floor V27 requires) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 |
+| median 3×3 → bicubic | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 |
+| non-local means → bicubic (the honest bar) | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 |
+| **NAFSR w48 n16, EMA** | **28.7851 ± 4.5324** | **0.78279 ± 0.14169** | **0.25233** |
+
+**+5.13 dB over bicubic, +2.51 dB over non-local means**, winning all three metrics against all
+three baselines.
+
+### The LPIPS direction is the result worth defending
+
+Across the classical baselines, fidelity and perceptual quality move **in opposition**: NLM
+gains 2.6 dB of PSNR over bicubic while scoring the *worst* LPIPS of the three, because it buys
+fidelity by over-smoothing. The scoring blend is an undisclosed mix of PSNR, SSIM and LPIPS
+(F9), so a model that raised PSNR while degrading LPIPS would be gaming one half of the blend
+at the other half's expense — and would look good on the metric we can see.
+
+This model improves **both simultaneously**: LPIPS falls from 0.409–0.426 to **0.252**, a larger
+relative gain than the PSNR improvement. That is the evidence the balanced
+Charbonnier + 0.15·SSIM + 0.05·FFT loss is doing what SPEC §8 intends, and it is the argument
+against the pure-L2 or pure-GAN alternatives recorded in §7.2.
+
+### Two numbers that must not be confused
+
+The training log reports `psnr 30.3944` at iteration 20000. **That is a 100-image subset**
+(`--val_limit`) used only for in-run checkpoint selection. The reportable figure is the
+**full 400-image committed split: 28.7851 dB**. The 1.6 dB gap is subset variance, not a
+regression. **Always quote the lower number**; a repo that quotes its in-run selection metric
+as its headline result is overstating by exactly the amount nobody can audit.
+
+### What this result does NOT yet establish
+
+- **No learned-baseline comparison exists.** The three baselines above are classical. V28
+  requires beating a U-Net trained under the *same* budget, and that run has not happened, so
+  the rubric's like-for-like learned comparison is genuinely missing.
+- **V27/V28/V48 are still red and correctly so.** They read
+  `results/baselines/final/metrics.json`, written by `scripts/evaluate.py` — not the training
+  log. A number in a log is not an evaluation record.
+- **Throughput is unmeasured.** No runtime report exists; the throughput axis is unscored.
+- **The checkpoint is not obtainable by anyone else.** It exists only on the dev machine (V59).
+
+### Do NOT retry
+
+Nothing here was rejected — this is the first accepted training result and the baseline all
+future runs must beat. Any subsequent architecture, loss or augmentation change must be
+measured against **28.7851 / 0.78279 / 0.25233 on the 400-image split**, and per D16 an
+in-distribution gain bought by narrowing the degradation randomisation is a regression against
+the actual objective, not an improvement.

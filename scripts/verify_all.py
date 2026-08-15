@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -1830,6 +1831,46 @@ def check_V54(ctx: Ctx) -> CheckResult:
                        f"({scanned} modules scanned)", {"modules_scanned": scanned})
 
 
+def _parse_github_remote(url: str) -> tuple[str, str] | None:
+    """Parse `owner, name` from a git remote, accepting ONLY a real github.com host.
+
+    Deliberately not a substring match. The first version of this used
+    ``re.search(r"github\\.com[:/]+([^/]+)/([^/\\s]+?)(?:\\.git)?$", url)``, which is
+    unanchored, so the host was never actually validated:
+
+        https://evil.example.com/github.com/attacker/payload.git  -> ("attacker", "payload")
+        https://notgithub.com/a/b                                 -> ("a", "b")
+
+    Both matched. Today V55 only clones the remote git already points at, so the blast
+    radius was small — but the owner/name it derives are exactly the values one would use
+    to build an `api.github.com/repos/<owner>/<name>` request, and at that point the
+    bypass becomes a live SSRF. Fixed at the parser rather than at the call site, so it
+    cannot be reintroduced by a later caller.
+    """
+    u = url.strip()
+    # scp-like syntax: git@github.com:owner/repo(.git)
+    m = re.fullmatch(r"(?:ssh://)?git@github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?", u)
+    if m:
+        return m.group(1), m.group(2)
+    try:
+        p = urllib.parse.urlsplit(u)
+    except ValueError:
+        return None
+    if p.scheme not in ("https", "http", "git", "ssh"):
+        return None
+    if (p.hostname or "").lower() not in ("github.com", "www.github.com"):
+        return None
+    parts = [s for s in p.path.split("/") if s]
+    if len(parts) != 2:
+        return None
+    owner, name = parts[0], parts[1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    if not owner or not name:
+        return None
+    return owner, name
+
+
 def check_V55(ctx: Ctx) -> CheckResult:
     """F12: the repository must be PUBLIC, proven without credentials.
 
@@ -1841,11 +1882,12 @@ def check_V55(ctx: Ctx) -> CheckResult:
     if rc != 0 or not url.strip():
         return CheckResult("V55", FAIL, "no origin remote configured")
     url = url.strip()
-    m = re.search(r"github\.com[:/]+([^/]+)/([^/\s]+?)(?:\.git)?$", url)
-    if not m:
-        return CheckResult("V55", FAIL, f"cannot parse a GitHub owner/name from {url}",
+    parsed = _parse_github_remote(url)
+    if parsed is None:
+        return CheckResult("V55", FAIL,
+                           f"origin is not a recognised github.com remote: {url}",
                            {"url": url})
-    owner, name = m.group(1), m.group(2)
+    owner, name = parsed
     # Strip every credential source: a pass here must mean genuinely public.
     anon = {"GITHUB_TOKEN": "", "GH_TOKEN": "", "GIT_ASKPASS": "",
             "GIT_TERMINAL_PROMPT": "0"}

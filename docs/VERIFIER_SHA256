@@ -14,7 +14,7 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a  scripts/verify_all.py
+4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b  scripts/verify_all.py
 d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
@@ -50,3 +50,8 @@ d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICAT
 #             pins move. See docs/decisions.md D27.
 #             prior verifier pin: 24b4b1f1f6919502a84ffe2360a9dce53137d9f31bd6d46c7710219e277f6c7f
 #             prior contract pin: 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef
+# 2026-08-15  SECURITY: V55 host validation was an UNANCHORED substring match, so
+#             https://evil.example.com/github.com/attacker/payload.git parsed as owner
+#             attacker/repo payload. Replaced with real URL parsing + exact host match.
+#             See docs/decisions.md D28.
+#             prior pin: dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a

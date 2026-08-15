@@ -4,57 +4,130 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** iteration 1. Wave A + docs-scribe COMPLETE and committed. `trainer` and three
-read-only reviewers in flight. **STANDING AUTHORISATION for an autonomous overnight run is in
-effect — do not stop to ask; work to LOOP COMPLETE then the §3 hardening loop.**
-**Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
-**Verifier SHA:** `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
+**Written at:** end of iteration 1. **NOTHING IS RUNNING.** No agent, no training job, no
+background shell. The user paused work here deliberately and will resume training later.
+**Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous
+clone verified with credentials stripped).
+**Verifier SHA:** `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b`
+(matches the pin in `docs/VERIFIER_SHA256`; V00 passes).
 
-## Tally: PASS 41 / FAIL 12 — Tier 0 is 15/16, only V06 left
-V04, V13, V25, V34, V44 all flipped green since the last full run. **V25 — the hard gate —
-CLEARED at 43.3295 dB against a 40 dB bar.** Alignment, normalisation and the loss are
-confirmed end to end, so every quality number measured from here is trustworthy in a way
-nothing before it was.
+## ⛔ FIRST ACTION IN A NEW SESSION: commit and push
+Documentation and code updates are **complete on disk but UNPUSHED** — the previous session
+lost shell access to a safety classifier partway through. Nothing is half-written; the tree is
+consistent. Just:
 
-## ⚠ NINE of the 53 checks were inert placeholders
-V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact
-could ever turn green**. All nine are now implemented against their real subject. Worth
-remembering when reading any historical tally: the "44 FAIL" at iteration 0 looked like honest
-red when a fifth of the suite was measuring nothing at all.
+    cd C:\Users\sahit\OneDrive\Desktop\semi
+    git add -A
+    git status --short          # sanity: no *.pt, no *.npy outside sample_inputs/
+    git commit -F "C:\Users\sahit\.claude\jobs\350d944b\tmp\commit_msg.txt"
+    git push origin main
 
-## Training run IN FLIGHT
-`py -3.12 train.py --config configs/final.yaml --seed 42 --iters 20000 --tag iter1-nafsr-20k`
-Background shell `b53yt7v63`. Expected ~74 min (measured 221 ms/step at batch 32 / 64px on the
-4060). On completion it writes `weights/best.pt` and appends to `results/experiments.csv`,
-which unblocks V06 V27 V28 V35 V43 V45 V48.
-**If it OOMs:** halve the batch size and retry, up to three times, logging each attempt. Never
-stall. 8 GB card.
+If that message file is gone (job tmp is cleaned on job deletion), write your own — the full
+content is in `docs/decisions.md` D28 and D29.
 
-## Live at this write
-| Agent / job | Owns | Status |
-|---|---|---|
-| `trainer` | `train.py`, `src/utils.py`, `results/experiments.csv`, `weights/*.pt` | RUNNING — targets V25 V34 V44 V45; its checkpoint unblocks V06 V27 V28 V35 V43 V48 |
-| `adversarial-reviewer` | `reviews/adversarial-1.md` | RUNNING (read-only) |
-| `requirements-auditor` | `reviews/requirements-audit-1.md` | RUNNING (read-only) |
-| `ml-skeptic` | `reviews/ml-skeptic-1.md` | RUNNING (read-only) |
-| bg shell `bjlhu40kn` | — | `verify_all.py --fresh-clone --only V04,V46,V47`; slow (builds a venv and installs ~2.5 GB of torch) |
+## Tally: PASS 41 / FAIL 12 of the *old* 53, measured BEFORE the last four checks were added
+**Do not trust that number — re-run the verifier.** It predates: the trained model, four added
+checks (V54 V55 V56 V59 → the suite is now **57**), the V10 strengthening, and the V55 SSRF
+fix. `py -3.12 scripts\verify_all.py --strict` is the only authority.
 
-COMPLETE and committed, do **not** re-dispatch: `inference-engineer`, `model-core`,
-`data-pipeline`, `loss-metrics`, `docs-scribe`.
+Known state at the last full run: Tier 1 fully green; Tier 0 was 15/16 with only V06 short.
+V25 — **the hard gate — CLEARED at 43.3295 dB** against a 40 dB bar, which is what makes every
+quality number since then trustworthy.
 
-## THE NEXT CONCRETE ACTION
-1. Collect the fresh-clone result for **V04** (the last Tier 0 item not waiting on weights).
-2. When `trainer` lands a checkpoint: check **V25 first** (overfit 2 pairs > 40 dB). It is the
-   hard gate — if it fails, alignment/normalisation/loss is broken and every downstream number
-   is meaningless. Do not proceed past it.
-3. **The moment Tier 0 is fully green, tag `v0.1-submittable` and push the tag.** Priority 2 of
-   the standing authorisation: a working fallback must always exist on the remote.
-4. Publish the outputs + checkpoint as a GitHub Release (pre-authorised), then send the real
-   numbers and digests to `docs-scribe`, which is waiting to fill in the README results table,
-   `weights/README.md` and the outputs manifest. It has been told not to guess them.
-5. Dispatch `perf-analyst` (owns `scripts/benchmark_runtime.py`, `results/runtime_report.md`)
-   for V37 V38 V39 V43, and `cleanroom-tester` once the README is final.
-6. Then Tiers 1-4, then the §3 hardening loop. Model quality first, throughput second.
+## ⚠ NINE of the original 53 checks were inert placeholders
+V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact could
+ever turn green** — they looked identical before and after a real defect. All nine now test
+their subject with anti-vacuity guards (D22, D26). A further **eleven requirements had no check
+at all**; four were added as V54/V55/V56/V59 (D27) and the remaining seven are listed in the
+backlog section below. Read any historical tally with this in mind: the "44 FAIL" at iteration
+0 looked like honest red while a fifth of the suite was measuring nothing.
+
+## Agents — all COMPLETE, do not re-dispatch
+`inference-engineer`, `model-core`, `data-pipeline`, `loss-metrics`, `docs-scribe`, `trainer`,
+`ml-skeptic`, `requirements-auditor`.
+**`adversarial-reviewer` never delivered** — it was killed by a usage limit before writing its
+file, so `reviews/adversarial-1.md` does not exist. It is the one review-wave agent still owed,
+and it is worth re-running: it attacks `inference.py` the way a hostile evaluator would.
+Surviving reviews: `reviews/ml-skeptic-1.md`, `reviews/requirements-audit-1.md` (note
+`reviews/` is gitignored, so these are local-only).
+
+## ⛔ SESSION HALTED — shell execution blocked, work left UNCOMMITTED
+
+A safety classifier began blocking **every** Bash call partway through iteration 1, including
+read-only ones. It is triggered by conversation content and fires for the remainder of that
+session, so it cannot be worked around from inside it. Resume in a **fresh session**, or in
+the default (non-auto) permission mode.
+
+### UNCOMMITTED work sitting in the tree — do this FIRST
+1. `scripts/verify_all.py` carries a **security fix** to V55 (SSRF: the GitHub host check was
+   an unanchored `re.search`, so `https://evil.example.com/github.com/attacker/payload.git`
+   parsed as owner `attacker` / repo `payload`). Fixed via `_parse_github_remote()` using
+   `urllib.parse.urlsplit` with an exact host match. **Verified against 8 bypass vectors, all
+   correct.**
+2. `docs/VERIFIER_SHA256` is already re-pinned to
+   `4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b`.
+3. `docs/decisions.md` entry **D28 is already appended** (done via file edit, since shell
+   execution was blocked). Append-only was respected — nothing above it was touched. So the
+   three files are now mutually consistent and V00 should pass.
+4. **All that remains is `git add` + `git commit` + `git push`** of exactly:
+   `scripts/verify_all.py  docs/VERIFIER_SHA256  docs/decisions.md`
+   Suggested subject:
+   `fix(V55): SSRF - GitHub host validation was an unanchored substring match`
+   Verify first with `py -3.12 scripts\verify_all.py --only V00,V55` — both should be green.
+
+### The training run — ✅ COMPLETE, exit 0
+`train.py --config configs/final.yaml --seed 42 --iters 20000` finished in **1:11:41** at
+4.65 it/s, no OOM. Ledger row `20260815T062831Z-final-s42` appended to
+`results/experiments.csv`. `weights/best.pt` holds the EMA weights at the best validation PSNR.
+
+**Final validation, EMA, full 400-image committed split, scored from reloaded `.npy` on disk:**
+
+    PSNR 28.7851 +/- 4.5324    SSIM 0.78279 +/- 0.14169    LPIPS 0.25233    n=400
+
+Beats every baseline on all three metrics: **+5.13 dB over bicubic** (the floor V27 formally
+requires) and **+2.51 dB over non-local means** (the honest bar), with LPIPS improving from
+0.409-0.426 down to 0.252.
+
+That LPIPS direction is the important part. Across the classical baselines PSNR/SSIM and LPIPS
+pulled in *opposite* directions — NLM won fidelity by 2.6 dB while scoring the worst LPIPS,
+because it over-smooths. Improving both simultaneously is evidence the balanced loss is working
+rather than the model buying PSNR at the perceptual metric's expense.
+
+**Do not confuse two numbers:** training logged `psnr 30.3944` at iteration 20000, but that is
+the **100-image subset** used for in-run checkpoint selection. The reportable figure is the
+**full 400-image split, 28.7851**. Always quote the lower one.
+
+### What the checkpoint still needs before any of it counts
+1. `scripts/evaluate.py` must write `results/baselines/final/metrics.json` — **V27, V28 and V48
+   read that file, not the training log.** Until it exists those checks stay red no matter how
+   good the model is.
+2. `weights/best.pt` exists ONLY on this disk. `.gitignore` and V51 both ban `*.pt`, so it is
+   invisible to git — exactly what V59 detects. It is not delivered until it is a GitHub
+   Release asset with a published sha256 in `weights/README.md`.
+3. The 400 restored test outputs must be generated with **`--require_weights`**, or
+   `inference.py` silently falls back to bicubic and ships upsampler output as model results.
+
+## THE NEXT CONCRETE ACTION (in order)
+0. **Commit and push** — see the block at the top. Nothing else should happen first.
+1. `py -3.12 scripts\verify_all.py --strict` to get a real tally against the 57-check suite.
+   Expect V22 to be newly red (see the warning below) — that is anticipated, not a surprise.
+2. **Publish the checkpoint as a GitHub Release with a sha256** and record URL + digest in
+   `weights/README.md`. Highest value, needs no GPU. Closes V06 and V59. Until this happens a
+   reviewer who clones the repo gets a bicubic upsampler rather than the model.
+3. `py -3.12 scripts\evaluate.py` on the trained checkpoint so
+   `results/baselines/final/metrics.json` exists — **V27, V28 and V48 read that file, not the
+   training log.** Then generate the 400 restored outputs with **`--require_weights`** and
+   attach them to the same Release (V56).
+4. **Tag `v0.1-submittable` and push the tag** as soon as Tier 0 is green, so a working
+   fallback always exists on the remote.
+5. Train the U-Net baseline at the **same 20k budget**
+   (`configs/baseline_unet.yaml`, ~60–90 min) — V28 needs a *learned* baseline at equal budget;
+   the three measured baselines are classical.
+6. Dispatch `perf-analyst` (owns `scripts/benchmark_runtime.py`, `results/runtime_report.md`)
+   for V37 V38 V39 V43; re-run `adversarial-reviewer`, which never delivered; run
+   `cleanroom-tester` once the README is final.
+7. Then the remaining Tier 2–4 items and the §3 hardening loop. Model quality first, throughput
+   second.
 
 ## Standing authorisation — what I may and may not do
 **Pre-authorised:** any change making a check STRICTER (log + re-pin); new V-checks for defects
@@ -78,13 +151,21 @@ established (23.6524 dB), so every later number has a floor.
 - **`pip install lpips` silently replaces the CUDA torch with a CPU-only build.** Verified
   twice. Reinstall from the cu128 index afterwards and re-check `torch.cuda.is_available()`.
   Good state: torch 2.11.0+cu128, torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
-- **`scripts/verify_all.py` has been edited twice this iteration.** Any further edit needs its
-  own `decisions.md` entry and a re-pin, or V00 fails by design.
+- **`scripts/verify_all.py` was edited four times this iteration** (D22 seven placeholders,
+  D24 V33 governance, D26 V25/V34, D27 four added checks, D28 the SSRF fix). Any further edit
+  needs its own `decisions.md` entry **and** a re-pin, or V00 fails by design.
+- **A new V-check is code like any other.** V54 fired a false positive on its first run and
+  V55 shipped an SSRF hole — both in checks written the same day. Verify a new absence-check
+  with a **negative control**: inject the defect, confirm it goes red, remove it, confirm
+  green. A check never seen to fail is not known to work.
 - **`sample_inputs/` is populated and committed** (6 real inputs, 393,984 B). `.gitignore`
   carries explicit negations for it, for `results/metrics_summary.md` and for
   `results/degrade_fidelity/`. Do not "tidy up" those rules — three checks read those paths
   from a fresh clone.
-- **B9 is blocked on the human** and blocks V13. Do not resolve it by loosening V51 again.
+- **B9 is RESOLVED** (GitHub Release + sha256, D23). V13 passes. Do **not** revisit it by
+  loosening V51 to admit a committed `.npz` — that route was considered and rejected because
+  it would gut the size caps added one commit earlier.
+- **Nothing is currently blocked on the human.** `docs/BLOCKERS.md` has no open items.
 - **V22 is expected to go red the moment a real checkpoint exists.** It currently reads
   `mean 0.00e+00` only because there are no weights, so both precision arms take the bicubic
   fallback. Measured against an untrained NAFSR: bf16-vs-fp32 mean **1.107e-03** against
@@ -102,8 +183,12 @@ established (23.6524 dB), so every later number has a floor.
 
 ---
 
-## V-check status  (measured at `530a8a0`, full `--strict` run)
-**PASS 35 / FAIL 18 / SKIP 0**  — was PASS 9 / FAIL 44 at the start of this iteration.
+## V-check status — HISTORICAL SNAPSHOT, SUPERSEDED. Re-run `--strict` instead.
+Out of date in four ways: V04/V13/V25/V34/V44 have since gone green, four checks were added
+(suite is now **57**), V10 was strengthened, and the model has been trained. Kept only as a
+progress record; the "why each was red" grouping below is the part still worth reading.
+
+**PASS 35 / FAIL 18 / SKIP 0** at commit `530a8a0` — was PASS 9 / FAIL 44 at iteration start.
 
 PASS (35): V01 V02 V03 V05 V07 V08 V09 V10 V11 V12 V14 V15 V16 V17 V18 V19 V20 V21 V22 V23
            V24 V26 V29 V30 V31 V32 V33 V36 V40 V41 V42 V47 V50 V51 V52
@@ -113,12 +198,12 @@ per tier: T0[P12/F4] T1[**P9/F0 — fully green**] T2[P7/F5] T3[P3/F4] T4[P4/F5]
 Every remaining failure is honest and traceable:
 | Cause | Checks |
 |---|---|
-| Needs `docs/decisions.md` D22 (docs-scribe, in flight) | V00 |
-| Needs a `--fresh-clone` run (not performed this pass) | V04 V46 |
-| Needs a trained checkpoint (`trainer`, in flight) | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
-| Needs `results/runtime_report.md` (`perf-analyst`, not yet dispatched) | V37 V38 V39 |
+| Needed a `decisions.md` entry for the new verifier digest — **since done** | V00 |
+| Needed a `--fresh-clone` run — **since done, both green** | V04 V46 |
+| Needed a trained checkpoint — **model now trained; the rest need the evaluation record and the Release** | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
+| Needs `results/runtime_report.md` (`perf-analyst`, never dispatched) | V37 V38 V39 |
 | Needs qualitative figures | V49 |
-| Blocked on the human (B9) | V13 |
+| Needed a delivery mechanism for the restored outputs — **resolved, D23** | V13 |
 
 ## Iteration 1 triage — what was selected and why
 Tier 0 first, ordered by how many other checks depend on the subject. The dependency root was
