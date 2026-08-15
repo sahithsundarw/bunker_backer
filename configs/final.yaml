@@ -4,8 +4,8 @@
 # `train.py --config configs/final.yaml --seed 42` twice and requires identical losses.
 #
 # Owner: model-core (model block) / trainer (optim, train blocks) / data-pipeline (data).
-# The `model` block is identical to configs/nafnet_x2.yaml. If they ever diverge, this file
-# is the truth for the submission and nafnet_x2.yaml is a development variant.
+# The `model` block is the submission truth. It may diverge from development variants when a
+# measured CPU-feasible checkpoint path needs an explicit architectural knob.
 #
 # MEASURED cost (src/model.py self-test, `py -3.12 -m src.model`):
 #   params 388,225 (0.388 M)   MACs @128x128 = 5.584 G   FLOPs ~= 11.17 G per image
@@ -21,6 +21,7 @@ model:
   dw_expand: 2
   ffn_expand: 2
   layerscale_init: 1.0
+  padding_mode: replicate   # required by the closed-form LS-5 checkpoint embedder
 data:
   lr_patch: 64            # -> 128 GT patch
   batch_size: 32

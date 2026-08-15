@@ -126,6 +126,16 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--workers", type=int, default=0,
                     help="DataLoader workers. 0 is the default: measured 0.72 ms/item against "
                          "a ~220 ms train step, and 0 keeps the run bit-reproducible")
+    ap.add_argument("--closed_form_linear", action="store_true",
+                    help="CPU-feasible Phase-1 path: fit a train-split least-squares 5x5 "
+                         "linear residual and embed it into the configured NAFSR checkpoint")
+    ap.add_argument("--linear_kernel", type=int, default=5,
+                    help="odd LR kernel size for --closed_form_linear")
+    ap.add_argument("--linear_ridge", type=float, default=1.0e-4,
+                    help="L2 ridge used by --closed_form_linear; intercept is unregularised")
+    ap.add_argument("--closed_form_min_psnr", type=float, default=26.2722,
+                    help="fail --closed_form_linear if full-split validation PSNR does not "
+                         "beat this measured baseline")
     ap.add_argument("--device", default=None)
     ap.add_argument("--deterministic", dest="deterministic", action="store_true", default=None)
     ap.add_argument("--no_deterministic", dest="deterministic", action="store_false")
@@ -628,6 +638,240 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
 
 
 # ======================================================================================
+# CPU-FEASIBLE PHASE 1: CLOSED-FORM LINEAR CHECKPOINT
+# ======================================================================================
+def _linear_features(lr: np.ndarray, kernel: int) -> np.ndarray:
+    """Edge-padded local LR features plus an intercept column."""
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    k = int(kernel)
+    pad = k // 2
+    padded = np.pad(np.asarray(lr, dtype=np.float64), pad, mode="edge")
+    windows = sliding_window_view(padded, (k, k)).reshape(-1, k * k)
+    ones = np.ones((windows.shape[0], 1), dtype=np.float64)
+    return np.concatenate([windows, ones], axis=1)
+
+
+def _fit_linear_filters(root: Path, train_names: Sequence[str], kernel: int, ridge: float,
+                        verbose: bool = False) -> np.ndarray:
+    """Least-squares LR-neighbourhood -> four HR subpixels, trained on train split only."""
+    k = int(kernel)
+    if k <= 0 or k % 2 == 0:
+        raise ValueError(f"--linear_kernel must be a positive odd integer, got {kernel}")
+    f = k * k + 1
+    xtx = np.zeros((f, f), dtype=np.float64)
+    xty = np.zeros((f, 4), dtype=np.float64)
+    lr_dir = root / "train" / "NoisyLR"
+    gt_dir = root / "train" / "GT"
+    t0 = time.perf_counter()
+    for i, name in enumerate(train_names):
+        lr = np.load(lr_dir / name, allow_pickle=False)
+        gt = np.load(gt_dir / name, allow_pickle=False)
+        x = _linear_features(lr, k)
+        y = np.stack(
+            [gt[dy::2, dx::2].reshape(-1) for dy in range(2) for dx in range(2)],
+            axis=1,
+        ).astype(np.float64)
+        xtx += x.T @ x
+        xty += x.T @ y
+        if verbose and (i + 1) % 250 == 0:
+            _log(f"  [closed-form] fit {i + 1}/{len(train_names)} "
+                 f"elapsed {format_hms(time.perf_counter() - t0)}")
+    reg = np.eye(f, dtype=np.float64) * float(ridge)
+    reg[-1, -1] = 0.0
+    return np.linalg.solve(xtx + reg, xty)
+
+
+def _bilinear_coefficients(kernel: int) -> np.ndarray:
+    """2x align_corners=False bilinear skip as edge-padded local-filter coefficients."""
+    k = int(kernel)
+    pad = k // 2
+    coeff = np.zeros((k * k + 1, 4), dtype=np.float64)
+    row = {
+        0: [(-1, 0.25), (0, 0.75)],
+        1: [(0, 0.75), (1, 0.25)],
+    }
+    col = row
+    for dy in range(2):
+        for dx in range(2):
+            s = dy * 2 + dx
+            for oy, wy in row[dy]:
+                for ox, wx in col[dx]:
+                    coeff[(oy + pad) * k + (ox + pad), s] += wy * wx
+    return coeff
+
+
+def _linear_predict(lr: np.ndarray, filters: np.ndarray, kernel: int) -> np.ndarray:
+    """Unclipped direct linear prediction, used only for an embedding self-check."""
+    h, w = lr.shape
+    y = _linear_features(lr, kernel) @ filters
+    out = np.empty((2 * h, 2 * w), dtype=np.float32)
+    out[0::2, 0::2] = y[:, 0].reshape(h, w)
+    out[0::2, 1::2] = y[:, 1].reshape(h, w)
+    out[1::2, 0::2] = y[:, 2].reshape(h, w)
+    out[1::2, 1::2] = y[:, 3].reshape(h, w)
+    return out
+
+
+@torch.no_grad()
+def _embed_linear_residual(model: torch.nn.Module, residual: np.ndarray, kernel: int) -> None:
+    """Encode a 5x5 residual filter into the NAFSR stem + PixelShuffle head path.
+
+    The configured NAFSR still supplies the global bilinear skip. The fitted direct filter
+    is therefore converted to a residual filter before embedding. Residual blocks are set to
+    exact identity by zeroing their layer scales.
+    """
+    mcfg = getattr(model, "width", None), getattr(model, "scale", None)
+    if mcfg[0] is None or int(mcfg[0]) < 9 or int(mcfg[1]) != 2:
+        raise ValueError("closed-form embedding requires NAFSR width >= 9 and scale == 2")
+    k = int(kernel)
+    if k != 5:
+        raise ValueError("the current two-conv NAFSR carrier embeds exactly a 5x5 LR filter")
+    if residual.shape != (k * k + 1, 4):
+        raise ValueError(f"residual filter shape {residual.shape} != {(k * k + 1, 4)}")
+
+    for prm in model.parameters():
+        prm.zero_()
+
+    # Channels 0..8 are shifted LR basis maps from the 3x3 stem.
+    for ay in range(-1, 2):
+        for ax in range(-1, 2):
+            c = (ay + 1) * 3 + (ax + 1)
+            model.stem.weight[c, 0, ay + 1, ax + 1] = 1.0
+
+    # PixelShuffle channel order for scale 2: c*4 + dy*2 + dx.
+    pad = k // 2
+    for oy in range(-pad, pad + 1):
+        for ox in range(-pad, pad + 1):
+            idx = (oy + pad) * k + (ox + pad)
+            ay = max(-1, min(1, oy))
+            ax = max(-1, min(1, ox))
+            by, bx = oy - ay, ox - ax
+            c = (ay + 1) * 3 + (ax + 1)
+            for s in range(4):
+                model.head.expand.weight[s, c, by + 1, bx + 1] += float(residual[idx, s])
+    for s in range(4):
+        model.head.expand.bias[s] = float(residual[-1, s])
+    model.head.project.weight[0, 0, 1, 1] = 1.0
+
+
+def _closed_form_embed_error(model: torch.nn.Module, filters: np.ndarray, root: Path,
+                             sample_name: str, kernel: int) -> float:
+    lr = np.load(root / "train" / "NoisyLR" / sample_name, allow_pickle=False)
+    direct = _linear_predict(lr, filters, kernel)
+    x = torch.from_numpy(lr.astype(np.float32))[None, None]
+    out = model.eval()(x)[0, 0].detach().cpu().numpy()
+    return float(np.max(np.abs(out - direct)))
+
+
+def run_closed_form_linear(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int:
+    """Fit and checkpoint a train-split least-squares residual model.
+
+    This is deliberately explicit rather than pretending a CPU host completed the 20k-step
+    gradient run. It produces a normal V35 checkpoint, but its metrics identify the training
+    mode as closed-form LS-5.
+    """
+    root = resolve_data_root(args.data_root)
+    train_names, val_names = train_val_names(root)
+    out_path = Path(args.out) if args.out else (_ROOT / "weights" / "best.pt")
+    if not out_path.is_absolute():
+        out_path = _ROOT / out_path
+
+    cfg.setdefault("model", {})
+    cfg["model"]["padding_mode"] = str(cfg["model"].get("padding_mode", "replicate"))
+    if cfg["model"]["padding_mode"] != "replicate":
+        raise SystemExit("--closed_form_linear requires model.padding_mode: replicate")
+
+    t0 = time.perf_counter()
+    filters = _fit_linear_filters(root, train_names, args.linear_kernel, args.linear_ridge,
+                                  verbose=args.verbose)
+    residual = filters - _bilinear_coefficients(args.linear_kernel)
+    fit_s = time.perf_counter() - t0
+
+    device = resolve_device(args.device)
+    model = build_model(cfg).to(device)
+    _embed_linear_residual(model, residual, args.linear_kernel)
+    n_params = count_parameters(model)
+    ema = EMA(model, decay=float(_section(cfg, "train").get("ema_decay", 0.999)))
+
+    embed_error = _closed_form_embed_error(model.cpu(), filters, root, val_names[0],
+                                           args.linear_kernel)
+    if device.type != "cpu":
+        model = model.to(device)
+
+    dcfg = _data_config(cfg, seed, preload=True)
+    _, val_ds = build_datasets(root, dcfg)
+    amp = str(_section(cfg, "train").get("amp", "bf16"))
+    channels_last = bool(_section(cfg, "train").get("channels_last", True))
+    if channels_last:
+        model = model.to(memory_format=torch.channels_last)
+    full = validate(model, val_ds, device, amp=amp, channels_last=channels_last,
+                    limit=None, with_lpips=False)
+    wall = time.perf_counter() - t0
+
+    passed_bar = bool(full["psnr"] > float(args.closed_form_min_psnr))
+    metrics = {
+        "training_mode": "closed_form_linear_ls5",
+        "val_psnr": full["psnr"], "val_psnr_std": full["psnr_std"],
+        "val_ssim": full["ssim"], "val_ssim_std": full["ssim_std"],
+        "val_n": full["n"],
+        "split": "configs/split_val.txt",
+        "train_n": len(train_names),
+        "linear_kernel": int(args.linear_kernel),
+        "linear_ridge": float(args.linear_ridge),
+        "baseline_to_beat_psnr": float(args.closed_form_min_psnr),
+        "beats_baseline_to_beat": passed_bar,
+        "embedding_max_abs_error": embed_error,
+        "total_iters_run": 0,
+        "wall_clock_s": round(wall, 2),
+        "fit_wall_clock_s": round(fit_s, 2),
+    }
+    sha = git_sha()
+    save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=0,
+                    metrics=metrics, git=sha)
+
+    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-" \
+             f"{Path(args.config).stem}-closed-form-s{seed}"
+    if not args.no_ledger:
+        append_experiment(LEDGER, {
+            "run_id": run_id,
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "git_sha": sha,
+            "config": args.config.replace("\\", "/"),
+            "seed": seed,
+            "model": str(_section(cfg, "model").get("name", "?")),
+            "params": n_params,
+            "iters": 0,
+            "batch_size": 0,
+            "lr_patch": 0,
+            "structural_kind": "n/a",
+            "best_iter": 0,
+            "best_psnr": round(float(full["psnr"]), 4),
+            "best_ssim": round(float(full["ssim"]), 5),
+            "best_lpips": "",
+            "val_n": int(full["n"]),
+            "weights_used": "ema",
+            "wall_clock_s": round(wall, 1),
+            "wall_clock_hms": format_hms(wall),
+            "checkpoint": _repo_relative(out_path),
+            "device": str(device),
+            "notes": args.tag or "closed_form_linear_ls5",
+        })
+    report = {
+        "run_id": run_id,
+        "checkpoint": str(out_path),
+        "git": sha,
+        "seed": seed,
+        "train_n": len(train_names),
+        "val_n": len(val_names),
+        "params": n_params,
+        "metrics": metrics,
+    }
+    _log(json.dumps(report, indent=2))
+    return 0 if passed_bar else 2
+
+
+# ======================================================================================
 def main(argv: list[str] | None = None) -> int:
     args = build_argparser().parse_args(argv)
     cfg = load_config(args.config)
@@ -640,6 +884,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.overfit:
         return run_overfit(cfg, args, seed)
+    if args.closed_form_linear:
+        return run_closed_form_linear(cfg, args, seed)
     return run_training(cfg, args, seed)
 
 

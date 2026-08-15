@@ -72,6 +72,7 @@ _DEFAULTS: dict[str, Any] = {
     "dw_expand": 2,
     "ffn_expand": 2,
     "layerscale_init": 1.0,
+    "padding_mode": "zeros",
 }
 
 # Name aliases. "UNetBaseline" is accepted because early configs used it; keeping the
@@ -118,6 +119,7 @@ class NAFSR(nn.Module):
         dw_expand: int = 2,
         ffn_expand: int = 2,
         layerscale_init: float = 1.0,
+        padding_mode: str = "zeros",
     ) -> None:
         super().__init__()
         if width < 1 or num_blocks < 1:
@@ -127,8 +129,11 @@ class NAFSR(nn.Module):
         self.out_ch = int(out_ch)
         self.width = int(width)
         self.num_blocks = int(num_blocks)
+        self.padding_mode = str(padding_mode)
 
-        self.stem = nn.Conv2d(in_ch, width, kernel_size=3, padding=1)
+        self.stem = nn.Conv2d(
+            in_ch, width, kernel_size=3, padding=1, padding_mode=self.padding_mode
+        )
         self.body = nn.Sequential(
             *[
                 NAFBlock(
@@ -136,12 +141,17 @@ class NAFSR(nn.Module):
                     dw_expand=dw_expand,
                     ffn_expand=ffn_expand,
                     layerscale_init=layerscale_init,
+                    padding_mode=self.padding_mode,
                 )
                 for _ in range(num_blocks)
             ]
         )
-        self.body_tail = nn.Conv2d(width, width, kernel_size=3, padding=1)
-        self.head = PixelShuffleHead(width, out_ch=out_ch, scale=self.scale)
+        self.body_tail = nn.Conv2d(
+            width, width, kernel_size=3, padding=1, padding_mode=self.padding_mode
+        )
+        self.head = PixelShuffleHead(
+            width, out_ch=out_ch, scale=self.scale, padding_mode=self.padding_mode
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         skip = bilinear_upsample(x, self.scale)
@@ -273,9 +283,9 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
         cfg: model hyper-parameters, or a full training config containing a ``model``
             sub-mapping. Recognised keys: ``name`` (``"NAFSR"`` | ``"UNetSR"``), ``width``,
             ``num_blocks`` (NAFSR), ``levels`` (UNetSR), ``scale``, ``in_ch``, ``out_ch``,
-            ``dw_expand``, ``ffn_expand``, ``layerscale_init``. Every key is optional;
-            missing keys fall back to ``_DEFAULTS``. Unrecognised keys are ignored, so a
-            config carrying extra sections or future keys still loads.
+            ``dw_expand``, ``ffn_expand``, ``layerscale_init`` and ``padding_mode``. Every
+            key is optional; missing keys fall back to ``_DEFAULTS``. Unrecognised keys are
+            ignored, so a config carrying extra sections or future keys still loads.
 
     Returns:
         An ``nn.Module`` mapping ``(B, in_ch, H, W)`` to ``(B, out_ch, scale*H, scale*W)``
@@ -313,6 +323,7 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
             dw_expand=int(get("dw_expand")),
             ffn_expand=int(get("ffn_expand")),
             layerscale_init=float(get("layerscale_init")),
+            padding_mode=str(get("padding_mode")),
         )
 
     # UNetSR. `num_blocks` is accepted as a synonym for `levels` only if `levels` is
