@@ -483,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
             "experiment_id": "F001-tta",
             "parent_experiment_id": parent,
             "config_diff": json.dumps({"inference": {"tta": True}}, sort_keys=True),
-            "command": "python inference.py --tta --require_weights ...",
+            "command": command_base + "  # node F001-tta; internal 8-way dihedral evaluation",
             "checkpoint_path": "weights/best.pt",
             "validation_psnr": f"{metrics['psnr']:.8f}",
             "validation_ssim": f"{metrics['ssim']:.8f}",
