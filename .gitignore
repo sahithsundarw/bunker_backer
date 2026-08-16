@@ -22,7 +22,7 @@ outputs/
 
 results/*
 
-# --- Archives & model weights (never commit) ---
+# --- Archives & model weights (ignored by default; final checkpoint exempted below) ---
 *.zip
 *.tar
 *.tar.gz

@@ -151,9 +151,10 @@ Checked in this session by reading every metrics-adjacent claim in the repo:
 
 ## 9. Remaining verifier failures explained
 
-Full `--strict` run at time of writing: **46 PASS / 11 FAIL** (up from the previously recorded
-45/12 — see the V49 note below). Every failure traces to a known, already-documented cause;
-none is a new or unexplained regression.
+The pre-hardening full `--strict` snapshot was **46 PASS / 11 FAIL** (up from the previously
+recorded 45/12 — see the V49 note below). The 2026-08-16 final-hardening pass subsequently
+resolved V38 with a working external harness and a measured 400-image run; the table preserves
+the other snapshot failures that still require external state or additional model work.
 
 | Check | Cause | Disposition |
 |---|---|---|
@@ -165,7 +166,6 @@ none is a new or unexplained regression.
 | V29 | Same `KLA_DATA_ROOT` requirement as V25 | Same — checked live in this session |
 | V32 | Scans every `*.py` under the repo including `.venv-mac/` (only literal `.venv` is excluded, not `.venv-mac`) and finds a plain `cv2.imread(` inside a **third-party package installed in the local venv**, not in this repo's own source | Documented environment noise, `docs/decisions.md` D30 — does not reproduce on a fresh clone, which is what actually gets scored |
 | V34 | Same `KLA_DATA_ROOT` requirement as V25/V29 | Same — checked live in this session |
-| V38 | External-process startup-vs-compute timing breakdown (`scripts/benchmark_runtime.py`) not implemented | Backlog item; the timing that *is* recorded (`results/runtime_report.md`) is a real, correctly-labelled local-CPU measurement (V37/V39 PASS), just not the deeper external-harness breakdown |
 | V46 | Same fresh-clone requirement as V04 | Independently PASSED on Linux — item 8 |
 | V56 | `manifest.json.release_url` still empty | The one pending human step — item 6 |
 

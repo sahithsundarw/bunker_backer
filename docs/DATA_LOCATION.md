@@ -2,9 +2,19 @@
 
 ## Dataset root
 
+Dataset-dependent training and verifier checks require either:
+
+- `KLA_DATA_ROOT` set to the extracted dataset root; or
+- the measured Mac dataset at `/Users/shanmukhsai/Downloads`.
+
+The historical Windows verification root was `C:\kla-data`. The portable invocation is:
+
+```bash
+KLA_DATA_ROOT=/path/to/dataset python scripts/verify_all.py --strict
 ```
-C:\kla-data
-```
+
+The root must contain `train/GT` and `train/NoisyLR`. The released final-test inputs are under
+`NoisyLR` on the measured Mac and `test_NoisyLR` on the historical Windows extraction.
 
 Deliberately **outside** OneDrive and outside the repo. It is never committed, never synced,
 never copied into `C:\Users\sahit\OneDrive\Desktop\semi`.

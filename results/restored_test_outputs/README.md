@@ -7,8 +7,8 @@ SPEC F12 makes this folder a mandatory repository item and V13 asserts it is non
 ## ⚠ Read this first: what is actually in this folder
 
 **This folder contains a manifest and per-file sha256 hashes. It does not contain the restored
-`.npy` files themselves.** The outputs are published as a **GitHub Release asset** and are
-downloaded on demand.
+`.npy` files themselves.** The output archive is prepared for publication as a **GitHub
+Release asset**, but that publication step is still pending.
 
 That is said plainly, up front, because a "non-empty" folder that leaves a reviewer believing
 the outputs are committed would satisfy V13's letter and defeat its purpose.
@@ -34,11 +34,11 @@ in this directory is real, measured data — 400 rows, each computed from the ac
 asset (see "Manual step" below); everything else in this document is a measured fact, not a
 placeholder.
 
-`inference.py` falls back to a parameter-free bicubic ×2 upsample when the checkpoint is
-missing or fails to load. **Bicubic fallback output must never be published in this folder.**
-The run that produced these outputs used `--require_weights`, so a missing or unloadable
-checkpoint would have failed loudly instead of silently shipping an upsampler's output as a
-model result.
+Normal `inference.py` submission runs fail if the checkpoint is missing or cannot be loaded.
+The parameter-free bicubic baseline is available only through the explicit demo flag
+`--allow_bicubic_fallback` and must never be published in this folder. The run that produced
+these outputs used `--require_weights`, so a missing or unloadable checkpoint would have
+failed loudly.
 
 ## Provenance — what produced these outputs
 
@@ -52,7 +52,8 @@ model result.
 | Checkpoint used | `weights/best.pt`, sha256 `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7` |
 | Checkpoint validation metrics (disk-verified, full 400-pair val split — **not** a final-test score) | PSNR 28.0394 dB / SSIM 0.74804 / LPIPS 0.29571 |
 | Command used | `python inference.py --input_dir /Users/shanmukhsai/Downloads/NoisyLR --output_dir /tmp/semicon_final_outputs_28db --weights weights/best.pt --require_weights --batch_size 32 --device cpu --precision fp32 --verbose` |
-| Run log | `loaded weights/best.pt (ema weights)` / `restored 400/400 in 56.73s (7.1 img/s) \| device=cpu precision=fp32 batch=32 shapes=[(128, 128)] weights=best unreadable=0 write_errors=0` |
+| Runtime headline | **Local Mac CPU external-process benchmark: 400 images in 71.72 s (5.6 img/s), batch size 32, fp32.** Process creation through exit; not a Linux/CUDA or H100 benchmark. |
+| Release-output generation log | **Local Mac CPU, internal `main()` timer:** `loaded weights/best.pt (ema weights)` / `restored 400/400 in 56.73s (7.1 img/s) \| device=cpu precision=fp32 batch=32 shapes=[(128, 128)] weights=best unreadable=0 write_errors=0`. This records the producing run and is not the headline benchmark. |
 | Git SHA of the producing run | `a2694c5e9e99914e1604eee1f83110f0a38113db` (also embedded in the checkpoint under `git`) |
 
 **No PSNR/SSIM/LPIPS is computed on these 400 outputs.** The final test set has no ground

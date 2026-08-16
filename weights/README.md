@@ -43,22 +43,19 @@ result — the reported 28.0394 dB figure is the full-400-split, disk-verified n
 
 ### What `inference.py` does if the checkpoint is missing or fails to load
 
-If the checkpoint cannot be found or cannot be loaded, `inference.py` prints
+Normal submission inference treats the checkpoint as required. If it cannot be found or
+loaded, `inference.py` prints an explicit error and exits nonzero without generating
+substitute outputs. The ordinary two-argument command and `--require_weights` are both strict;
+`--require_weights` is retained as an explicit assertion for release-generation commands.
 
-```
-inference.py: checkpoint not found at <path>; falling back to bicubic x2 upsample
-```
-
-on stderr and completes with **exit code 0**, producing a parameter-free bicubic ×2 upsample
-of each input. That is a deliberate degradation-not-crash policy: a script that runs and
-scores badly is scored, and a script that crashes is not (CLAUDE.md PD4). It is **not** a
-model result and must never be reported as one. `results/restored_test_outputs/` was generated
-with `--require_weights`, which turns that fallback into a hard failure instead — so the
-packaged outputs are guaranteed to be real model output, not a silent fallback.
+`--allow_bicubic_fallback` is an explicit, demo-only opt-in for the parameter-free bicubic
+baseline. It is never enabled by default, may not be used for submission outputs, and is
+overridden by `--require_weights`. `results/restored_test_outputs/` was generated with
+`--require_weights`, so those artifacts are model outputs.
 
 ---
 
-## Download
+## Availability and verification
 
 **Route A — committed directly.** `weights/best.pt` is tracked in this repository at 1.97 MiB,
 far under GitHub's 100 MB limit. No external link, no Release asset, no link-rot risk for the
@@ -94,5 +91,5 @@ The checkpoint was produced in two stages, both on branch `codex/residual-ls5-re
 - [x] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35) —
       confirmed live via `inference.py --require_weights` against `sample_inputs/`
 - [x] `inference.py --require_weights` succeeds against it — the bicubic fallback is not in play
-- [ ] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43) — done
+- [x] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43) — done
       for this checkpoint in Phase 5 of this branch's integration

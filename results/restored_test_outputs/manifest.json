@@ -15,6 +15,31 @@
   "manifest_csv": "manifest.csv",
   "manifest_csv_sha256": "029ae460a270b665471a2e7db13b689c51fff409c8997508d75b93e8d5c31625",
   "command": "python inference.py --input_dir /Users/shanmukhsai/Downloads/NoisyLR --output_dir /tmp/semicon_final_outputs_28db --weights weights/best.pt --require_weights --batch_size 32 --device cpu --precision fp32 --verbose",
+  "runtime": {
+    "headline": {
+      "label": "local Mac CPU external-process benchmark",
+      "wall_clock_s": 71.72,
+      "images_per_s": 5.6,
+      "image_count": 400,
+      "device": "Apple Silicon Mac CPU",
+      "precision": "fp32",
+      "batch_size": 32,
+      "torch": "2.13.0",
+      "main_pipeline_s": 70.34,
+      "startup_import_overhead_s": 1.38,
+      "timing_scope": "external subprocess timer from process creation through exit"
+    },
+    "release_output_generation": {
+      "wall_clock_s": 56.73,
+      "images_per_s": 7.1,
+      "timing_scope": "inference.py main() timer; excludes interpreter and module-import startup"
+    },
+    "linux_cuda_fresh_clone": {
+      "compatibility_passed": true,
+      "runtime_measured": false
+    },
+    "not_claimed": "no Linux/CUDA, H100, or competition-server runtime is claimed"
+  },
   "output_contract": {
     "shape": [256, 256],
     "dtype": "float32",
