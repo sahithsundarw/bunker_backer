@@ -1,0 +1,323 @@
+{
+  "name": "real_sem_ood_final",
+  "label": "real_sem_ood_final",
+  "kind": "unknown",
+  "description": "",
+  "n": 45,
+  "split": "REAL-SEM OOD: 45 real electron-microscopy images (Zenodo 17315241, CC-BY 4.0) -- NOT the official test set, NOT trained or fitted on. Degraded with the already-fitted degradation model, zero refitting.",
+  "gt_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\real_sem_ood\\GT",
+  "pred_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\baselines\\real_sem_ood\\final",
+  "pred_dtype": [
+    "float32"
+  ],
+  "sec_per_image": null,
+  "checkpoint": null,
+  "lpips_device": "cuda",
+  "with_lpips": true,
+  "unclipped_files": [],
+  "metrics": {
+    "psnr": {
+      "mean": 17.884682562691328,
+      "std": 0.7906611827911341,
+      "min": 16.18426536906979,
+      "max": 19.716675204020724,
+      "n": 45
+    },
+    "ssim": {
+      "mean": 0.32844172364749913,
+      "std": 0.11670662793102612,
+      "min": 0.07062010368053652,
+      "max": 0.5378201226798384,
+      "n": 45
+    },
+    "lpips": {
+      "mean": 0.5686408817768097,
+      "std": 0.15781355011548076,
+      "min": 0.28115811944007874,
+      "max": 1.0567660331726074,
+      "n": 45
+    }
+  },
+  "per_image": [
+    {
+      "file": "realsem_000000.npy",
+      "psnr": 18.41004751708219,
+      "ssim": 0.18894666798921667,
+      "lpips": 0.7916508316993713
+    },
+    {
+      "file": "realsem_000001.npy",
+      "psnr": 18.835007484550953,
+      "ssim": 0.4417471780855163,
+      "lpips": 0.48460105061531067
+    },
+    {
+      "file": "realsem_000002.npy",
+      "psnr": 18.804136024936348,
+      "ssim": 0.45893451195161955,
+      "lpips": 0.5188890695571899
+    },
+    {
+      "file": "realsem_000003.npy",
+      "psnr": 18.33092597038153,
+      "ssim": 0.20982559489617297,
+      "lpips": 0.7897252440452576
+    },
+    {
+      "file": "realsem_000004.npy",
+      "psnr": 18.30241328298531,
+      "ssim": 0.09360725790614209,
+      "lpips": 0.9874129295349121
+    },
+    {
+      "file": "realsem_000005.npy",
+      "psnr": 18.53690841964952,
+      "ssim": 0.24824159726282588,
+      "lpips": 0.7672816514968872
+    },
+    {
+      "file": "realsem_000006.npy",
+      "psnr": 18.279201356454998,
+      "ssim": 0.18358235806112316,
+      "lpips": 0.85420161485672
+    },
+    {
+      "file": "realsem_000007.npy",
+      "psnr": 17.958875939936924,
+      "ssim": 0.07062010368053652,
+      "lpips": 1.0567660331726074
+    },
+    {
+      "file": "realsem_000008.npy",
+      "psnr": 18.389653413251835,
+      "ssim": 0.18479577311485137,
+      "lpips": 0.8388264179229736
+    },
+    {
+      "file": "realsem_000009.npy",
+      "psnr": 18.633477702032287,
+      "ssim": 0.4240394281910537,
+      "lpips": 0.6146941184997559
+    },
+    {
+      "file": "realsem_000010.npy",
+      "psnr": 18.867147712349993,
+      "ssim": 0.32239517624597686,
+      "lpips": 0.6361908912658691
+    },
+    {
+      "file": "realsem_000011.npy",
+      "psnr": 19.716675204020724,
+      "ssim": 0.39568410840108414,
+      "lpips": 0.28115811944007874
+    },
+    {
+      "file": "realsem_000012.npy",
+      "psnr": 18.173465932953118,
+      "ssim": 0.4331849634331815,
+      "lpips": 0.4706723392009735
+    },
+    {
+      "file": "realsem_000013.npy",
+      "psnr": 17.51630861723835,
+      "ssim": 0.3207212273162723,
+      "lpips": 0.5221619606018066
+    },
+    {
+      "file": "realsem_000014.npy",
+      "psnr": 17.469026391965265,
+      "ssim": 0.2518119782919216,
+      "lpips": 0.5165306925773621
+    },
+    {
+      "file": "realsem_000015.npy",
+      "psnr": 17.49225773862181,
+      "ssim": 0.320920626729546,
+      "lpips": 0.4735892415046692
+    },
+    {
+      "file": "realsem_000016.npy",
+      "psnr": 17.24167171305659,
+      "ssim": 0.2418635914261985,
+      "lpips": 0.4996134340763092
+    },
+    {
+      "file": "realsem_000017.npy",
+      "psnr": 16.953928712609873,
+      "ssim": 0.21459754401457945,
+      "lpips": 0.5762931704521179
+    },
+    {
+      "file": "realsem_000018.npy",
+      "psnr": 17.547703295238037,
+      "ssim": 0.34745509115575407,
+      "lpips": 0.5899861454963684
+    },
+    {
+      "file": "realsem_000019.npy",
+      "psnr": 17.45820702916701,
+      "ssim": 0.32223532861469084,
+      "lpips": 0.5128280520439148
+    },
+    {
+      "file": "realsem_000020.npy",
+      "psnr": 18.268024403633003,
+      "ssim": 0.48033582679572057,
+      "lpips": 0.4154967665672302
+    },
+    {
+      "file": "realsem_000021.npy",
+      "psnr": 16.18426536906979,
+      "ssim": 0.23627631707123217,
+      "lpips": 0.586601197719574
+    },
+    {
+      "file": "realsem_000022.npy",
+      "psnr": 16.865507594861512,
+      "ssim": 0.25462092530493163,
+      "lpips": 0.6629316210746765
+    },
+    {
+      "file": "realsem_000023.npy",
+      "psnr": 18.350432085011782,
+      "ssim": 0.5097552902536555,
+      "lpips": 0.43391382694244385
+    },
+    {
+      "file": "realsem_000024.npy",
+      "psnr": 17.882759492039202,
+      "ssim": 0.5378201226798384,
+      "lpips": 0.4268975257873535
+    },
+    {
+      "file": "realsem_000025.npy",
+      "psnr": 18.768951232770863,
+      "ssim": 0.497947598507761,
+      "lpips": 0.4148857593536377
+    },
+    {
+      "file": "realsem_000026.npy",
+      "psnr": 18.645038353681613,
+      "ssim": 0.513541314559993,
+      "lpips": 0.3745562434196472
+    },
+    {
+      "file": "realsem_000027.npy",
+      "psnr": 18.044992006212127,
+      "ssim": 0.47209717217747815,
+      "lpips": 0.432741641998291
+    },
+    {
+      "file": "realsem_000028.npy",
+      "psnr": 17.200518100308486,
+      "ssim": 0.253840653420292,
+      "lpips": 0.7209850549697876
+    },
+    {
+      "file": "realsem_000029.npy",
+      "psnr": 17.56347183274829,
+      "ssim": 0.2771992893647598,
+      "lpips": 0.6008453369140625
+    },
+    {
+      "file": "realsem_000030.npy",
+      "psnr": 18.206118490816944,
+      "ssim": 0.46073911853712024,
+      "lpips": 0.45741820335388184
+    },
+    {
+      "file": "realsem_000031.npy",
+      "psnr": 17.28859009062402,
+      "ssim": 0.2426865442209306,
+      "lpips": 0.6438595056533813
+    },
+    {
+      "file": "realsem_000032.npy",
+      "psnr": 17.57419277585845,
+      "ssim": 0.2738864575306327,
+      "lpips": 0.6357975006103516
+    },
+    {
+      "file": "realsem_000033.npy",
+      "psnr": 16.539949670586903,
+      "ssim": 0.2859755615093523,
+      "lpips": 0.587044358253479
+    },
+    {
+      "file": "realsem_000034.npy",
+      "psnr": 19.19639642010839,
+      "ssim": 0.4737066933462516,
+      "lpips": 0.4110952913761139
+    },
+    {
+      "file": "realsem_000035.npy",
+      "psnr": 18.79106681731388,
+      "ssim": 0.5217858711439705,
+      "lpips": 0.4605524241924286
+    },
+    {
+      "file": "realsem_000036.npy",
+      "psnr": 18.332969687117913,
+      "ssim": 0.42458934098669704,
+      "lpips": 0.45827972888946533
+    },
+    {
+      "file": "realsem_000037.npy",
+      "psnr": 17.446092948169674,
+      "ssim": 0.306623699794732,
+      "lpips": 0.526345431804657
+    },
+    {
+      "file": "realsem_000038.npy",
+      "psnr": 17.767578660902934,
+      "ssim": 0.3215416715442617,
+      "lpips": 0.5067858695983887
+    },
+    {
+      "file": "realsem_000039.npy",
+      "psnr": 17.506517869099344,
+      "ssim": 0.3067640700443364,
+      "lpips": 0.47384724020957947
+    },
+    {
+      "file": "realsem_000040.npy",
+      "psnr": 16.31667172581374,
+      "ssim": 0.23664569836529445,
+      "lpips": 0.5411601066589355
+    },
+    {
+      "file": "realsem_000041.npy",
+      "psnr": 16.4621204573894,
+      "ssim": 0.24061743619939605,
+      "lpips": 0.5445393919944763
+    },
+    {
+      "file": "realsem_000042.npy",
+      "psnr": 18.46813043111627,
+      "ssim": 0.39506939049934203,
+      "lpips": 0.4407652020454407
+    },
+    {
+      "file": "realsem_000043.npy",
+      "psnr": 16.82513814554659,
+      "ssim": 0.2685757381577908,
+      "lpips": 0.5463236570358276
+    },
+    {
+      "file": "realsem_000044.npy",
+      "psnr": 17.398181201826088,
+      "ssim": 0.3120256553534262,
+      "lpips": 0.5020977854728699
+    }
+  ],
+  "metric_settings": {
+    "psnr": "skimage.metrics.peak_signal_noise_ratio(gt, pred, data_range=1.0)",
+    "ssim": "skimage.metrics.structural_similarity(gt, pred, data_range=1.0, gaussian_weights=True, sigma=1.5, use_sample_covariance=False)",
+    "lpips": "lpips.LPIPS(net='alex').eval(); grayscale -> repeat(1,3,1,1); [0,1] -> [-1,1]; torch.no_grad()",
+    "dispersion": "population standard deviation, np.std(..., ddof=0)",
+    "artifact": "metrics are computed on the reloaded on-disk .npy, not an in-memory tensor",
+    "postprocess": "np.clip(pred, 0.0, 1.0) only -- never per-image renormalisation"
+  },
+  "scored_from_disk": true,
+  "scored_at": "2026-08-16T19:46:15+00:00"
+}

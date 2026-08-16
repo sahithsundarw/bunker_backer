@@ -289,5 +289,5 @@
     "postprocess": "np.clip(pred, 0.0, 1.0) only -- never per-image renormalisation"
   },
   "scored_from_disk": true,
-  "scored_at": "2026-08-16T17:08:42+00:00"
+  "scored_at": "2026-08-16T19:46:13+00:00"
 }

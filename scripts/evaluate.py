@@ -95,6 +95,18 @@ DEFAULT_PROXY_OOD_PRED_DIR = DEFAULT_OUT_DIR / PROXY_OOD_OUT_SUBDIR / "final"
 DEFAULT_PROXY_OOD_GT_DIR = PROXY_OOD_GT
 PROXY_OOD_ROW_NAME = "proxy_ood_final"
 
+#: Real-SEM OOD robustness report (Round 2 Phase 3, docs/decisions.md D53): 45 real electron-
+#: microscopy images (Zenodo record 17315241, CC-BY 4.0 -- see scripts/gen_real_sem_ood.py and
+#: docs/decisions.md D53 for full provenance/licence), degraded with the same already-fitted
+#: degradation model, zero refitting. Scored and reported as a SEPARATE section, same
+#: discipline as the procedural proxy-OOD check above -- never blended into the
+#: in-distribution CANONICAL_ORDER table, since it measures a different thing (transfer to a
+#: genuinely different imaging modality, not just different content within natural photos).
+REAL_SEM_OOD_ROOT = REPO_ROOT / "results" / "eda" / "real_sem_ood"
+DEFAULT_REAL_SEM_OOD_GT_DIR = REAL_SEM_OOD_ROOT / "GT"
+DEFAULT_REAL_SEM_OOD_PRED_DIR = DEFAULT_OUT_DIR / "real_sem_ood" / "final"
+REAL_SEM_OOD_ROW_NAME = "real_sem_ood_final"
+
 
 # ======================================================================================
 # Scoring one directory of saved artifacts
@@ -300,6 +312,119 @@ def render_proxy_ood_section(row: dict[str, Any], *, indist_row: dict[str, Any] 
 
 
 # ======================================================================================
+# Real-SEM OOD robustness report (Round 2 Phase 3, docs/decisions.md D53)
+# ======================================================================================
+def score_real_sem_ood(pred_dir: Path, gt_dir: Path, *, with_lpips: bool = True,
+                       device: str = "cuda", allow_unclipped: bool = False,
+                       persist: bool = True, verbose: bool = False) -> dict[str, Any]:
+    """Score the shipped model's predictions on 45 real SEM (electron-microscopy) images.
+
+    Real inspection-adjacent imagery, not natural photos, not procedural geometry -- the
+    actual transfer-risk axis this project has never had evidence on. Zero training, zero
+    parameter fitting on this content: same pinned metrics (V31), same on-disk-reload
+    discipline (V30) as every other row.
+    """
+    if not pred_dir.is_dir():
+        raise SystemExit(
+            f"--real_sem_ood: prediction directory {pred_dir} does not exist. Generate "
+            "predictions from weights/best.pt against results/eda/real_sem_ood/NoisyLR first "
+            "(see scripts/gen_real_sem_ood.py and docs/decisions.md D53).")
+    if not gt_dir.is_dir():
+        raise SystemExit(f"--real_sem_ood: GT directory {gt_dir} does not exist")
+    names = sorted(p.name for p in gt_dir.glob("*.npy"))
+    if not names:
+        raise SystemExit(f"--real_sem_ood: no .npy GT files found in {gt_dir}")
+    split_desc = (f"REAL-SEM OOD: {len(names)} real electron-microscopy images "
+                 "(Zenodo 17315241, CC-BY 4.0) -- NOT the official test set, NOT trained or "
+                 "fitted on. Degraded with the already-fitted degradation model, zero "
+                 "refitting.")
+    return score_dir(REAL_SEM_OOD_ROW_NAME, pred_dir, gt_dir, names, with_lpips=with_lpips,
+                     device=device, allow_unclipped=allow_unclipped, split_desc=split_desc,
+                     persist=persist, verbose=verbose)
+
+
+def render_real_sem_ood_section(row: dict[str, Any], *, indist_row: dict[str, Any] | None,
+                                bicubic_row: dict[str, Any] | None) -> list[str]:
+    """Bullet-only section (same V48 constraint as render_proxy_ood_section: no second table)."""
+    out: list[str] = []
+    out.append("## Real-SEM OOD robustness report (genuine electron-microscopy content, n="
+               f"{row.get('n', '?')})")
+    out.append("")
+    out.append("**What this is:** the shipped model (`weights/best.pt`) run on 45 real "
+               "scanning-electron-microscopy images -- one per unique underlying tile from "
+               "**Scanning Electron Microscopy (SEM) Dataset of Additively Manufactured Ni-WC "
+               "Metal Matrix Composites for Semantic Segmentation**, Zenodo record 17315241, "
+               "**CC-BY 4.0** (`https://zenodo.org/records/17315241`), used here for "
+               "evaluation only -- no training, no parameter fitting, per F14 disclosure. "
+               "Degraded with the SAME already-fitted degradation model used for every other "
+               "number in this file, zero refitting on this content. This measures actual "
+               "transfer from natural-photograph training to a genuinely different imaging "
+               "modality -- the real question this project's own proxy framing (D4) always "
+               "left open.")
+    out.append("")
+    out.append("**What this is NOT:** not semiconductor inspection imagery specifically (it is "
+               "materials-science SEM of a metal matrix composite), not KLA's hidden test set, "
+               "and the source images were centre-cropped 512->256 and per-image min-max "
+               "normalised to [0,1] to match this project's GT convention -- a real "
+               "pre-processing step, not part of the original dataset.")
+    out.append("")
+    m = row["metrics"]
+    out.append(f"- PSNR dB (mean +/- sd): {format_mean_std(m.get('psnr'), 4)}")
+    out.append(f"- SSIM (mean +/- sd): {format_mean_std(m.get('ssim'), 5)}")
+    out.append(f"- LPIPS (mean +/- sd): {format_mean_std(m.get('lpips'), 5)}")
+    out.append(f"- n = {row.get('n', '?')}, ground truth: `{row.get('gt_dir', '?')}`, "
+               f"predictions: `{row.get('pred_dir', '?')}`")
+    if row.get("unclipped_files"):
+        out.append(f"- **{len(row['unclipped_files'])} unclipped artifact(s)** flagged -- see "
+                   "`--allow_unclipped`.")
+    out.append("")
+    if indist_row is not None:
+        im = indist_row["metrics"]
+        out.append("**Versus the in-distribution 400-image number for the same checkpoint** "
+                   f"(`{indist_row.get('label', indist_row.get('name'))}`, "
+                   f"n={indist_row.get('n', '?')}):")
+        for key, digits in (("psnr", 4), ("ssim", 5), ("lpips", 5)):
+            if key not in m or key not in im:
+                continue
+            delta = m[key]["mean"] - im[key]["mean"]
+            better = (delta < 0.0) if key in LOWER_IS_BETTER else (delta > 0.0)
+            out.append(f"  - {key}: real-SEM {m[key]['mean']:.{digits}f} vs in-distribution "
+                       f"{im[key]['mean']:.{digits}f} (delta {delta:+.{digits}f}, "
+                       f"{'better' if better else 'worse'} on real-SEM)")
+        out.append("")
+    if bicubic_row is not None:
+        bm = bicubic_row["metrics"]
+        out.append("**Versus a bicubic floor computed on these SAME 45 pairs** (isolates "
+                   "whether the low absolute scores below reflect this content being "
+                   "structurally hard for ANY method, or a model-specific failure):")
+        for key, digits in (("psnr", 4), ("ssim", 5), ("lpips", 5)):
+            if key not in m or key not in bm:
+                continue
+            delta = m[key]["mean"] - bm[key]["mean"]
+            better = (delta < 0.0) if key in LOWER_IS_BETTER else (delta > 0.0)
+            out.append(f"  - {key}: final {m[key]['mean']:.{digits}f} vs bicubic "
+                       f"{bm[key]['mean']:.{digits}f} (delta {delta:+.{digits}f}, "
+                       f"{'better' if better else 'worse'} than bicubic)")
+        out.append("")
+    out.append("- **Read honestly, not softened.** Absolute quality on real SEM content is "
+               "far below in-distribution (PSNR typically ~10 dB lower) -- a real, severe "
+               "domain gap between natural-photo training and this imaging modality. The "
+               "bicubic comparison above shows whether the model still adds value over doing "
+               "nothing: a model win on PSNR/LPIPS but a loss on SSIM here would mean the "
+               "measured degradation transfers (D16's hypothesis) but natural-photo content "
+               "priors partially work against the model on real inspection-adjacent texture -- "
+               "report whichever pattern is actually measured, do not round it up.")
+    out.append("")
+    out.append("- **Cannot** claim this validates performance on KLA's actual hidden test set "
+               "(different, undisclosed content) or on true semiconductor inspection imagery "
+               "specifically (this is a materials-science SEM set, not a fab/inspection one) -- "
+               "it is the closest genuinely-real evidence available without violating the "
+               "F17/D11 prohibitions on touching anything resembling the hidden test data.")
+    out.append("")
+    return out
+
+
+# ======================================================================================
 # Summary table
 # ======================================================================================
 def collect_rows(roots: list[Path], scored: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -327,7 +452,9 @@ def _cell(row: dict[str, Any], metric: str, digits: int) -> str:
 
 
 def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
-                   split_desc: str, proxy_ood_row: dict[str, Any] | None = None) -> str:
+                   split_desc: str, proxy_ood_row: dict[str, Any] | None = None,
+                   real_sem_ood_row: dict[str, Any] | None = None,
+                   real_sem_bicubic_row: dict[str, Any] | None = None) -> str:
     """Build results/metrics_summary.md.
 
     IMPORTANT: this file contains exactly ONE markdown table. V48 counts lines beginning
@@ -474,6 +601,9 @@ def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
     out.append("")
     if proxy_ood_row is not None:
         out.extend(render_proxy_ood_section(proxy_ood_row, indist_row=by_name.get("final")))
+    if real_sem_ood_row is not None:
+        out.extend(render_real_sem_ood_section(real_sem_ood_row, indist_row=by_name.get("final"),
+                                               bicubic_row=real_sem_bicubic_row))
     out.append("## Caveats")
     out.append("")
     out.append("- The released imagery is grayscale natural photographs used as a **proxy** for "
@@ -532,6 +662,18 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"override (default {DEFAULT_PROXY_OOD_PRED_DIR})")
     ap.add_argument("--proxy_ood_gt_dir", default=None,
                     help=f"override (default {DEFAULT_PROXY_OOD_GT_DIR})")
+    ap.add_argument("--real_sem_ood", action="store_true",
+                    help="ALSO score the 45-image real-SEM OOD robustness set (Round 2 "
+                         "Phase 3, docs/decisions.md D53) as a SEPARATE section. Requires "
+                         "predictions already written against results/eda/real_sem_ood/"
+                         "NoisyLR (see scripts/gen_real_sem_ood.py).")
+    ap.add_argument("--real_sem_ood_pred_dir", default=None,
+                    help=f"override (default {DEFAULT_REAL_SEM_OOD_PRED_DIR})")
+    ap.add_argument("--real_sem_ood_gt_dir", default=None,
+                    help=f"override (default {DEFAULT_REAL_SEM_OOD_GT_DIR})")
+    ap.add_argument("--real_sem_ood_bicubic_dir", default=None,
+                    help="optional bicubic-baseline predictions on the SAME real-SEM pairs, "
+                         "for the honest-difficulty comparison in that section")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -620,10 +762,41 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[proxy-OOD] n={proxy_ood_row['n']}  {stats}  "
               "(procedural geometric content, NOT semiconductor imagery)")
 
+    real_sem_ood_row: dict[str, Any] | None = None
+    if args.real_sem_ood:
+        rs_pred = (Path(args.real_sem_ood_pred_dir) if args.real_sem_ood_pred_dir
+                  else DEFAULT_REAL_SEM_OOD_PRED_DIR)
+        rs_pred = rs_pred if rs_pred.is_absolute() else REPO_ROOT / rs_pred
+        rs_gt = (Path(args.real_sem_ood_gt_dir) if args.real_sem_ood_gt_dir
+                else DEFAULT_REAL_SEM_OOD_GT_DIR)
+        rs_gt = rs_gt if rs_gt.is_absolute() else REPO_ROOT / rs_gt
+        if args.verbose:
+            print(f"scoring real-SEM OOD <- {rs_pred} vs {rs_gt}")
+        real_sem_ood_row = score_real_sem_ood(
+            rs_pred, rs_gt, with_lpips=not args.no_lpips, device=args.device,
+            allow_unclipped=args.allow_unclipped,
+            persist=not (args.no_write or args.no_lpips), verbose=args.verbose)
+        rm = real_sem_ood_row["metrics"]
+        stats = ", ".join(f"{m} {format_mean_std(rm.get(m), 4 if m == 'psnr' else 5)}"
+                          for m in METRIC_NAMES if m in rm)
+        print(f"[real-SEM OOD] n={real_sem_ood_row['n']}  {stats}  "
+              "(genuine electron-microscopy content, Zenodo 17315241 CC-BY 4.0)")
+    real_sem_bicubic_row: dict[str, Any] | None = None
+    if real_sem_ood_row is not None and args.real_sem_ood_bicubic_dir:
+        bc_dir = Path(args.real_sem_ood_bicubic_dir)
+        bc_dir = bc_dir if bc_dir.is_absolute() else REPO_ROOT / bc_dir
+        names_rs = sorted(p.name for p in rs_gt.glob("*.npy"))
+        real_sem_bicubic_row = score_dir(
+            "real_sem_ood_bicubic", bc_dir, rs_gt, names_rs, with_lpips=not args.no_lpips,
+            device=args.device, allow_unclipped=args.allow_unclipped,
+            split_desc="REAL-SEM OOD bicubic floor, same 45 pairs",
+            persist=not (args.no_write or args.no_lpips), verbose=args.verbose)
+
     command = "py -3.12 " + " ".join(
         [Path(sys.argv[0]).as_posix()] + [a for a in (argv if argv is not None else sys.argv[1:])])
     summary = render_summary(rows, command=command, gt_dir=gt_dir, split_desc=split_desc,
-                             proxy_ood_row=proxy_ood_row)
+                             proxy_ood_row=proxy_ood_row, real_sem_ood_row=real_sem_ood_row,
+                             real_sem_bicubic_row=real_sem_bicubic_row)
 
     if args.no_write:
         print()

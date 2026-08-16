@@ -2540,3 +2540,74 @@ produce real, longer-budget numbers — not asserted here.
 **Would overturn this:** the sweep or long run showing FiLM+uncertainty underperforms the
 plain architecture at a longer, properly-converged budget, or a paired significance test on a
 larger sample showing the small SSIM/LPIPS edge above does not replicate.
+
+## D53 — Real-SEM OOD robustness report: a genuine, severe domain gap, measured honestly
+
+**Date:** 2026-08-17. Round 2 Phase 3 (`.claude/plans/as-of-now-whatever-steady-lemur.md`,
+user-approved). The procedural proxy-OOD set (V63) tests content-domain shift within natural
+photographs; this closes the harder, more honest question: how does the shipped checkpoint
+actually transfer to a genuinely different imaging modality.
+
+**Source, licence, disclosure (F14):** *Scanning Electron Microscopy (SEM) Dataset of
+Additively Manufactured Ni-WC Metal Matrix Composites for Semantic Segmentation*, Zenodo
+record 17315241, `https://zenodo.org/records/17315241`, **CC-BY 4.0** (confirmed via the
+Zenodo API's `metadata.license.id == "cc-by-4.0"`, `access_right == "open"`, not inferred).
+Used for **evaluation only** — no training, no parameter fitting, same framing as the
+LPIPS/AlexNet disclosure already in the README. `AugmentedImages.zip` (130,018,324 bytes)
+downloaded and verified against the size the Zenodo API itself reports before use.
+
+**Selection, to avoid over-representing near-duplicates as independent samples:** the source
+ships 405 images, but only **45 unique underlying tiles** (each tile augmented ~9× with
+flips/rotations/elastic warps/brightness/contrast). Using all 405 would inflate `n` with
+near-duplicate copies of the same real content. One file per unique tile was selected
+deterministically — the `HorizontalFlip` variant, a lossless mirror of real sensor pixels, not
+a synthetic warp (unlike `ElasticTransform`/`GridDistortion`, also present in the source and
+deliberately not used).
+
+**Generation, mirroring the procedural proxy-OOD set's own method exactly** (`scripts/gen_real_sem_ood.py`,
+committed and reproducible, unlike the procedural set's uncommitted one-off — an improvement
+on that precedent): each 512×512 tile is converted to real luminance grayscale, **centre-cropped**
+to 256×256 (no resampling before our own degradation model runs), **per-image min-max
+normalised to exactly [0,1]** (matching the real-GT convention, U1), then degraded with
+`src.degrade.degrade_fitted(gt, rng)` — the recovered kernel + fitted 3-parameter noise, **zero
+randomisation, zero refitting**, identical discipline to the procedural set. Verified computed,
+not asserted: `gt_min==0.0` and `gt_max==1.0` for 45/45 images; disjoint from `train/GT`,
+`train/NoisyLR` and `test_NoisyLR` (0 intersection on all three, `results/eda/real_sem_ood/membership_check.json`).
+
+**Measured** (`scripts/evaluate.py --real_sem_ood`, pinned metrics V31, disk-reload V30, n=45):
+
+| | PSNR dB | SSIM | LPIPS |
+|---|---|---|---|
+| Bicubic floor (same 45 pairs) | 16.6268 ± 0.9604 | 0.37117 | 0.64403 |
+| **Shipped checkpoint** | **17.8847 ± 0.7907** | **0.32844 ± 0.11671** | **0.56864 ± 0.15781** |
+| (for reference) in-distribution, same checkpoint | 28.7865 | 0.78287 | 0.25324 |
+
+**Read honestly, the whole point of running this:** absolute quality collapses on real SEM
+content — PSNR ~11 dB below in-distribution, an unambiguous, severe domain gap between
+natural-photo training and this imaging modality. But the model still **beats the bicubic
+floor on PSNR (+1.26 dB) and LPIPS (better by 0.075)**, losing only on SSIM (worse by 0.043).
+This is a genuinely mixed, not uniformly bad, result: it is *consistent with* D16's standing
+hypothesis (the transferable asset is the measured degradation, not any content prior) — the
+degradation-inversion machinery still adds value over doing nothing — while showing that
+natural-photo content priors partially work against the model on real inspection-adjacent
+texture, enough to lose the structural-similarity axis specifically. Both halves of this are
+reported; neither is rounded up or explained away.
+
+**What this can and cannot prove, stated plainly** (same discipline as the procedural
+proxy-OOD entry): this is real electron-microscopy content, which the procedural set is not —
+a materials-science SEM of a metal-matrix composite, not semiconductor fab imagery
+specifically, and not KLA's actual hidden test set. It is the closest genuinely-real evidence
+available without violating F17/D11's prohibitions on touching anything resembling the hidden
+test data (no attempt was made to identify or acquire semiconductor-specific SEM data; this
+was the highest-value *available* real-world stand-in found by a documented licence-first
+search, and the search would have stopped and reported nothing if no cleanly-licensed
+candidate existed).
+
+**Code changes:** `scripts/gen_real_sem_ood.py` (new, generation), `scripts/evaluate.py`
+(`--real_sem_ood`/`--real_sem_ood_bicubic_dir` flags, `score_real_sem_ood`,
+`render_real_sem_ood_section`, mirroring the existing `--proxy_ood` machinery exactly so
+`results/metrics_summary.md` stays machine-generated, never hand-edited).
+
+**Would overturn/extend this:** a licensed semiconductor-fab-specific SEM/inspection dataset
+surfacing later would be strictly more relevant and should supersede this materials-science
+stand-in, not be added alongside it as a second claim about the same axis.

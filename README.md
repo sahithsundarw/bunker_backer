@@ -428,16 +428,18 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
 ## External resources & licences
 
 **No external datasets or pretrained weights are used in the shipped model.** It is trained
-from scratch on the provided image pairs. One external pretrained network is used for
-*evaluation only* and never for training: LPIPS (Zhang et al., CVPR 2018) with its standard
-AlexNet backbone, which the `lpips` package downloads on first use. It contributes no gradient
-to the shipped checkpoint and is not required to run `inference.py`.
+from scratch on the provided image pairs. Two external resources are used for *evaluation
+only* and never for training: LPIPS (Zhang et al., CVPR 2018) with its standard AlexNet
+backbone, and a real-SEM image set used for an OOD robustness report (`docs/decisions.md`
+D53). Neither contributes a gradient to the shipped checkpoint and neither is required to run
+`inference.py`.
 
 | Resource | Role | Link | Licence (verified at source) | Paper / model card |
 |---|---|---|---|---|
 | **LPIPS** (`lpips` 0.1.4) — linear calibration weights, shipped inside the pip package (`lpips/weights/v0.1/alex.pth`, 6,009 B) | Evaluation metric only | `https://github.com/richzhang/PerceptualSimilarity` | **BSD-2-Clause** — read from `LICENSE` at that repository (HTTP 200, fetched 2026-08-15); PyPI metadata agrees (`License :: OSI Approved :: BSD License`) | Zhang, Isola, Efros, Shechtman, Wang, *The Unreasonable Effectiveness of Deep Features as a Perceptual Metric*, CVPR 2018 |
 | **AlexNet ImageNet-pretrained backbone**, pulled by LPIPS via `torchvision.models.alexnet(pretrained=True)` → `~/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth`, **244,408,911 B measured** | Evaluation metric only — the feature extractor inside LPIPS | `https://github.com/pytorch/vision` | **BSD-3-Clause** — read from `LICENSE` at that repository (HTTP 200, fetched 2026-08-15) | Krizhevsky, Sutskever, Hinton, *ImageNet Classification with Deep Convolutional Neural Networks*, NeurIPS 2012; distributed via the torchvision model zoo |
-| External training datasets (DIV2K, Flickr2K, BSD, SEM corpora, …) | **None used** | — | — | — |
+| **Real-SEM OOD set** — 45 images (of 405 shipped; one per unique tile), SEM of Ni-WC metal matrix composites | Evaluation only — an out-of-distribution robustness report (`docs/decisions.md` D53), zero training/fitting | `https://zenodo.org/records/17315241` | **CC-BY 4.0** — confirmed via the Zenodo API's `metadata.license.id` field, not inferred | *Scanning Electron Microscopy (SEM) Dataset of Additively Manufactured Ni-WC Metal Matrix Composites for Semantic Segmentation*, Zenodo record 17315241 |
+| External training datasets (DIV2K, Flickr2K, BSD, …) | **None used** | — | — | — |
 | Pretrained super-resolution or restoration checkpoints (SwinIR, EDSR, NAFNet, …) | **None used** | — | — | — |
 
 Rationale for training from scratch, with the alternatives costed, is in `docs/decisions.md`
