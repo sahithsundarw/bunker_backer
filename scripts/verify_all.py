@@ -1107,6 +1107,8 @@ def _sem(d: dict[str, Any]) -> float | None:
 #: reasoning as V33_THRESHOLDS (ml-skeptic F2): the subject under test must not own its own
 #: pass mark. The contract says PSNR > 40 dB; this is that number, not a copy of train.py's.
 V25_TARGET_DB = 40.0
+V25_LR_SHAPE = [32, 32]
+V25_GT_SHAPE = [64, 64]
 
 
 def _extract_json_object(text: str, must_contain: str) -> dict[str, Any] | None:
@@ -1141,9 +1143,8 @@ def check_V25(ctx: Ctx) -> CheckResult:
     cfg = ctx.p("configs", "final.yaml")
     if not cfg.exists():
         return not_impl("V25", "configs/final.yaml")
-    # The full 6,000-step CPU path measured slightly above one hour on the clean Mac host.
-    # This is execution capacity only: the pair count, iteration budget, and 40 dB gate below
-    # remain verifier-owned and unchanged.
+    # The allowance covers the 6,000-step CPU failure budget. Pair count, fixed real-region
+    # dimensions, and the 40 dB gate below remain verifier-owned.
     rc, so, se = ctx.run([sys.executable, str(ctx.p("train.py")),
                           "--config", str(cfg), "--overfit", "2"], timeout=7200)
     rep = _extract_json_object(so + "\n" + se, "best_psnr_db")
@@ -1155,7 +1156,7 @@ def check_V25(ctx: Ctx) -> CheckResult:
     ev = {k: rep.get(k) for k in
           ("pass", "best_psnr_db", "best_at_iter", "iters", "max_iters",
            "stopped_after_gate", "n_pairs", "pair_names", "split_of_pairs",
-           "structural_kind", "seed", "device", "wall_clock_s")}
+           "overfit_region", "structural_kind", "seed", "device", "wall_clock_s")}
     if rep.get("n_pairs") != 2:
         return CheckResult("V25", FAIL,
                            f"overfit ran on {rep.get('n_pairs')} pairs, the contract says 2",
@@ -1164,6 +1165,15 @@ def check_V25(ctx: Ctx) -> CheckResult:
         return CheckResult("V25", FAIL,
                            f"overfit pairs came from '{rep.get('split_of_pairs')}', not train",
                            ev)
+    region = rep.get("overfit_region")
+    if not isinstance(region, dict) or region.get("kind") != "fixed_center_crop":
+        return CheckResult("V25", FAIL, "overfit did not use the fixed center region", ev)
+    if region.get("lr_shape") != V25_LR_SHAPE or region.get("gt_shape") != V25_GT_SHAPE:
+        return CheckResult(
+            "V25", FAIL,
+            f"overfit region must be LR {V25_LR_SHAPE} / GT {V25_GT_SHAPE}, got "
+            f"{region.get('lr_shape')} / {region.get('gt_shape')}", ev,
+        )
     if best is None or not float(best) > V25_TARGET_DB:
         return CheckResult("V25", FAIL,
                            f"overfit reached {best} dB, below the {V25_TARGET_DB} dB gate — "

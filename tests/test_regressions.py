@@ -28,7 +28,7 @@ from src.io_utils import save_array
 from src.metrics import paired_verdict
 from src.utils import (EMA, capture_rng_state, capture_source_provenance, restore_rng_state,
                        save_checkpoint, seed_everything)
-from train import promote_checkpoint_if_accepted
+from train import fixed_overfit_regions, promote_checkpoint_if_accepted
 
 
 def digest(path: Path) -> str:
@@ -156,6 +156,20 @@ class ResumeAndGateTests(unittest.TestCase):
             self.assertFalse(promote_checkpoint_if_accepted(False, path, writer))
             self.assertFalse(called)
             self.assertEqual(digest(path), before)
+
+    def test_overfit_regions_are_centered_and_exactly_aligned(self) -> None:
+        lr = torch.arange(2 * 1 * 40 * 42, dtype=torch.float32).reshape(2, 1, 40, 42)
+        gt = torch.repeat_interleave(torch.repeat_interleave(lr, 2, -2), 2, -1)
+        lr_crop, gt_crop, detail = fixed_overfit_regions(lr, gt, lr_side=32)
+        self.assertEqual(tuple(lr_crop.shape), (2, 1, 32, 32))
+        self.assertEqual(tuple(gt_crop.shape), (2, 1, 64, 64))
+        self.assertEqual(detail["lr_shape"], [32, 32])
+        torch.testing.assert_close(
+            gt_crop,
+            torch.repeat_interleave(torch.repeat_interleave(lr_crop, 2, -2), 2, -1),
+            rtol=0,
+            atol=0,
+        )
 
     def test_dirty_or_external_training_source_content_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

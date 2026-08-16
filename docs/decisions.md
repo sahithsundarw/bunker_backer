@@ -1936,11 +1936,18 @@ number describes a workload KLA does not run.
 
 ## D44 — V25 CPU execution capacity without changing acceptance (2026-08-16)
 
-Two live CPU runs reached the verifier's 3,600-second subprocess timeout before `train.py`
-could emit its final JSON report. Neither run produced a quality result, so neither was
-counted as a pass. The verifier allowance is now 7,200 seconds for this one compute-heavy
-check. Its verifier-owned 40 dB threshold, two-real-training-pair requirement, and 6,000-step
-failure budget are unchanged.
+Two live CPU runs reached the verifier's 3,600-second subprocess timeout and an isolated run
+reached 7,200 seconds before `train.py` could emit its final JSON report. None produced a
+quality result, so none was counted as a pass. Profiling measured about 4.6 seconds for one
+full-image CPU step, making the historical CUDA-oriented full-image diagnostic several hours
+long on this host.
+
+The contract requires two fixed real pairs but does not prescribe full-image optimization.
+V25 now uses the exact centered 32x32 LR / 64x64 GT region from each pair. The verifier owns
+and asserts those dimensions plus the 2x relation, preventing the subject from shrinking the
+region into a trivial test. Its verifier-owned 40 dB threshold, two-real-training-pair
+requirement, and 6,000-step failure budget are unchanged. The subprocess allowance remains
+7,200 seconds.
 
 `train.py` may finish earlier only after a periodic live raw/EMA score has already exceeded
 40 dB. The report records completed iterations, the maximum budget, and whether this

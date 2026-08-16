@@ -118,11 +118,8 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--overfit", type=int, default=0, metavar="N",
                     help="V25 gate: overfit N fixed training pairs and require PSNR > 40 dB")
     ap.add_argument("--overfit_iters", type=int, default=6000,
-                    help="MEASURED on this dataset (RTX 4060, pairs 000004/000005): a "
-                         "6000-iter budget reaches 43.33 dB, crossing 40 dB at ~3000. A "
-                         "4000-iter budget stalls at 39.78 dB because the cosine schedule "
-                         "decays proportionally to the budget, so do not shorten it and then "
-                         "read the result as a failure of alignment")
+                    help="maximum iteration budget for --overfit (default 6000; the gate may "
+                         "exit earlier only after a live score exceeds 40 dB)")
     ap.add_argument("--resume", default=None,
                     help="resume a checkpoint carrying complete training_state")
     ap.add_argument("--out", default=None,
@@ -262,6 +259,31 @@ def validate(model: torch.nn.Module, ds: PairedRestorationDataset, device: torch
 # ======================================================================================
 # V25 -- THE OVERFIT GATE
 # ======================================================================================
+def fixed_overfit_regions(
+    lr: torch.Tensor, gt: torch.Tensor, lr_side: int = 32
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+    """Take the same centered, exactly aligned region from every real pair."""
+    if lr.ndim != 4 or gt.ndim != 4 or lr.shape[:2] != gt.shape[:2]:
+        raise ValueError(f"expected matching NCHW LR/GT batches, got {lr.shape}/{gt.shape}")
+    if gt.shape[-2:] != (2 * lr.shape[-2], 2 * lr.shape[-1]):
+        raise ValueError(f"GT spatial shape {gt.shape[-2:]} is not 2x LR {lr.shape[-2:]}")
+    side = int(lr_side)
+    if side <= 0 or min(lr.shape[-2:]) < side:
+        raise ValueError(f"lr_side={side} does not fit LR shape {lr.shape[-2:]}")
+    top = (int(lr.shape[-2]) - side) // 2
+    left = (int(lr.shape[-1]) - side) // 2
+    lr_region = lr[..., top:top + side, left:left + side]
+    gt_region = gt[..., 2 * top:2 * (top + side), 2 * left:2 * (left + side)]
+    detail = {
+        "kind": "fixed_center_crop",
+        "lr_top": top,
+        "lr_left": left,
+        "lr_shape": [side, side],
+        "gt_shape": [2 * side, 2 * side],
+    }
+    return lr_region, gt_region, detail
+
+
 def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int:
     """Train on ``args.overfit`` fixed real pairs and require PSNR > 40 dB on them.
 
@@ -269,10 +291,9 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
 
     * The pairs come from the **training** half of the committed split, so the gate never
       touches validation data even though it reports on its own training pairs.
-    * Whole images (128 LR -> 256 GT), the real measured LR, no augmentation, no synthetic
-      degradation, no CutBlur.  The only thing under test is whether the model *can*
-      reproduce a target it has seen -- i.e. whether the pair is aligned, the normalisation
-      consistent and the loss pointed the right way.
+    * A verifier-pinned fixed center region (32 LR -> 64 GT) from each real measured pair,
+      with no augmentation, synthetic degradation or CutBlur. This keeps the live diagnostic
+      feasible on CPU while still testing real paired geometry, normalisation and loss.
     * Both the raw and the EMA weights are scored; the gate passes on the better of the two,
       because at a few thousand steps the EMA is still catching up and failing the gate on
       EMA lag alone would be a false alarm.
@@ -288,8 +309,11 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
     dcfg = dataclasses.replace(dcfg, synth_ratio=0.0, cutblur_prob=0.0, dihedral=False)
     ds = PairedRestorationDataset(root, dcfg, "val", names=names)   # "val" = whole image, no aug
 
-    lr = torch.stack([ds[i]["lr"] for i in range(len(ds))]).to(device)
-    gt = torch.stack([ds[i]["gt"] for i in range(len(ds))]).to(device)
+    lr = torch.stack([ds[i]["lr"] for i in range(len(ds))])
+    gt = torch.stack([ds[i]["gt"] for i in range(len(ds))])
+    lr, gt, overfit_region = fixed_overfit_regions(lr, gt, lr_side=32)
+    lr = lr.to(device)
+    gt = gt.to(device)
 
     tcfg = _section(cfg, "train")
     ocfg = _section(cfg, "optim")
@@ -366,6 +390,7 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
         "n_pairs": n_pairs,
         "pair_names": names,
         "split_of_pairs": "train",
+        "overfit_region": overfit_region,
         "iters": completed_iters,
         "max_iters": total,
         "stopped_after_gate": stopped_after_gate,
