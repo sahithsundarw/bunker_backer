@@ -117,6 +117,28 @@ class SCA(nn.Module):
     every output pixel depends on the whole input. That is intentional (it is where the
     block gets its global context) but it means the model must never be applied tile-wise
     without overlap, or tiles would get inconsistent gains. Whole images only.
+
+    **V22 root cause, fixed here.** ``x.mean(dim=(2,3))`` is a raw spatial reduction, not
+    ``F.layer_norm``. Autocast's op-policy table (`ATen/autocast_mode.h`,
+    `AT_FORALL_FP32`) force-promotes `layer_norm`/`native_layer_norm`/`group_norm` to fp32
+    automatically, but a bare `Tensor.mean` is NOT on that list -- it is not an
+    autocast-registered op at all, so it silently executes in whatever dtype its input
+    already has. By the time control reaches here under bf16 autocast, `x` is the output of
+    an upstream bf16 conv + SimpleGate, so the mean over up to 128x128=16384 elements
+    (H*W up to 65536 for the 256x256 group) accumulates and stores in bf16's 8-bit
+    mantissa, then feeds a 1x1 conv that is autocast-forced to bf16 again regardless of
+    what dtype it receives. Confirmed empirically on this repo's checkpoint + CUDA:
+
+        F.layer_norm(bf16 input, fp32 weight, fp32 bias)   -> fp32 output  (auto-promoted)
+        x.mean(dim=(2,3), keepdim=True) of a bf16 input    -> bf16 output  (NOT promoted)
+
+    On `tests/fixtures/single/only_128.npy` (the exact V22 fixture, values to 2.16) this
+    measurably moves the final-output bf16-vs-fp32 divergence: baseline max abs diff
+    ~1.17e-2 (over V22's 1e-2 cap) drops to ~9.7e-3 (under it) once this module's global
+    mean AND the following 1x1 conv are computed in fp32 -- computing the mean alone in
+    fp32 and then rounding straight back to bf16 before the conv reproduces the unpatched
+    result bit-for-bit, so both the reduction and the conv have to stay inside the
+    disabled-autocast region for the fix to do anything.
     """
 
     def __init__(self, channels: int) -> None:
@@ -125,7 +147,16 @@ class SCA(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # mean over (H, W) keeping dims -> (B, C, 1, 1); defined for any H, W >= 1.
-        w = self.conv(x.mean(dim=(2, 3), keepdim=True))
+        # Forced to fp32 (see class docstring, V22): unlike F.layer_norm, autocast does
+        # not force-promote a raw Tensor.mean reduction, so it must be done explicitly.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            w = self.conv(x.float().mean(dim=(2, 3), keepdim=True))
+        # `w` is left in fp32: `x * w` (bf16 * fp32) promotes to fp32 by ordinary ATen
+        # type-promotion rules, the same way autocast leaves F.layer_norm's fp32 output
+        # to be re-cast by whatever bf16 op consumes it next. Casting `w` back to bf16
+        # here before the multiply was tried and is a no-op (undoes the whole fix): the
+        # 1x1 conv already only sees `bf16`-rounded values, so its own output content is
+        # identical to computing everything in bf16 in the first place.
         return x * w
 
 

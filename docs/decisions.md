@@ -1990,3 +1990,35 @@ any cloud training script must import the same `configs/split_val.txt`-driven sp
 
 Matches `jobs-pricing` docs exactly: `a100-large` = 80 GB VRAM, $0.041667/min = $2.50/hr.
 **No H100 flavor exists in HF Jobs** — confirmed against the live hardware list, not inferred.
+
+## D42 — V22 root cause found and fixed: SCA's raw spatial mean, not LayerNorm
+
+**Root cause, confirmed empirically, not guessed.** `SCA.forward()` (`src/blocks.py`) computed
+`self.conv(x.mean(dim=(2,3), keepdim=True))`. Autocast's op-policy table force-promotes
+`F.layer_norm`/`native_layer_norm`/`group_norm` to fp32 automatically; a bare `Tensor.mean` is
+**not** an autocast-registered op at all, so under bf16 autocast it silently executes in
+whatever dtype its input already has (bf16, since `x` is the output of an upstream bf16 conv +
+SimpleGate). The two competing hypotheses from `docs/STATE.md`'s dispatch were both tested
+rather than assumed: `F.layer_norm(bf16 in, fp32 weight/bias)` does auto-promote to fp32
+(confirmed a no-op fix, as suspected); `x.mean(dim=(2,3))` of a bf16 input does not (confirmed
+the actual culprit).
+
+**Fix:** wrap the SCA spatial-mean-and-1x1-conv pair in `torch.autocast(..., enabled=False)`
+with the input explicitly cast to fp32 first; the gate multiply `x * w` then promotes to fp32
+by ordinary ATen type-promotion (bf16 * fp32 -> fp32) without needing its own cast, the same
+way autocast lets a `F.layer_norm` fp32 output be re-cast by whatever bf16 op consumes it next.
+Casting `w` back to bf16 before the multiply was tried and measured as a no-op (reproduces the
+unpatched result bit-for-bit) — the 1x1 conv's own output is bf16-rounded either way, so the
+precision has to be preserved past the conv, not just through the mean.
+
+**Measured, on the V22 fixture (`tests/fixtures/single/only_128.npy`, real trained checkpoint,
+CUDA):** bf16-vs-fp32 max abs diff 1.27e-02 (over the 1e-2 cap) -> **7.79e-03** (under it);
+mean abs diff 5.90e-04 -> 5.29e-04 (both comfortably under the 1e-3 cap either way).
+`py -3.12 scripts/verify_all.py --only V22`: **PASS**.
+
+Tolerance was never widened, matching Prime Directive 1 — the fix moves the number, not the bar.
+
+`src/blocks.py` is nominally `model-core`'s file per `CLAUDE.md`'s ownership map, but V22's
+root cause is architectural and `inference-engineer` was tasked with root-causing and fixing
+it; no `model-core` agent was running concurrently, so there was no write conflict. Noted here
+for the record rather than silently crossing the ownership boundary unremarked.
