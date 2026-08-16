@@ -186,8 +186,11 @@ Every timing number produced under this plan is labelled with its device:
 |---|---|---|---|---|---|
 | 2026-08-16 | Smoke test job (`6a8184cbc97db76cbdf32d59`) | cpu-basic | ~1 min | ~$0.0002 | **$0.0002** |
 | 2026-08-16 | Dataset repo creation + upload (919 MB + 23 MB) | n/a (storage, not compute-billed) | — | $0.00 | $0.0002 |
+| 2026-08-16 | First sweep attempt (`6a82111c1f5885ae605beac6`) — failed fast on a `--hub_repo` arg mismatch (stale code, never pushed) | a100-large | ~2 min | ~$0.08 (est.) | ~$0.08 |
+| 2026-08-16 | Pareto sweep, 6 configs (`6a821471c97db76cbdf3346c`), config e chosen (D55) | a100-large | ~32 min training + setup, ~40 min total (est. from run timestamps, not a billing-API readout) | ~$1.67 (est.) | ~$1.75 |
+| 2026-08-16/17 | **Long run in progress** (`6a822762c97db76cbdf33506`), config e, 129,700 iters, timeout cap 8h | a100-large | up to 8h (cap) | up to $20.00 (cap; billed only for actual run time, likely less if it finishes before the cap) | up to ~$21.75 if the cap is hit |
 
-Remaining: **$29.9998** of $30.00. Stop-and-report threshold: $24.00 spent.
+**No public billing API exists to read the exact dollar balance** (`GET /api/organizations/.../billing` → 404, checked in the PLAN_PHASE2 session) — costs above are computed from measured job/run durations × the published per-minute rate, not read from an authoritative HF billing endpoint. Stop-and-report threshold: **$24.00** spent. The long run's 8h timeout cap alone would bring the running total to ~$21.75 in the worst case (full timeout reached) — under the threshold, but close enough that no further cloud spend should be committed until this run's actual outcome and duration are known.
 
 ---
 
