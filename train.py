@@ -320,6 +320,8 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
 
     history: list[dict[str, float]] = []
     best = {"psnr": float("-inf"), "iter": -1, "weights": "none"}
+    completed_iters = 0
+    stopped_after_gate = False
     t0 = time.perf_counter()
     model.train()
     for it in range(total):
@@ -333,6 +335,7 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         opt.step()
         ema.update(model)
+        completed_iters = it + 1
 
         last = (it == total - 1)
         if last or (it + 1) % max(1, total // 12) == 0:
@@ -347,6 +350,12 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
             if args.verbose:
                 _log(f"  overfit it={it+1:5d} loss={logs['total']:.6f} "
                      f"psnr_raw={raw:.3f} psnr_ema={ema_psnr:.3f}")
+            # V25 is a threshold gate, not a convergence benchmark. Once a live score on
+            # both required real pairs clears the fixed bar, later optimization cannot add
+            # evidence to the pass decision and only risks exceeding the verifier timeout.
+            if best["psnr"] > OVERFIT_PSNR_TARGET_DB:
+                stopped_after_gate = True
+                break
 
     dt = time.perf_counter() - t0
     passed = bool(best["psnr"] > OVERFIT_PSNR_TARGET_DB)
@@ -357,7 +366,9 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
         "n_pairs": n_pairs,
         "pair_names": names,
         "split_of_pairs": "train",
-        "iters": total,
+        "iters": completed_iters,
+        "max_iters": total,
+        "stopped_after_gate": stopped_after_gate,
         "best_psnr_db": round(float(best["psnr"]), 4),
         "best_at_iter": int(best["iter"]),
         "best_weights": best["weights"],
