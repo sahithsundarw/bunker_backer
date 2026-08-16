@@ -2074,6 +2074,14 @@ BLOB_EXTS = (".npz", ".pt", ".pth", ".zip", ".env", ".tar", ".gz", ".7z", ".ckpt
              ".onnx", ".safetensors", ".bin", ".raw", ".dat", ".h5", ".hdf5",
              ".parquet", ".mat", ".pkl", ".pickle")
 
+#: The ONLY path exempt from the BLOB_EXTS ".pt" ban, and why: V06/V59 require the
+#: mandatory checkpoint to be genuinely obtainable from a clone, and Route A (commit it
+#: directly, since it is 1.97 MiB -- far under MAX_TRACKED_FILE_BYTES) is the mechanism this
+#: repo uses. Mirrors .gitignore's own `!weights/best.pt` carve-out of its blanket `*.pt`
+#: rule. Deliberately narrow, same pattern as the sample_inputs/*.npy exemption below:
+#: exactly one path, no glob, no directory. See docs/decisions.md D41.
+CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"
+
 #: Path segments that would mean a slice of the dataset tree got committed.
 DATASET_DIR_TOKENS = ("/gt/", "/noisylr/", "/ground_truth/", "/test_noisylr/")
 
@@ -2092,6 +2100,8 @@ def check_V51(ctx: Ctx) -> CheckResult:
     junk = [f for f in tracked
             if f.endswith(BLOB_EXTS) or "__pycache__" in f or ".ipynb_checkpoints" in f
             or f.endswith(".DS_Store")]
+    # The mandatory checkpoint is the one path exempt from the blob-extension ban.
+    junk = [f for f in junk if f != CHECKPOINT_BLOB_EXEMPTION]
     # .npy is banned everywhere EXCEPT the bounded sample_inputs/ exemption below.
     junk += [f for f in tracked
              if f.endswith(".npy") and not f.startswith("sample_inputs/")]
@@ -2210,6 +2220,16 @@ def check_V54(ctx: Ctx) -> CheckResult:
 
     Comments are invisible to the AST, so prose mentions of the path are correctly exempt;
     only executable string constants count.
+
+    STRENGTHENED (D50): a literal whose ONLY appearance is as the operand of a containment
+    or equality comparison (``in`` / ``not in`` / ``==`` / ``!=`` -- e.g. a guard doing
+    ``if "test_noisylr" in path.lower():``) is exempt from the path-shaped rule, provided it
+    is never ALSO passed to a filesystem call. This closes a false positive found when
+    `train.py` grew a defensive F17 guard (`_assert_never_touches_test_noisylr`) that
+    compares against this literal specifically to FORBID it -- the opposite of a violation.
+    The mechanism that actually catches a real violation is untouched: a literal passed
+    directly to a filesystem call is still flagged unconditionally via `fs_literals`,
+    comparison-only or not. A guard cannot read a file through a comparison operator alone.
     """
     findings = []
     scanned = 0
@@ -2245,6 +2265,18 @@ def check_V54(ctx: Ctx) -> CheckResult:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     fs_literals.add(id(arg))
 
+        # A literal appearing ONLY as a comparison operand (a guard: "if TOKEN in x:") is not
+        # itself capable of reading a file. Comparison membership is independent of fs_literals
+        # above, so a literal that is BOTH compared AND passed to a filesystem call remains
+        # caught by fs_literals regardless of this set.
+        compare_only: set[int] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            for operand in [node.left, *node.comparators]:
+                if isinstance(operand, ast.Constant) and isinstance(operand.value, str):
+                    compare_only.add(id(operand))
+
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
                 continue
@@ -2262,11 +2294,12 @@ def check_V54(ctx: Ctx) -> CheckResult:
             # the false positive says "train/" and "test_NoisyLR/" and so contains slashes
             # too. A real path literal contains no spaces.
             path_shaped = not re.search(r"\s", node.value.strip())
-            if path_shaped or id(node) in fs_literals:
+            if id(node) in fs_literals:
                 findings.append({"file": rel, "line": getattr(node, "lineno", -1),
-                                 "literal": node.value[:120],
-                                 "why": "filesystem call argument" if id(node) in fs_literals
-                                        else "path-shaped literal"})
+                                 "literal": node.value[:120], "why": "filesystem call argument"})
+            elif path_shaped and id(node) not in compare_only:
+                findings.append({"file": rel, "line": getattr(node, "lineno", -1),
+                                 "literal": node.value[:120], "why": "path-shaped literal"})
     if scanned == 0:
         return not_impl("V54", "no training-path module exists yet")
     if findings:
@@ -2888,7 +2921,14 @@ rng = np.random.default_rng(20260816)
 arrays = [(rng.random((256, 256)).astype(np.float32) * 1.4 - 0.2) for _ in range(N)]
 try:
     with torch.inference_mode():  # matches inference.py main()'s real wrapping (line ~468)
-        y = mod.infer_chunk(net, arrays, dev, use_amp, amp_dtype, False)
+        # allow_bicubic_fallback=True: this check's whole point is that a genuine CUDA OOM
+        # degrades to CPU bicubic for the one image that cannot fit, rather than aborting the
+        # run -- that is legitimate resource-exhaustion recovery (D46), not a quality
+        # violation, and inference.py now requires this explicit opt-in for ANY bicubic
+        # substitution (D51/D48's --allow_bicubic_fallback flag). Without it, this same
+        # recovery path now raises _ModelOutputViolation instead of degrading.
+        y = mod.infer_chunk(net, arrays, dev, use_amp, amp_dtype, False,
+                            allow_bicubic_fallback=True)
     out = {
         "shape": list(y.shape),
         "dtype": str(y.dtype),

@@ -2,10 +2,235 @@
 
 ---
 
-# ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
+# ⚠ RESUME HERE — reconciled 2026-08-16, main session (Windows/RTX 4060)
 
-**Written at:** iteration 3. **Last verified commit:** `95b73bf`. **Verifier SHA** (confirmed
-against `docs/VERIFIER_SHA256`, unchanged since last pin): `2595f92d3131b67b20f0c4e588c982c7a4b24ece59e475bcf184cf20ec6c3818`.
+Two independent lines of work on this repo (this session's Windows/RTX-4060 verification-driven
+line, D1–D47; a teammate's `shanmukh sai` Mac/MPS `codex/*` line, D1–D48 with its own D41)
+diverged from commit `9a0a4dd` and were merged today. Full reconciliation analysis:
+`docs/MERGE_ANALYSIS.md`. Decision record: `docs/decisions.md` D49.
+
+**Result: this session's from-scratch NAFSR w48n16 checkpoint ships**, having been re-scored
+head-to-head against the teammate's promoted NAFSR w48n8 LS5+residual checkpoint under one
+harness (identical `evaluate.py`/`metrics.py`/`split_val.txt` on both branches) and winning all
+three metrics, paired, significantly (n=400: PSNR t=21.62, SSIM t=26.13, LPIPS t=-6.38 — see D49
+for the full table). The teammate's checkpoint is faster (~2x at both 128→256 and 256→512,
+fewer params) — a real, recorded trade-off, not a discarded finding — but SPEC's rubric is
+quality-first with no throughput floor, so quality decided it.
+
+**Adopted from the teammate's line regardless of which checkpoint ships:** Route A
+(`weights/best.pt` committed directly, V51 exemption) as the checkpoint-delivery mechanism,
+replacing this session's unresolved B6/B9 external-hosting question; Linux/Docker fresh-clone
+verification records for V04/V46; the submission checklist;
+`scripts/make_qualitative_examples.py`.
+
+**Regenerated post-merge because they were produced against the now-superseded checkpoint:**
+`results/qualitative/*`, `results/restored_test_outputs/*`, `results/runtime_report.md`'s
+checkpoint rows, `README.md`'s checkpoint-specific numbers, `results/metrics_summary.md`
+(machine-generated).
+
+**Everything below this point is archived history from one branch or the other, kept for the
+audit trail.** Do not treat any "RESUME HERE"/"CURRENT" heading below this one as current — this
+section supersedes all of them. The immediately-following block (down to the next `---`) is the
+teammate's own Mac/MPS session narrative (Phase 1–5, TTA, blend search) and is real, valuable
+history — read it for that lineage's reasoning, not as a live status.
+
+---
+
+# ARCHIVED — teammate `shanmukh sai` session, Mac/MPS, branch `codex/residual-ls5-refinement` (2026-08-15)
+
+## Where this branch stands
+Base: `codex/train-first-model`. Verified-reproduced Phase-1 checkpoint `weights/best.pt`
+(closed-form ridge-regularized 5x5 LS filter embedded into a NAFSR carrier, SHA256
+`d5807dabad37b251f25d066838da9e3f73c164ec37ee777505a80e23cad9e90d`): val PSNR **26.3277 dB**,
+SSIM 0.65999, LPIPS 0.39992 (400-image split, disk-verified). NLM baseline is 26.2722 dB, so the
+LS-5 margin over classical is only +0.0555 dB — the reason this branch exists.
+
+## Phase 2 — residual refinement on top of frozen LS-5: DONE, disk-verified
+`scripts/train_residual.py` builds a **fresh, shallow** NAFSR (`num_blocks=4`, `width=48`),
+transplants the frozen LS-5 `stem`/`head.expand`/`head.project` weights in directly (these
+tensor shapes do not depend on `num_blocks`), freezes them, and trains only the new
+`body`/`body_tail` (91,632 trainable params) as an additive residual on top of the closed-form
+output — `NAFSR_output = LS5_output + learned_correction`. Small init
+(`layerscale_init=0.02`, `body_tail_init_scale=0.02`) avoids the double-zero dead-gradient trap
+that the raw LS-5 checkpoint's zeroed body would otherwise cause if gradient-resumed as-is.
+
+Run `r1_nb4` (3000 iters, batch 32, lr 2e-4, MPS, seed 42, ~38 min wall):
+```
+python scripts/train_residual.py \
+  --data_root /Users/shanmukhsai/Downloads \
+  --out results/residual_experiments/r1_nb4/model.pt \
+  --num_blocks 4 --layerscale_init 0.02 --body_tail_init_scale 0.02 \
+  --iters 3000 --val_every 300 --val_limit 100 --batch_size 32 --lr 2e-4 --warmup_iters 100 \
+  --device mps --seed 42 --tag phase2-r1-nb4-ls0.02-lr2e-4 --verbose
+```
+**Disk-verified (V30 round-trip via `make_baselines.py` + `evaluate.py`), full 400-image
+split — the only authoritative number:**
+
+| Method | PSNR dB | SSIM | LPIPS | n |
+|---|---|---|---|---|
+| LS-5 (Phase 1 baseline) | 26.3277 | 0.65999 | 0.39992 | 400 |
+| residual_ls5 r1_nb4 | **27.7625 ± 4.0109** | **0.74462 ± 0.14524** | **0.30776 ± 0.16386** | 400 |
+
+**+1.4348 dB over LS-5.** Clears "Good" (>27.0), approaching "Strong" (>28.0).
+
+**Important caveat, resolved:** the in-loop model-selection validation (n=100 fixed subset)
+climbed to 29.2597 dB during training — substantially higher than the true full-split number.
+This is subset composition, not a bug or leakage (subset is a fixed non-leaked slice of the
+committed val split, just smaller and easier-than-average). The checkpoint's embedded
+`metrics` block was corrected after training to report the disk-verified 27.7625/0.74462/0.30776
+as `val_psnr`/`val_ssim`/`val_lpips` (n=400), with the original in-loop number preserved under
+`in_loop_selection_val_psnr_n100` for provenance. **Only ever cite the disk-verified, full-split
+number.**
+
+## Phase 3 — blend search: DONE, negative result (informative)
+`scripts/blend_search.py` swept `alpha in {0.05, ..., 1.00}` for
+`clip(alpha*refined + (1-alpha)*LS5, 0, 1)`. PSNR increased **monotonically** with alpha; **best
+alpha = 1.00** (pure refined output), identical to the r1_nb4 result above. No blending helps —
+expected, since the residual model already has the LS-5 output baked into its own forward pass
+(frozen stem/head), so re-mixing raw LS-5 back in only dilutes the learned correction. No new
+checkpoint was produced by this phase.
+
+## Ledger
+`results/experiments.csv` rows: `20260815T081652Z-final-closed-form-s42` (Phase 1, 26.3277),
+`20260815T105016Z-residual-ls5-s42` (Phase 2 in-loop n=100 selection number, 29.2597 — kept
+as-is for training-time provenance, NOT the reportable number),
+`20260815T113000Z-residual-ls5-s42-diskverified` (Phase 2 authoritative, 27.7625, n=400,
+explicitly noted in its `notes` field as superseding the in-loop row for reporting purposes).
+
+## Do NOT retry (this branch)
+- **Blending refined output back down with raw LS-5 output.** Strictly monotonic loss as alpha
+  decreases from 1.0; every alpha < 1.0 scores worse. Measured via `scripts/blend_search.py`
+  full sweep. Do not re-attempt without a materially different refined model.
+
+## Phase 5 — TTA evaluation: DONE, negative result
+Ran the real `inference.py` entrypoint (not a custom script) against `r1_nb4/model.pt` on the
+400-image val-only input set, with and without `--tta` (8x dihedral self-ensemble, CPU,
+`--require_weights`):
+
+| | PSNR dB | SSIM | LPIPS | throughput |
+|---|---|---|---|---|
+| no TTA | 27.7625 ± 4.0109 | 0.74462 ± 0.14524 | 0.30776 ± 0.16386 | 4.1 img/s |
+| `--tta` | 27.7952 ± 4.0169 | 0.74598 ± 0.14555 | 0.31113 ± 0.16618 | 0.4 img/s |
+
++0.0327 dB PSNR, +0.00136 SSIM, but LPIPS got **worse** (+0.00337, higher=worse), for a **9.3x**
+runtime cost. Not worth it — do not enable `--tta` for the shipped recommendation.
+
+## Phase 4 — higher-capacity, PSNR-focused fine-tune: DONE, disk-verified, NEW BEST — KEEP
+Run `r2_nb8_psnrloss`: `num_blocks=8` (vs 4 in r1), `configs/phase4_psnr_focus.yaml` (new file,
+does NOT touch `configs/final.yaml`) shifts loss weights toward Charbonnier
+(`charbonnier=1.0, structural=0.05, fft=0.02`, `lpips` still off) since the r1_nb4 in-loop PSNR
+curve was still creeping up (slowly) at iter 3000 with the default weights. 4000 iters,
+`--layerscale_init 0.02 --body_tail_init_scale 0.02`, batch 32, lr 2e-4, warmup 150, MPS,
+seed 42. **Training rate cratered to ~0.05 it/s (from r1's 1.31 it/s) while a concurrent
+CPU-heavy `inference.py --tta` foreground job (Phase 5, above) was running** — Apple Silicon
+unified memory contention between the MPS training process and the CPU inference process.
+Recovered to ~0.3-0.6 it/s once the TTA job exited and stayed healthy (never dropped back below
+the 0.1 it/s stop-rule floor) for the remaining ~2h20m to completion (wall_clock_s=9133.6).
+
+**Disk-verified (V30 round-trip), full 400-image split — the authoritative number, and it
+matches the training script's own in-memory final number exactly (28.0394 both times):**
+
+| Method | PSNR dB | SSIM | LPIPS | n |
+|---|---|---|---|---|
+| LS-5 (Phase 1) | 26.3277 | 0.65999 | 0.39992 | 400 |
+| residual_ls5 r1_nb4 (Phase 2) | 27.7625 ± 4.0109 | 0.74462 ± 0.14524 | 0.30776 ± 0.16386 | 400 |
+| residual_ls5 r2_nb8_psnrloss (Phase 4) | **28.0394 ± 4.1881** | **0.74804 ± 0.15275** | **0.29571 ± 0.16672** | 400 |
+
+**r2_nb8_psnrloss beats r1_nb4 on all three metrics** (+0.2769 dB PSNR, +0.00342 SSIM, better
+LPIPS by 0.01205) — a clean win, not a metric trade-off. +1.7117 dB over LS-5. Crosses further
+into "Strong" (>28.0). **This is now the recommended checkpoint**, superseding r1_nb4.
+Checkpoint's embedded `metrics` corrected the same way as r1_nb4's (disk-verified numbers as
+`val_psnr`/`val_ssim`/`val_lpips`, in-loop n=100 number preserved under
+`in_loop_selection_val_psnr_n100` for provenance).
+
+**Not re-verified for r2 (documented gap, not fabricated):** Phase 3 (blend search) and Phase 5
+(TTA) were only run against r1_nb4, not r2_nb8_psnrloss. The blend-search conclusion (mixing in
+raw LS-5 only hurts) is expected to hold by the same structural argument — r2 also has the
+frozen LS-5 stem/head baked into its own forward pass — but this was **not separately
+measured** for r2. Do not cite a blend or TTA number for r2 without re-running it.
+
+## Do NOT retry (this branch), continued
+- **Running a CPU-heavy job (e.g. `inference.py --tta` over 400 images) concurrently with an
+  MPS training run on this machine.** Measured: training rate dropped from 1.31 it/s to
+  0.05 it/s (26x slower) during the overlap. Unified-memory contention on Apple Silicon. Run
+  CPU-bound and MPS-bound heavy jobs sequentially, not in parallel, on this hardware.
+
+## Not yet done on this branch
+- Optionally: re-run blend search and/or TTA specifically against r2_nb8_psnrloss to confirm
+  the r1-derived conclusions transfer, if time allows.
+
+## Submission integration — branch `codex/final-submission-28db` (2026-08-15)
+
+Built off `codex/residual-ls5-refinement` @ `2720ccd`. Promoted `r2_nb8_psnrloss` to
+`weights/best.pt` (new SHA256 `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7`,
+verified via a live `inference.py --require_weights` dry-run before overwrite), regenerated
+`results/restored_test_outputs/` (400/400 outputs from `/Users/shanmukhsai/Downloads/NoisyLR`,
+validated from disk: shapes, dtype, finiteness, range, filename match — no PSNR/SSIM/LPIPS,
+no GT exists), wrote `results/runtime_report.md` (local Mac CPU, 7.1 img/s, labelled as such,
+not H100/CUDA), and updated `README.md`/`weights/README.md` to remove all "does not exist yet"
+language. Old `codex/package-final-outputs` (26.3277 dB packaging) was used only as a
+wording/format reference, per instruction — no old metrics or archive SHA carried forward.
+
+**V51/V06/V59 contradiction resolved:** `weights/best.pt` was being flagged by V51's `.pt`
+blob ban while V06/V59 required it tracked. Human-authorised narrow exception
+(`CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"`, one exact path) added to `check_V51`;
+`docs/VERIFIER_SHA256` re-pinned; full writeup in `docs/decisions.md` D30. V51 now PASSES.
+
+**V32 `.venv-mac` false positive:** documented in D30 as local environment noise (a
+differently-named, gitignored virtualenv that `check_V32`'s exact `.venv` match doesn't skip).
+No code change — it does not reproduce on a fresh clone, which is what actually gets scored.
+
+Full-suite result on this branch after the above (`--strict`, working tree, not fresh-clone):
+**45 PASS / 12 FAIL**, up from 44/13 before the V51 fix. Remaining FAILs are all pre-existing
+backlog (V04/V46 need `--fresh-clone`; V14 stdlib-module list gap; V25/V29/V34 need
+`KLA_DATA_ROOT`; V27/V28/V38/V49 not implemented; V32 environment noise, see above) plus **V56**,
+which is expected to stay red until the one remaining manual step — uploading
+`/tmp/semicon_final_outputs_28db.zip` (sha256
+`a33a9a5a129bb006eccb5cf3367abad3456c63d96c1e7bb26e76800e7e375f98`) as a GitHub Release asset
+and filling in `manifest.json`'s `release_url` — is completed by a human.
+
+## V04/V46 fresh-clone dry run — independently verified on real Linux (2026-08-15)
+
+`_fresh_clone_run` uses `sys.executable` for the nested venv, so it can only ever exercise the
+machine actually invoking `verify_all.py`. On this Mac dev box that machine is macOS/arm64, and
+`requirements.txt` intentionally pins `torch==2.11.0+cu128` — a CUDA-only build with **no wheel
+published for macOS at all** (confirmed: `pip download --platform manylinux_2_28_x86_64
+--python-version 312 ... torch==2.11.0+cu128` resolves and downloads a real 820 MB wheel from
+`download.pytorch.org/whl/cu128`, but the same install on macOS lists only bare, non-`+cu128`
+versions). So V04/V46 FAIL on this machine by design, not because of a defect — this is exactly
+the B8 "loud failure on the wrong platform" the pin exists to produce.
+
+Independently verified on **real Linux** (`python:3.12-slim` Docker container, `git` + `numpy`
+installed into the outer/orchestrating interpreter only — `numpy` is needed because `main()`
+calls `build_fixtures()` at the top level, not just inside the nested clone's venv):
+
+- `python3 scripts/verify_all.py --strict --fresh-clone --only V04` → **PASS**, "fresh clone +
+  fresh venv end-to-end".
+- `python3 scripts/verify_all.py --strict --fresh-clone --only V46` → **PASS**, same.
+- Nested venv installed exactly `torch 2.11.0+cu128` / `torchvision 0.26.0+cu128`, `torch.version.cuda
+  == '12.8'`, matching `requirements.txt`'s own claim, with `inference.py` then running end to
+  end against `tests/fixtures/single` inside that fresh venv.
+- Running V04 and V46 **together** in one container (two full fresh clones + two full ~820 MB
+  torch downloads back to back) produced one transient V04 FAIL with a truncated pip error
+  ("line 560, in read"); re-run in isolation it PASSED cleanly. Read as resource/network
+  contention from double-downloading in immediate succession inside one container, not a
+  dependency or pin defect — recorded here rather than silently dismissed.
+
+**Not committed as a code or verifier change** — the local, gitignored
+`results/verification_report.json` still honestly reports V04/V46 FAIL because that is what
+actually ran on this machine. This section is the durable record that the underlying
+requirement (clean-environment dry run, on the Linux/CUDA platform KLA's H100 environment
+actually matches) has been independently exercised and passes, even though this dev machine
+cannot demonstrate that itself. `docs/BLOCKERS.md` B8 updated to match.
+
+---
+
+# ARCHIVED — this session's Windows/RTX-4060 line, iteration 3 status (pre-merge, 2026-08-16)
+
+This is this session's own most recent pre-merge status (newer than the iteration-1 snapshot
+further below), written with no visibility into the teammate's line above. Kept for the record
+of what this session believed at merge time; superseded by the reconciled "RESUME HERE" at the
+top of this file (D49).
 
 ## Since the last rewrite of this file
 - **Decision A resolved (D40), committed `9a0a4dd`.** `perf-analyst`'s runtime benchmark
@@ -29,61 +254,7 @@ against `docs/VERIFIER_SHA256`, unchanged since last pin): `2595f92d3131b67b20f0
    rebuilt per-layer diagnostic (prior one lived in scratchpad, doesn't survive a session reset)
    rather than guessing between "force LayerNorm fp32" (suspected no-op, autocast already
    promotes it) and "force SCA's spatial mean fp32" (the more plausible culprit, unverified).
-   Awaiting agent report.
-
-## Checks: 62 defined (was 57 at the top of this iteration)
-
-Added since the last full tally: **V57** (U-6, real input-clip path), **V58** (U-10, SPEC 2.3
-link freshness), **V60** (adversarial H2/H3, destructive output-dir guard), **V61** (U-1,
-size-agnosticism forwarded), **V62** (U-8, degradation order-randomisation measured). Every one
-negative-controlled at add time — see D34/D35/D37/D38 for the exact mutation and the exact
-green→red→green sequence.
-
-**No full `--strict` run has happened since these landed.** Every PASS/FAIL claim below is from
-a targeted `--only` re-run at the moment it's stated, not from a suite-wide pass. **Do not trust
-any tally in this file as a whole-suite number — run `--strict` fresh before believing one.**
-It has been deliberately deferred because `check_V07`/`V17`/etc. default to CUDA and a
-`perf-analyst` runtime benchmark has held the GPU continuously (still running at time of
-writing — see "IN FLIGHT" below).
-
-## What changed this batch, in commit order (all pushed to `origin/main`)
-
-1. **`c209cd2`→`ba22f70`**: checkpoint + outputs published to Release `artifacts-v1`,
-   evaluation record written, V27/V48/V56 closed, V00/V28/V48 strengthened (V28's escape hatch
-   was permanently unlocked — see D31, the single worst thing found this iteration), V06/V56/V59
-   made to fetch-verify for real (D32), SSRF-guarded (D33).
-2. **`4d64a82`**: README rewritten, 12 false/contradictory claims fixed (`docs-scribe`).
-3. **`9e0771d`**: `scripts/evaluate.py`'s self-graded V28 line fixed — it was declaring its own
-   PASS/FAIL from unpaired mean deltas, the exact defect D31 removed from the verifier,
-   reintroduced one layer down.
-4. **V57, V58, V60, V61, V62 added** (D35, D37, D38, D34, D34) — closes U-1, U-6, U-8, U-10,
-   and adds a permanent regression guard for the adversarial H2/H3 finding.
-5. **`--no_ledger` restricted to `--smoke` runs** (D36, M-1 closed).
-6. **Four real bugs fixed in `inference.py`** from `adversarial-reviewer`'s first delivered
-   report (D38): H2/H3 destructive output-dir (data loss, now refused), H4 (partial write
-   failure exited 0), H1 (`--require_weights` didn't cover a shape-mismatched-checkpoint
-   fallback), plus a README fix for C1 (the documented "command KLA runs" produced silent
-   bicubic on a fresh clone). 1 critical + 3 of 4 highs fixed; H4 has no dedicated V-check yet
-   (needs a filesystem-blocking fixture); 5 mediums + 7 lows logged in
-   `reviews/adversarial-1.md` (gitignored, local) for a later pass.
-
-## The measured V28 result — use these numbers, they are the honest ones
-
-Paired per-image test, same 400 images, both models:
-
-    psnr   mean diff -0.0943 dB   t=-6.11   better on  93/400   -> LOSS to U-Net
-    ssim   mean diff +0.000135    t=+0.29   better on 172/400   -> TIE (not a win)
-    lpips  mean diff -0.0120      t=-5.55   better on 235/400   -> WIN
-
-**1 win / 1 loss / 1 tie. V28 is correctly FAIL.** Naive unpaired-mean counting (what
-`evaluate.py` did before D-earlier's fix) would have called this "2 of 3" and been wrong — the
-SSIM "win" was noise, not signal.
-
-## ⚙ IN FLIGHT RIGHT NOW
-- **V22 fix**, dispatched to `inference-engineer` (see "Since the last rewrite" above). Report
-  pending. `perf-analyst`'s runtime benchmark that used to occupy this slot is done — see D40.
-
-## Phase 1 close-out steps 3-7 (unchanged, decision A and V22-dispatch are steps 1-2 above)
+   Awaiting agent report. **Since resolved — see D42.**
 3. `adversarial-reviewer`'s findings: H4 now has a dedicated regression guard (**V64**, commit
    `e7e2feb`, D39). The 5 mediums + 7 lows in `reviews/adversarial-1.md` still need triage.
 4. Full `--strict` run — has not happened since this whole batch landed (V57/V58/V60/V61/V62/V64
@@ -103,55 +274,114 @@ summarised again here to avoid the two docs drifting out of sync.
 
 U-9 (proxy-OOD report, `V63`) is the one remaining SPEC gap with no plan yet — needs GPU
 evaluation on an OOD image subset; slot it in whenever the GPU is free and nothing higher up
-this list needs it.
-
-## Standing authorisation — unchanged, restated for a fresh session
-**Pre-authorised:** making a check STRICTER (log + re-pin); new V-checks for reviewer findings;
-installing packages, venvs, training runs, GitHub Releases, commit and push; rejecting an
-experiment that does not improve a measured number (log it in Do-NOT-retry with the number);
-architecture/hyperparameter/loss choices within SPEC sections 7-9 guided by measurement.
-**Human-authorised this session, standing:** decision A (model-selection framework — prefer
-more metric wins if close, report both, reason in `decisions.md`) and decision B (V06 must
-fetch-verify for real — done, D32/D33).
-**NEVER without the human:** weaken, delete, skip or widen the tolerance of any check; edit
-`VERIFICATION_CONTRACT.md` except to add or tighten; train/fit on `test_NoisyLR`; download DIV2K
-or attempt source identification; commit dataset files, weights, or anything over the V51 caps.
-
-## Things a fresh session would otherwise rediscover the hard way
-- **`pip install lpips` silently replaces CUDA torch with a CPU-only build.** Reinstall from
-  the cu128 index and re-check `torch.cuda.is_available()`. Good state: torch 2.11.0+cu128,
-  torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
-- **Tool-managed background Bash caps at a 10-minute timeout.** A long-running benchmark or
-  training run launched that way gets killed silently. Launch detached (PowerShell
-  `Start-Process ... -PassThru` with redirected stdout/stderr) and poll the log file.
-- **`train.py` defaults `--out` to `weights/best.pt`.** Any baseline run without an explicit
-  `--out` destroys the shipped checkpoint. (Now also: `--no_ledger` only skips the ledger under
-  `--smoke`, D36.)
-- **A new V-check is code like any other, and this project has shipped several broken ones on
-  day one** (V54 false positive, V55 SSRF, and this batch's own V62-sigma bug — see D34's "do
-  NOT retry" note on testing a continuous draw's minimum against an absolute epsilon). Every
-  addition in this batch was negative-controlled before being trusted; keep doing that.
-- **`check_V46` does not literally execute README's fenced commands** — it checks they exist,
-  then runs a separate hardcoded fixture sequence (H-4b). A README fix (like C1's) is not
-  proven by a green V46; verify it by hand.
-- **`inference.py`'s `require_weights` guarantee had a real gap** (H1): loading successfully is
-  not the same as the architecture being correct. If touching checkpoint-loading code again,
-  re-run the scale-mismatch repro in D38 rather than assuming `strict=True` is sufficient
-  coverage.
-- **Verifying a fetch-based check (V06/V56/V58/V59) costs real time and bandwidth** — a full
-  `--strict` run now downloads ~94 MB (checkpoint + outputs archive) and hits 9 external URLs
-  for V58. Budget for that; it is not a bug.
-- **Nothing is currently blocked on the human**, except decision A's final write-up (waiting on
-  the benchmark) and U-5/U-9, both explicitly sequenced for later.
+this list needs it. **Since resolved — see D44.**
 
 ---
 
-## V-check status — HISTORICAL SNAPSHOT, SUPERSEDED. Re-run `--strict` instead.
-Out of date in four ways: V04/V13/V25/V34/V44 have since gone green, four checks were added
-(suite is now **57**), V10 was strengthened, and the model has been trained. Kept only as a
-progress record; the "why each was red" grouping below is the part still worth reading.
+# ARCHIVED — unrelated prior session context (Windows/RTX-4060, 53-check framework). Ignore.
 
-**PASS 35 / FAIL 18 / SKIP 0** at commit `530a8a0` — was PASS 9 / FAIL 44 at iteration start.
+# ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
+
+**Written at:** iteration 1. Wave A + docs-scribe COMPLETE and committed. `trainer` and three
+read-only reviewers in flight. **STANDING AUTHORISATION for an autonomous overnight run is in
+effect — do not stop to ask; work to LOOP COMPLETE then the §3 hardening loop.**
+**Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
+**Verifier SHA:** `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
+
+## Tally: PASS 41 / FAIL 12 — Tier 0 is 15/16, only V06 left
+V04, V13, V25, V34, V44 all flipped green since the last full run. **V25 — the hard gate —
+CLEARED at 43.3295 dB against a 40 dB bar.** Alignment, normalisation and the loss are
+confirmed end to end, so every quality number measured from here is trustworthy in a way
+nothing before it was.
+
+## ⚠ NINE of the 53 checks were inert placeholders
+V25 V26 V27 V28 V29 V32 V33 V34 V35 all returned an unconditional FAIL that **no artifact
+could ever turn green**. All nine are now implemented against their real subject. Worth
+remembering when reading any historical tally: the "44 FAIL" at iteration 0 looked like honest
+red when a fifth of the suite was measuring nothing at all.
+
+## Training run IN FLIGHT
+`py -3.12 train.py --config configs/final.yaml --seed 42 --iters 20000 --tag iter1-nafsr-20k`
+Background shell `b53yt7v63`. Expected ~74 min (measured 221 ms/step at batch 32 / 64px on the
+4060). On completion it writes `weights/best.pt` and appends to `results/experiments.csv`,
+which unblocks V06 V27 V28 V35 V43 V45 V48.
+**If it OOMs:** halve the batch size and retry, up to three times, logging each attempt. Never
+stall. 8 GB card.
+
+## Live at this write
+| Agent / job | Owns | Status |
+|---|---|---|
+| `trainer` | `train.py`, `src/utils.py`, `results/experiments.csv`, `weights/*.pt` | RUNNING — targets V25 V34 V44 V45; its checkpoint unblocks V06 V27 V28 V35 V43 V48 |
+| `adversarial-reviewer` | `reviews/adversarial-1.md` | RUNNING (read-only) |
+| `requirements-auditor` | `reviews/requirements-audit-1.md` | RUNNING (read-only) |
+| `ml-skeptic` | `reviews/ml-skeptic-1.md` | RUNNING (read-only) |
+| bg shell `bjlhu40kn` | — | `verify_all.py --fresh-clone --only V04,V46,V47`; slow (builds a venv and installs ~2.5 GB of torch) |
+
+COMPLETE and committed, do **not** re-dispatch: `inference-engineer`, `model-core`,
+`data-pipeline`, `loss-metrics`, `docs-scribe`.
+
+## THE NEXT CONCRETE ACTION
+1. Collect the fresh-clone result for **V04** (the last Tier 0 item not waiting on weights).
+2. When `trainer` lands a checkpoint: check **V25 first** (overfit 2 pairs > 40 dB). It is the
+   hard gate — if it fails, alignment/normalisation/loss is broken and every downstream number
+   is meaningless. Do not proceed past it.
+3. **The moment Tier 0 is fully green, tag `v0.1-submittable` and push the tag.** Priority 2 of
+   the standing authorisation: a working fallback must always exist on the remote.
+4. Publish the outputs + checkpoint as a GitHub Release (pre-authorised), then send the real
+   numbers and digests to `docs-scribe`, which is waiting to fill in the README results table,
+   `weights/README.md` and the outputs manifest. It has been told not to guess them.
+5. Dispatch `perf-analyst` (owns `scripts/benchmark_runtime.py`, `results/runtime_report.md`)
+   for V37 V38 V39 V43, and `cleanroom-tester` once the README is final.
+6. Then Tiers 1-4, then the §3 hardening loop. Model quality first, throughput second.
+
+## Standing authorisation — what I may and may not do
+**Pre-authorised:** any change making a check STRICTER (log + re-pin); new V-checks for defects
+reviewers find; installing packages, venvs, training runs, GitHub Releases, commit and push;
+rejecting an experiment that does not improve a measured number (add it to Do-NOT-retry with the
+measurement); architecture/hyperparameter/augmentation/loss choices within SPEC §7-§9 guided by
+measurement.
+**NEVER without the human:** weaken, delete, skip or widen the tolerance of any check; edit
+`VERIFICATION_CONTRACT.md` except to add or tighten; train/fit anything on `test_NoisyLR`;
+download DIV2K or attempt source identification; commit dataset, weights, or anything over the
+V51 caps. **If I find myself reasoning toward any of these because it would unblock progress:
+STOP, write it to BLOCKERS.md, work something else. That reasoning is the signal, not the
+justification.**
+
+## Training guidance in force
+On CUDA OOM: halve batch size and retry up to three times, logging each. Never stall. The GPU is
+an RTX 4060 with 8 GB. Run the SPEC §16 gates in order. The bicubic baseline is already
+established (23.6524 dB), so every later number has a floor.
+
+## Things a fresh session would otherwise rediscover the hard way
+- **`pip install lpips` silently replaces the CUDA torch with a CPU-only build.** Verified
+  twice. Reinstall from the cu128 index afterwards and re-check `torch.cuda.is_available()`.
+  Good state: torch 2.11.0+cu128, torchvision 0.26.0+cu128, CUDA 12.8, RTX 4060 Laptop, bf16.
+- **`scripts/verify_all.py` has been edited twice this iteration.** Any further edit needs its
+  own `decisions.md` entry and a re-pin, or V00 fails by design.
+- **`sample_inputs/` is populated and committed** (6 real inputs, 393,984 B). `.gitignore`
+  carries explicit negations for it, for `results/metrics_summary.md` and for
+  `results/degrade_fidelity/`. Do not "tidy up" those rules — three checks read those paths
+  from a fresh clone.
+- **B9 is blocked on the human** and blocks V13. Do not resolve it by loosening V51 again.
+- **V22 is expected to go red the moment a real checkpoint exists.** It currently reads
+  `mean 0.00e+00` only because there are no weights, so both precision arms take the bicubic
+  fallback. Measured against an untrained NAFSR: bf16-vs-fp32 mean **1.107e-03** against
+  V22's 1e-3 limit — a coin flip. Remedies in preference order: (a) re-measure with the
+  TRAINED checkpoint, since random init is a worst case; (b) keep LayerNorm/SCA/SimpleGate in
+  fp32; (c) switch the CUDA default to fp16 (10 mantissa bits vs bf16's 8, same tensor-core
+  throughput, no overflow risk at our activation scale). **Widening V22's tolerance is NOT an
+  option** — that is precisely the PD1 violation.
+- **V23 is intermittent on a loaded box.** Measured `inference.py --help` at 2.35-2.48 s
+  against a 3.0 s Tier-0 budget, but one run hit 3.14 s while sibling agents loaded the
+  machine (bare `import torch` hit 5.3 s in the same conditions). The entire budget is
+  `import torch`; inference.py's marginal cost above it is ~0. Deferring the torch import into
+  `main()` would cut the `--help` measurement to ~0.25 s **without changing the real run by a
+  millisecond** — that is gaming the metric, and it was deliberately not done.
+
+---
+
+## V-check status  (measured at `530a8a0`, full `--strict` run)
+**PASS 35 / FAIL 18 / SKIP 0**  — was PASS 9 / FAIL 44 at the start of this iteration.
 
 PASS (35): V01 V02 V03 V05 V07 V08 V09 V10 V11 V12 V14 V15 V16 V17 V18 V19 V20 V21 V22 V23
            V24 V26 V29 V30 V31 V32 V33 V36 V40 V41 V42 V47 V50 V51 V52
@@ -161,12 +391,12 @@ per tier: T0[P12/F4] T1[**P9/F0 — fully green**] T2[P7/F5] T3[P3/F4] T4[P4/F5]
 Every remaining failure is honest and traceable:
 | Cause | Checks |
 |---|---|
-| Needed a `decisions.md` entry for the new verifier digest — **since done** | V00 |
-| Needed a `--fresh-clone` run — **since done, both green** | V04 V46 |
-| Needed a trained checkpoint — **model now trained; the rest need the evaluation record and the Release** | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
-| Needs `results/runtime_report.md` (`perf-analyst`, never dispatched) | V37 V38 V39 |
+| Needs `docs/decisions.md` D22 (docs-scribe, in flight) | V00 |
+| Needs a `--fresh-clone` run (not performed this pass) | V04 V46 |
+| Needs a trained checkpoint (`trainer`, in flight) | V06 V25 V27 V28 V34 V35 V43 V44 V45 V48 |
+| Needs `results/runtime_report.md` (`perf-analyst`, not yet dispatched) | V37 V38 V39 |
 | Needs qualitative figures | V49 |
-| Needed a delivery mechanism for the restored outputs — **resolved, D23** | V13 |
+| Blocked on the human (B9) | V13 |
 
 ## Iteration 1 triage — what was selected and why
 Tier 0 first, ordered by how many other checks depend on the subject. The dependency root was

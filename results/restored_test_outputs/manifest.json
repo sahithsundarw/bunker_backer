@@ -1,54 +1,20 @@
 {
-  "n_files": 400,
+  "schema_version": 1,
+  "status": "published",
   "release_url": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip",
-  "release_page": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/tag/artifacts-v1",
-  "archive_sha256": "fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750",
-  "archive_bytes": 91069597,
-  "archive_format": "zip (deflate, level 6), flat \u2014 400 .npy at the archive root, no directory prefix",
-  "archive_verified": {
-    "method": "re-fetched with GITHUB_TOKEN and GH_TOKEN cleared from the environment, so the fetch could not succeed on cached credentials",
-    "http_status": 200,
-    "served_bytes": 91069597,
-    "served_sha256": "fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750"
-  },
+  "archive_name": "restored_test_outputs.zip",
+  "archive_sha256": "b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1",
+  "archive_size_bytes": 90990452,
+  "n_files": 400,
+  "producing_git_sha": "4eeeb2e1e145fd25c3d61300a4de08e9932dcc82",
+  "checkpoint": "weights/best.pt",
   "checkpoint_sha256": "9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313",
-  "checkpoint_url": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt",
-  "checkpoint_weights_used": "ema",
-  "producing_git_sha": "c209cd213f6b4df0f5a6676a1671d5a8828a057c",
-  "producing_tree_clean": true,
-  "command": "py -3.12 inference.py --input_dir C:/kla-data/test_NoisyLR --output_dir <out> --require_weights --verbose",
-  "require_weights": true,
-  "input_dir": "C:/kla-data/test_NoisyLR (the 400 released test inputs, 000000.npy .. 000399.npy)",
-  "runtime": {
-    "wall_clock_s": 20.09,
-    "images_per_s": 19.9,
-    "device": "cuda",
-    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
-    "precision": "bf16",
-    "batch_size": 32,
-    "unreadable_inputs": 0,
-    "write_errors": 0
-  },
-  "outputs": {
-    "dtype": "float32",
-    "shape": [
-      256,
-      256
-    ],
-    "ndim": 2,
-    "value_range_observed": [
-      0.0,
-      1.0
-    ],
-    "postprocess": "np.clip(pred, 0.0, 1.0) only -- no renormalisation (docs/decisions.md D3)",
-    "filenames": "byte-identical to the inputs; no suffix, no extension change"
-  },
-  "validation": {
-    "n_checked": 400,
-    "violations": 0,
-    "asserted": "dtype float32, ndim 2, shape (256,256), all finite, within [0,1], filename set identical to the input set"
-  },
-  "per_file_sha256": "sha256sums.txt (400 rows, `<sha256>  <filename>`, sorted by filename)",
-  "ground_truth": "none exists. The released test set ships inputs only, so no score can be computed against it. Every metric in this repository is measured on a held-out split of train/.",
-  "note": "The .npy files are NOT committed. 400 outputs at 256x256 float32 is ~105 MB raw, which would require loosening V51's 5 MB per-file and 25 MB total-tree caps. See docs/decisions.md D23 and D30."
+  "checkpoint_val_psnr_db": 28.7865,
+  "checkpoint_val_ssim": 0.78287,
+  "checkpoint_val_lpips": 0.25324,
+  "manifest_csv": "manifest.csv",
+  "manifest_csv_sha256": "809498ef06fd621c8fff6b95a6e5b0232734c08394badd19d66b7fc9fb6d7d29",
+  "command": "python inference.py --input_dir C:\\kla-data\\test_NoisyLR --output_dir <out> --require_weights --verbose",
+  "device": "cuda",
+  "note": "Regenerated 2026-08-16 after merge reconciliation (docs/decisions.md D49) replaced weights/best.pt with this session's from-scratch NAFSR w48n16 checkpoint. Verified fetchable anonymously (no auth) and sha256-matched before this manifest was written."
 }

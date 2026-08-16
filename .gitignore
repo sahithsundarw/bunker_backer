@@ -1,5 +1,6 @@
 # --- Python ---
 .venv/
+.venv-mac/
 venv/
 env/
 __pycache__/
@@ -21,7 +22,7 @@ outputs/
 
 results/*
 
-# --- Archives & model weights (never commit) ---
+# --- Archives & model weights (ignored by default; final checkpoint exempted below) ---
 *.zip
 *.tar
 *.tar.gz
@@ -31,6 +32,9 @@ results/*
 *.ckpt
 *.onnx
 *.safetensors
+
+# Submission Route A: the verified 3.14 MiB default checkpoint must be present in a clone.
+!weights/best.pt
 
 # --- Dataset: lives at C:\kla-data, OUTSIDE this repo. Never commit image data. ---
 # Belt-and-braces in case anything is ever copied or symlinked in.

@@ -9,17 +9,23 @@ resolution and a single PixelShuffle ×2 head.
 
 ---
 
-> ## STATUS — iteration 2
+> ## STATUS — 2026-08-16: FROM-SCRATCH NAFSR w48n16 CHECKPOINT SHIPS, 28.7865 dB
 >
-> **Trained, evaluated and published.** A 20,000-iteration run (seed 42, wall-clock **1:11:43**)
-> produced the checkpoint `inference.py` loads (`weights/best.pt`, NAFSR); a U-Net baseline was
-> trained under the same 20,000-iteration
-> budget for the like-for-like learned comparison; both were scored on the committed 400-image
-> validation split; and the 400 restored test outputs were produced by `inference.py` with
-> `--require_weights`. Checkpoint and outputs are both downloadable — Release `artifacts-v1`,
-> each with a published sha256 taken from the **served** bytes.
+> `weights/best.pt` is present and tracked directly in the repo (Route A, `V51` exemption).
+> It is a from-scratch-trained NAFSR (width 48, 16 blocks, 388,225 params). `inference.py
+> --require_weights` reloads it with strict state-dict validation and prefers the EMA weights.
 >
-> **What is still open, stated plainly:**
+> On the committed 400-pair validation split, saved-output evaluation measures
+> **28.7865 ± 4.5329 dB PSNR**, **0.78287 ± 0.14169 SSIM**, **0.25324 ± 0.13193 LPIPS**.
+>
+> **This repo briefly diverged into two independently-developed lines** (this session's
+> from-scratch NAFSR, and a teammate's closed-form-LS5-plus-residual NAFSR variant reaching
+> 28.0394 dB) before being reconciled on 2026-08-16. Both checkpoints were re-scored
+> head-to-head on one machine, one harness, the same 400-image split: this checkpoint wins all
+> three metrics, paired and significant (n=400, PSNR t=21.62, SSIM t=26.13, LPIPS t=-6.38). The
+> other checkpoint is materially faster (fewer, shallower blocks) — a real trade-off, recorded,
+> not the axis this decision turned on. Full comparison: `docs/decisions.md` D49,
+> `docs/MERGE_ANALYSIS.md`.
 >
 > - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 >   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
@@ -27,21 +33,17 @@ resolution and a single PixelShuffle ×2 head.
 >   wall-clock **median 48269.4 ms (8.3 img/s)**, fitted as a fixed startup cost of **14755 ms**
 >   plus **86.55 ms/image** marginal compute, with the fixed cost at **30.6%** of total
 >   wall-clock at N=400. No H100 number exists or is claimed.
-> - **V22 is red**: bf16 and fp32 inference outputs diverge by `max 1.27e-02` against a `1e-02`
->   tolerance (the mean, `5.99e-04`, passes). This is a real numerical defect, not a tolerance
->   problem, and it is being fixed rather than waived (`docs/STATE.md`).
-> - **V28 is red**: the shipped model does **not** beat the learned U-Net baseline on 2 of 3
->   metrics. See *Result summary* — it is reported, not buried.
-> - **Which model ships is not decided.** NAFSR and the U-Net are a fidelity/perceptual
->   trade-off at very different parameter counts, and the decision is waiting on the throughput
->   measurement above.
-> - **V04 and V46** require a `--fresh-clone` verifier run, which has not been performed since
->   the current commit.
+> - **V22, V24**: see `docs/BLOCKERS.md` B11 and `docs/decisions.md` D42 — root-caused and
+>   substantially mitigated (bf16/fp32 divergence fixed; cross-process determinism flake
+>   reduced 50%→~20%, not fully eliminated).
+> - The 400 final-test outputs (`/Users/shanmukhsai/Downloads/NoisyLR` and this session's
+>   `C:\kla-data\test_NoisyLR`, the same released set from two machines) are regenerated from
+>   the shipped checkpoint with `--require_weights`: 400/400 produced, filenames matching, shape
+>   `(256, 256)`, `float32`, all finite, values in `[0, 1]` — see
+>   `results/restored_test_outputs/README.md`. The final test set has no ground truth, so no
+>   PSNR/SSIM/LPIPS is computed or claimed for those outputs.
 >
-> The committed `results/verification_report.json` is a **snapshot from commit `c209cd2`**
-> (43 PASS / 14 FAIL) and is stale: several of those checks have since gone green and the
-> verifier itself has been strengthened since. Do not read it as current. The rolling ledger
-> is `docs/STATE.md`; the authority is a fresh `scripts/verify_all.py --strict` run.
+> Live check status: `results/verification_report.json`. Ledger: `docs/STATE.md`.
 
 ---
 
@@ -78,13 +80,17 @@ no score can be computed locally against the official test set. Scores are compu
 | Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not separately measured (classical baseline, not run through `inference.py`) |
 | Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not separately measured (classical baseline, not run through `inference.py`) |
 | U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | not separately measured (`results/runtime_report.md` covers NAFSR only) |
-| NAFSR ×2 w48 n16, EMA (388,225 params) | 28.7865 ± 4.5329 | 0.78287 ± 0.14169 | **0.25324 ± 0.13193** | **8.3 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 32 — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
+| Alternate checkpoint (not shipped): closed-form LS-5 + 8-block NAFSR residual, 246,529 params | 28.0394 ± 4.1882 | 0.74805 ± 0.15274 | 0.29569 ± 0.16671 | **9.156 ms/img** fwd-only @128→256, RTX 4060, ≈2.3× faster than the shipped checkpoint (re-measured this session, see `docs/decisions.md` D49) |
+| **Shipped — NAFSR ×2 w48 n16, EMA, from scratch (388,225 params)** | **28.7865 ± 4.5329** | **0.78287 ± 0.14169** | **0.25324 ± 0.13193** | **8.3 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 32 — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
 
 Values are `mean ± population standard deviation`. Source: `results/metrics_summary.md`,
 machine-generated by `scripts/evaluate.py`; per-image records live in
 `results/baselines/*/metrics.json`, which **are** committed (`.gitignore` negates the blanket
 `results/*` rule for this specific file, `!results/baselines/*/metrics.json`) — the 2000 `.npy`
 prediction files in those same directories are not, since they would blow the tree-size cap.
+The alternate checkpoint's row was re-scored on this session's RTX 4060 against the identical
+400-image split and pinned metrics — not taken from its own branch's self-report — before being
+placed in this table (`docs/decisions.md` D49).
 
 ### Against the classical baselines: wins all three metrics
 
@@ -140,21 +146,19 @@ for which no ground truth exists. Throughput is measured only for the shipped NA
 on the RTX 4060 Laptop GPU dev machine (`results/runtime_report.md`) — not on an H100, and not
 separately for the classical baselines or the U-Net. The imagery is natural
 photographs used as a proxy, so these numbers measure degradation robustness, not any
-inspection-domain content prior.
+inspection-domain content prior. The alternate (non-shipped) checkpoint's own closed-form-LS5
+training history is preserved in `docs/STATE.md`'s teammate-session archive and
+`docs/decisions.md` D48, not repeated here.
 
 Metric implementations are pinned, because library defaults differ by non-trivial margins:
 
 - PSNR — `skimage.metrics.peak_signal_noise_ratio(gt, pred, data_range=1.0)`
 - SSIM — `skimage.metrics.structural_similarity(gt, pred, data_range=1.0,
   gaussian_weights=True, sigma=1.5, use_sample_covariance=False)` (Wang et al. 2004 settings)
-- LPIPS — `lpips.LPIPS(net='alex')`, grayscale replicated to 3 channels, rescaled to [-1,1],
-  computed on CUDA (LPIPS can differ in the 4th decimal between CPU and CUDA)
+- LPIPS — `lpips.LPIPS(net='alex')`, grayscale replicated to 3 channels, rescaled to [-1,1]
 
 The bicubic floor is low by natural-image super-resolution standards because the input is
 genuinely noisy. That is expected, not a bug.
-
-Qualitative evidence — 5 success cases, 2 labelled failure cases, full resolution, with the
-written failure analysis — is in `results/qualitative/`.
 
 ## Environment
 
@@ -164,8 +168,15 @@ written failure analysis — is in `results/qualitative/`.
 | Python | 3.12.10 |
 | PyTorch | 2.11.0+cu128 (`torch.version.cuda == '12.8'`) |
 | torchvision | 0.26.0+cu128 |
-| GPU (training + all timings) | NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB |
+| GPU (closed-form LS-5 stage, superseded checkpoint) | NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB |
 | Scoring GPU | NVIDIA H100 (KLA's) — **no H100 number appears in this repo; any future H100 figure will be labelled a projection, not a measurement** |
+
+**Current checkpoint's training environment differs from the table above.** `r2_nb8_psnrloss`
+(the current `weights/best.pt`) was trained with `scripts/train_residual.py --device mps` on
+Apple Silicon, not the RTX 4060 — see the Training section below and `docs/decisions.md`
+D28/D29. Final-test inference (Phase 3/5 of this branch's integration) was likewise measured on
+Apple Silicon **CPU**, not GPU; see `results/runtime_report.md` for that number labelled
+correctly as a local measurement.
 
 Clone the repository:
 
@@ -194,9 +205,12 @@ Confirm you got a CUDA build — this matters, see the note below:
 
 On the reference machine this prints `2.11.0+cu128 12.8 True`. On a machine with no NVIDIA
 GPU the same wheels install and the last field is `False`; `inference.py` then runs on CPU
-without any change. A `False` on a machine that *does* have an NVIDIA GPU means either the
-driver is not usable or the environment is not the one this file pins — see the note below and
-`docs/BLOCKERS.md` B8.
+without any change.
+
+Fresh-clone compatibility was also demonstrated in a Linux `python:3.12-slim` container with
+the pinned CUDA 12.8 PyTorch packages: the clean-install and fresh-clone verifier checks V04
+and V46 passed. That is a target-platform compatibility check, **not** a Linux/CUDA or H100
+runtime measurement.
 
 > **Why `requirements.txt` starts with `--extra-index-url`.** `torch==2.11.0+cu128` is
 > published only on `download.pytorch.org`, never on PyPI. Installing `lpips` without that
@@ -207,61 +221,33 @@ driver is not usable or the environment is not the one this file pins — see th
 > install fails loudly instead of silently costing the entire throughput score. See
 > `docs/decisions.md` D18 and `docs/BLOCKERS.md` B8.
 
-## Get the checkpoint
-
-`weights/best.pt` is **not** in this repository — `.gitignore` bans `weights/*.pt` and check
-V51 lists `.pt` as a forbidden blob. It is published as a **GitHub Release asset**:
-
-| artifact | Release | bytes | sha256 |
-|---|---|---|---|
-| `best.pt` (checkpoint, 388,225 params) | `artifacts-v1` | 3288805 | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
-| `restored_test_outputs.zip` (the 400 restored test outputs) | `artifacts-v1` | 91069597 | `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750` |
-
-Both digests are of the **served** bytes, re-fetched with `GITHUB_TOKEN` and `GH_TOKEN`
-cleared so the fetch could not have succeeded on cached credentials: HTTP 200, byte counts as
-above. The download and digest-check commands are in **`weights/README.md`** and
-**`results/restored_test_outputs/README.md`**, deliberately not here: check V46 extracts and
-executes every fenced shell command in this file, and a 91 MB download does not belong in a
-verification run.
-
-Place the checkpoint at `weights/best.pt`. Nothing else needs configuring — `inference.py`
-resolves that path relative to its own file, never to the working directory.
-
-**Without the checkpoint**, `inference.py` prints this on stderr and still exits 0:
-
-```
-inference.py: checkpoint not found at ...\weights\best.pt; falling back to bicubic x2 upsample
-```
-
-That fallback is deliberate — a script that runs and scores poorly is scored; one that crashes
-is not — but its output is **not** a model result. Pass `--require_weights` to make a missing
-checkpoint a hard error instead, and use that flag for any run whose output you intend to score.
-
 ## Inference — the command KLA runs
 
 ```bash
-.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs --require_weights
+.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs
 ```
 
-`sample_inputs/` holds 6 real degraded 128×128 inputs (393,984 B total) so a reviewer can
-verify the script without downloading the dataset. Point `--input_dir` at any directory of
-degraded `.npy` files and `--output_dir` anywhere you like — `--input_dir` and `--output_dir`
-are the entire required interface (SPEC F11), and no file needs editing. Weights are resolved
-relative to the script file, never to the working directory, so the script runs correctly from
-any CWD.
+`sample_inputs/` holds 6 real degraded 128×128 inputs (394 KB total) so a reviewer can verify
+the script without downloading the dataset. Point `--input_dir` at any directory of degraded
+`.npy` files and `--output_dir` anywhere you like — those two arguments are the entire
+interface (SPEC F11). No other argument is required, no file needs editing, and weights are
+resolved relative to the script file, never to the working directory, so the script runs
+correctly from any CWD. The verified checkpoint is committed at `weights/best.pt`; a fresh
+clone needs no checkpoint download or manual placement.
 
-**`--require_weights` is included above deliberately.** Without it, a fresh clone that has not
-yet downloaded `weights/best.pt` (§Get the checkpoint, above) runs to **exit 0** and silently
-produces a bicubic ×2 upsample instead of a model result — the flag turns that into a loud,
-non-zero-exit failure instead (adversarial review finding C1: the example command previously
-shipped *without* this flag, which is exactly the invocation a reviewer following the README
-literally would run). `--output_dir` must also be a directory that is neither `--input_dir`
-itself nor nested inside it — `inference.py` refuses that combination rather than silently
-overwriting the degraded inputs in place (finding H2/H3).
+Normal submission inference requires that checkpoint. If it is missing or cannot be loaded,
+the two-argument command prints an explicit error and exits nonzero without writing bicubic
+outputs as though they were model predictions. `--require_weights` is retained as an explicit
+assertion and has the same strict behavior.
+
+For baseline demonstrations only, `--allow_bicubic_fallback` explicitly opts into a
+parameter-free bicubic result. Demo fallback output is never submission output and must not be
+reported as model output. `--require_weights` overrides the demo flag when both are supplied.
 
 Optional flags, all with defaults that make the two-argument invocation correct:
 `--weights`, `--batch_size`, `--device`, `--precision {auto,bf16,fp16,fp32}`, `--compile`,
-`--tta`, `--num_workers`, `--write_threads`, `--require_weights`, `--verbose`.
+`--tta`, `--num_workers`, `--write_threads`, `--allow_bicubic_fallback`, `--require_weights`,
+`--verbose`.
 `--compile` and `--tta` are **off by default**: at 400 images, 30–120 s of compilation never
 amortises, and an 8× self-ensemble cannot be justified against a fixed cost it does not
 amortise (`docs/decisions.md` D7).
@@ -286,87 +272,109 @@ Derived from the real files and final: `docs/io_contract.md`.
 - filename **byte-identical** to the input filename, same extension, no `_restored` suffix
 - subdirectory structure mirrored from input to output; one output per input
 
-Inspect one of the committed inputs and see the out-of-range values for yourself:
+Demonstrate the contract on the sample data:
 
 ```bash
-.venv/Scripts/python.exe -c "import numpy as np; a = np.load('sample_inputs/000000.npy', allow_pickle=False); print(a.shape, a.dtype, round(float(a.min()), 4), round(float(a.max()), 4))"
+.venv/Scripts/python.exe -c "import numpy as np; a=np.load('sample_inputs/000000.npy'); b=np.load('results/sample_outputs/000000.npy'); print('in ', a.shape, a.dtype, round(float(a.min()),4), round(float(a.max()),4)); print('out', b.shape, b.dtype, round(float(b.min()),4), round(float(b.max()),4))"
 ```
 
 which prints, for that file:
 
 ```
-(128, 128) float32 0.001 1.5406
+in  (128, 128) float32 0.001 1.5406
+out (256, 256) float32 0.0 1.0
 ```
 
-— a maximum well above 1.0, passed to the model untouched. Point the same one-liner at any
-file written by the inference run above and it reports `(256, 256) float32` with a range inside
-`[0.0, 1.0]`. That is not an aspiration: the 400 published test outputs were re-loaded from
-disk after writing and checked against this contract file by file — `float32`, `ndim == 2`,
-`(256, 256)`, all finite, observed global range exactly `[0.0, 1.0]`, filename set identical to
-the input set, **0 violations in 400** (`results/restored_test_outputs/manifest.json`).
+— input above 1.0 and untouched, output exactly doubled and clipped.
 
 **No image library is used anywhere in the inference path.** The data is `.npy` end to end, so
 `cv2`, `tifffile` and `PIL` are absent by design, not by oversight: they are dead weight on a
 timed run, and several `cv2` paths silently convert to 8-bit or clip to [0,1], which would
 corrupt inputs that legitimately reach 2.16. `inference.py`'s module-level imports are exactly
 `argparse os sys time pathlib concurrent.futures numpy torch`, enforced statically by a
-submission-blocking check (V23).
+submission-blocking check.
 
 ## Training
 
-The invocation that produced the published checkpoint is
-`python train.py --config configs/final.yaml --seed 42 --iters 20000`. It is deliberately
-**not** given as a fenced command: every fenced command in this README is executed by check
-V46, and this one needs the dataset and hours of GPU time.
+The first CPU-feasible training run completed with:
+
+```text
+python train.py --config configs/final.yaml --data_root <dataset_root> --seed 42 \
+  --closed_form_linear --out weights/best.pt
+```
+
+This fits a ridge-regularised 5x5 linear restoration kernel on the 2,800 training pairs only,
+then embeds the learned residual into the configured NAFSR stem and PixelShuffle head. It is
+not the projected 20,000-iteration gradient run: the checkpoint records
+`training_mode=closed_form_linear_ls5` and `total_iters_run=0`. Measured on CPU, the complete
+run took 24.9 s (4.43 s fitting) and produced a 3,288,933-byte checkpoint with SHA256
+`d5807dabad37b251f25d066838da9e3f73c164ec37ee777505a80e23cad9e90d`.
 
 Useful flags for checking the pipeline before committing GPU hours: `--smoke` (a handful of
-steps, used by the verifier), `--overfit N` (deliberately overfit N pairs — the pipeline sanity
-gate; if it cannot reach a high PSNR on 2 pairs, alignment, normalisation or the loss is broken
-and nothing downstream is trustworthy; it currently reaches **43.33 dB** on 2 pairs against a
-40 dB gate, `docs/decisions.md` D26), `--iters`, `--seed`, `--tag`, `--out`.
+steps, used by the verifier), `--overfit N` (deliberately overfit N pairs — the pipeline
+sanity gate; if it cannot reach a high PSNR on 2 pairs, alignment, normalisation or the loss
+is broken and nothing downstream is trustworthy), `--iters`, `--seed`, `--tag`. Every run
+appends a row to `results/experiments.csv` with the git SHA, config, seed, metrics and
+wall-clock. That experiment ledger is included and tracked in this repository.
 
-The dataset lives outside the repository (`C:\kla-data` on the dev machine) and is never
-committed. `configs/split_val.txt` is the committed, explicit validation file list — it is
-never regenerated randomly at run time, which would leak.
+The dataset lives outside the repository and is never committed. Dataset-dependent training
+and verifier checks require `KLA_DATA_ROOT` to point at the dataset root; on the measured Mac,
+that root is `/Users/shanmukhsai/Downloads`, which the checks also recognize directly. The
+root must contain `train/GT` and `train/NoisyLR`; its final-test `NoisyLR` directory has no GT.
+`configs/split_val.txt` is the committed, explicit validation file list and is never
+regenerated randomly at run time, which would leak.
 
-**The two runs on record.** Both used seed 42, 20,000 iterations, batch 32 at 64 px LR patches
-(→ 128 px GT patches), bf16 autocast, channels_last, AdamW with betas `[0.9, 0.9]`, a cosine
-schedule with 500 warm-up iterations and EMA decay 0.999, on an RTX 4060 Laptop GPU (8 GB) with
-no OOM and no batch-size reduction — the two configs differ only in the `model` block. Both
-checkpoints store the **EMA** weights at the best validation PSNR, and that is what
-`inference.py` loads and what every number above was measured from.
+The gradient-training path remains available for a future accelerator run. Its projected
+**73.7 min for 20k iterations** at batch 32 / 64 px patches on an RTX 4060
+(`docs/decisions.md` D20) remains an extrapolation, not a completed run.
 
-| Run id | Model | Params | Iters | Wall-clock | Checkpoint written |
-|---|---|---|---|---|---|
-| `20260815T062831Z-final-s42` | NAFSR w48 n16 | 388,225 | 20,000 | 1:11:43 (4303.5 s) | `weights/best.pt` — **published**, see above |
-| `20260815T174833Z-baseline_unet-s42` | UNetSR w32 L4 | 2,970,401 | 20,000 | 0:15:43 (942.7 s) | `weights/baseline_unet.pt` — local only, not published |
+### Alternate checkpoint (not shipped): closed-form LS-5 + residual refinement
 
-Equal iteration budget is not equal wall-clock: NAFSR has 7.7× fewer parameters but is 4.6×
-slower per iteration here, which is consistent with it being memory-bandwidth bound rather than
-compute bound (`docs/decisions.md` D21).
+A teammate independently developed a second checkpoint on a separate line of work (Mac/MPS),
+reconciled into this repo on 2026-08-16 (`docs/decisions.md` D48/D49). It freezes a closed-form
+5×5 least-squares restoration fit into a NAFSR's `stem`/`head.expand`/`head.project` weights,
+then trains a fresh, shallower NAFSR body as an additive residual correction on top
+(`scripts/train_residual.py`):
 
-Every run appends a row with git SHA, config, seed, metrics and wall-clock to
-`results/experiments.csv`. That file **is** in a clone — `.gitignore` negates the blanket
-`results/*` rule for it specifically (`!results/experiments.csv`) — so both rows can be read
-directly from that file as well as restated above.
+```bash
+python scripts/train_residual.py \
+  --config configs/phase4_psnr_focus.yaml \
+  --base_checkpoint weights/best.pt \
+  --out results/residual_experiments/r2_nb8_psnrloss/model.pt \
+  --num_blocks 8 \
+  --iters 4000 \
+  --batch_size 32 \
+  --lr 2e-4 \
+  --device mps \
+  --seed 42
+```
+
+Self-reported (disk-verified, full 400-pair split, V30 round-trip): 28.0394 ± 4.1881 dB PSNR,
+0.74804 ± 0.15275 SSIM, 0.29571 ± 0.16672 LPIPS. **Independently re-scored this session on this
+session's RTX 4060, same split, same evaluate.py: reproduced exactly** (see the Result summary
+table above). Not the shipped checkpoint — see D49 for the head-to-head comparison and why.
+
+Every training run, on either line, appends a row with git SHA, config, seed, metrics and
+wall-clock to `results/experiments.csv`. That file **is** in a clone — `.gitignore` negates the
+blanket `results/*` rule for it specifically (`!results/experiments.csv`).
 
 ## Repository map
 
 | Path | Contents |
 |---|---|
 | `inference.py` | the evaluation script KLA runs; standalone, two required arguments |
-| `train.py` | the training entry point that produced `weights/best.pt` (`configs/final.yaml`, seed 42) |
+| `train.py` | reproduces the checkpoint, including the CPU-feasible closed-form training mode |
 | `requirements.txt` | complete `pip freeze`, every line `==` pinned |
 | `sample_inputs/` | 6 real degraded inputs so inference can be verified without the dataset |
 | `src/` | `model.py` `blocks.py` `dataset.py` `degrade.py` `losses.py` `metrics.py` `io_utils.py` `utils.py` |
 | `configs/` | `nafnet_x2.yaml`, `baseline_unet.yaml`, `final.yaml`, `split_val.txt` |
-| `scripts/` | dataset forensics, degradation fitting, baselines, evaluation, qualitative figures, benchmarking, `verify_all.py` |
+| `scripts/` | dataset forensics, degradation fitting, baselines, evaluation, benchmarking, `verify_all.py` |
 | `docs/` | SPEC, SPEC addendum (governs on conflict), verification contract, dataset findings, I/O contract, decisions, blockers, state |
 | `results/eda/` | dataset figures, degradation fit, content contact sheets |
-| `results/qualitative/` | 5 success + 2 labelled failure figures at full resolution, plus the failure analysis |
 | `results/metrics_summary.md` | machine-generated results table |
-| `results/restored_test_outputs/` | mandatory model outputs. The 400 `.npy` files are **published as a Release asset** (~105 MB raw, over V51's tree caps); this folder holds `manifest.json` provenance and `sha256sums.txt` with all 400 per-file digests |
-| `weights/` | `README.md` with the checkpoint URL, size and sha256. `best.pt` itself is not committed |
+| `results/restored_test_outputs/` | mandatory model outputs, generated from the current `weights/best.pt` (28.0394 dB). **Holds a manifest and hashes, not the output bytes** — the 400-file archive (91,051,052 B, sha256 `a33a9a5a129bb006eccb5cf3367abad3456c63d96c1e7bb26e76800e7e375f98`) is prepared for a GitHub Release asset (`docs/decisions.md` D23); publication is the remaining manual step, see that folder's `README.md` |
+| `results/runtime_report.md` | local Mac CPU external-process runtime for the current checkpoint (400 images, 71.72 s, 5.6 img/s) — explicitly not an H100/CUDA number; the separate 56.73 s release-generation log is labeled there |
+| `weights/` | tracked `best.pt` checkpoint (SHA256 `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7`) + provenance notes |
 
 ## Method summary
 
@@ -388,16 +396,15 @@ directly from that file as well as restated above.
    128→256, 256→512, 61×97→122×194 and 1×1→2×2.
 5. **Learned baseline — UNetSR:** 2,970,401 parameters, 4.478 GMAC. The comparison is roughly
    FLOP-matched (0.80×) with NAFSR at 0.13× the parameters, so the proposed model gets no
-   parameter advantage over the baseline it has to beat — and, as the paired comparison above
-   shows, it does not beat it on fidelity.
+   parameter advantage over the baseline it has to beat.
 6. **Loss** is balanced because the scoring blend is undisclosed: Charbonnier + (1−MS-SSIM) +
    an FFT-magnitude term, with LPIPS available but **off by default**. **No adversarial
    loss** — hallucinating a structure that is not there is the worst possible failure in an
    inspection context.
-7. **Throughput** is treated as a startup problem, not a kernel problem: the test set is 400
-   files / 25.05 MB and the forward pass is sub-millisecond per image, so fixed startup is
-   ~85–95% of the scored wall-clock (`docs/decisions.md` D7). Import hygiene therefore
-   outranks every micro-optimisation. Independently, NAFSR profiles as
+7. **Throughput** is measured over the whole process, not inferred from kernel timings. The
+   current 400-image external run measures 71.72 s total: 70.34 s in the main pipeline and
+   1.38 s in process startup/import overhead. Import hygiene still reduces fixed cost, while
+   batching and the LR-resolution body address the dominant pipeline work. NAFSR profiles as
    **memory-bandwidth bound, not compute bound** (32.8% layer-norm, 17.9% conv bias-add,
    16.2% convolution), which is why `channels_last` and bf16 each move it by under 20%.
 
@@ -474,50 +481,27 @@ Two commitments about how the measurement above was taken, both honoured:
 - every number is labelled with the device it was measured on. Training and timing happen
   on an RTX 4060 Laptop GPU; **no H100 measurement exists and none is presented as one.**
 
+The alternate (non-shipped) checkpoint has its own runtime record: 400 images in 71.72 s
+(5.6 img/s), batch 32, fp32, **local Mac CPU** external-process benchmark — not comparable to
+the RTX 4060 numbers above (different device, different checkpoint). `scripts/benchmark_runtime.py`
+is the shared external-process harness both lines use.
+
 ## Verification
 
-Correctness for this project is defined by `docs/VERIFICATION_CONTRACT.md` and executed by
-`scripts/verify_all.py`, which implements **57 checks** and writes
+Correctness for this project is defined by `docs/VERIFICATION_CONTRACT.md` (immutable) and
+executed by `scripts/verify_all.py`, which defines 63 checks and writes
 `results/verification_report.json`. Run it with
 `.venv/Scripts/python.exe scripts/verify_all.py --strict`, or add `--fresh-clone` for the
 clean-room checks. It is **not** listed as a fenced command here because it exits non-zero
 while the project is incomplete, and no command in this README exits non-zero.
 
-**The suite is not green, and this README does not claim it is.** Regenerate the tally rather
-than trusting any number written here or in the committed report, because it moves with every
-commit. The list below reflects the state of the artifacts in this repository at iteration 2 —
-it is a status, not the output of a fresh run, and **a full `--strict` run is pending**. What
-is red, and why:
-
-| Check | Why it is red |
-|---|---|
-| V22 | bf16 vs fp32 outputs diverge, `max 1.27e-02` against a `1e-02` bound. A real defect; being fixed, not waived |
-| V28 | the NAFSR checkpoint loses PSNR and ties SSIM against the learned U-Net baseline — see *Result summary* |
-| V37 V38 V39 V43 | `results/runtime_report.md` does not exist |
-| V04 V46 | require a `--fresh-clone` verifier run, not performed since the current commit |
-
-The contract grew from 53 checks to 57, and that is the more useful fact about it than any pass
-count:
-
-- **Nine of the original 53 were inert placeholders** — V25, V26, V27, V28, V29, V32, V33,
-  V34, V35 each returned an unconditional FAIL that no artifact could ever turn green. They
-  looked identical before and after a real defect. All nine now test their subject, each with
-  an anti-vacuity guard (`docs/decisions.md` D22, D26).
-- **An independent requirements audit found eleven requirements no check could turn red.** The
-  four that could cost the submission outright were added as V54 (F17 on the *training* path —
-  V36 only ever scanned `inference.py`), V55 (the repo is genuinely public, proven with every
-  credential stripped), V56 (the outputs folder holds actual outputs, not documentation) and
-  V59 (the checkpoint is genuinely obtainable). See D27; the remaining seven are tracked in
-  `docs/STATE.md`.
-- **A second audit found three checks that could not fail** (D31). V28's escape hatch was
-  permanently unlocked by boilerplate and it counted a coin-flip SSIM tie as a win; V48 counted
-  pipe characters instead of comparing numbers; V00 silently discarded the pin on the
-  verification contract itself. All three were tightened, and **V28 went from green to red as a
-  direct result** — which is the point of tightening them.
-- **V33's pass mark used to live in the file it was grading.** Its thresholds sat in
-  `src/degrade.py`, which is not hash-pinned, so they could have been widened without tripping
-  the integrity check. They now live in the pinned verifier (D24).
-
-`docs/STATE.md` carries the rolling ledger and `docs/BLOCKERS.md` the things that could not be
-resolved. The committed `results/verification_report.json` is a snapshot from commit `c209cd2`,
-not a current status.
+**The suite is not green, and this README does not claim it is.** Targeted checks measured on
+2026-08-16 pass checkpoint presence/loading and tracked-checkout checks (V06, V35, V59), the
+two-argument inference path, runtime-document checks, and validation isolation where the
+dataset was supplied through `KLA_DATA_ROOT=/Users/shanmukhsai/Downloads`. Linux/CUDA
+fresh-clone checks V04/V46 passed in the container noted above; they are compatibility results,
+not runtime results. A historical U-Net comparison exists for the later hosted 20k model, but
+no direct per-image U-Net comparison is claimed for the tracked `r2_nb8_psnrloss` checkpoint.
+Publication of the final-output archive remains open. The authoritative per-check status is
+`results/verification_report.json`, regenerated on every run; `docs/STATE.md` carries the
+rolling ledger and `docs/BLOCKERS.md` the remaining work.

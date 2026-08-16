@@ -7,52 +7,56 @@ SPEC F12 makes this folder a mandatory repository item and V13 asserts it is non
 ## ⚠ Read this first: what is actually in this folder
 
 **This folder contains a manifest and per-file sha256 hashes. It does not contain the restored
-`.npy` files themselves.** The outputs are published as a **GitHub Release asset** and are
-downloaded on demand.
+`.npy` files themselves.** The output archive is published as a **GitHub Release asset**
+(`artifacts-v1`), verified fetchable from a logged-out session before this document was
+written.
 
-That is said plainly, up front, because a "non-empty" folder that leaves a reviewer believing
-the outputs are committed would satisfy V13's letter and defeat its purpose.
-
-**Why.** 400 outputs at 256×256 float32 is ≈105 MB raw. Committing them — even compressed into
-a single `.npz` — would require loosening V51's 5 MB per-file and 25 MB total-tree caps, which
-were added one commit earlier specifically to stop a dataset-sized blob entering the tree.
+**Why not committed directly.** 400 outputs at 256×256 float32 is ≈91 MB archived. Committing
+them — even compressed into a single `.npz` — would require loosening V51's per-file and
+total-tree caps, which were added specifically to stop a dataset-sized blob entering the tree.
 Weakening a check because it is in the way is a stop signal, not a justification. Git LFS was
 ruled out separately: an unresolved LFS pointer stub on a fresh clone is a known way to fail
 V06, whose own text names that failure mode.
 
-A Release asset plus a published sha256 needs **no contract change at all** — it is exactly
-the mechanism V06 already permits for the model checkpoint. Full reasoning:
-`docs/decisions.md` D23 (superseding D17) and `docs/BLOCKERS.md` B9.
+A Release asset plus a published sha256 needs **no contract change at all** — it is exactly the
+mechanism V06 already permits for the model checkpoint. Full reasoning: `docs/decisions.md` D23
+(superseding D17) and `docs/BLOCKERS.md` B9.
 
 ---
 
-## Status — 2026-08-15, iteration 2
+## Status — 2026-08-16, reconciled (`docs/decisions.md` D49)
 
-**The outputs exist and are published.** All 400 were produced on 2026-08-15 by the shipped
-`inference.py` with **`--require_weights`**, so the bicubic fallback provably was not in play:
-the run log line reads `loaded weights/best.pt (ema weights)` and the flag turns a missing or
-unloadable checkpoint into a hard failure rather than a silent upsample. Machine-readable
-provenance is in `manifest.json`; per-file digests are in `sha256sums.txt`.
+**The outputs exist, are published, and have been generated from the shipped 28.7865 dB
+checkpoint.** This repo briefly diverged into two lines of work with two different checkpoints;
+these outputs were regenerated from the checkpoint that won the head-to-head re-score
+(`docs/decisions.md` D49), using the real `inference.py --require_weights` production
+entrypoint, not a re-implemented forward pass.
 
-`inference.py` falls back to a parameter-free bicubic ×2 upsample when the checkpoint is
-missing. **Bicubic fallback output must never be published in this folder** — that prohibition
-is now enforced in code, not just stated here: V56 fails if `manifest.json`'s recorded
-`command` does not contain `--require_weights`.
+Normal `inference.py` submission runs fail if the checkpoint is missing or cannot be loaded.
+The parameter-free bicubic baseline is available only through the explicit demo flag
+`--allow_bicubic_fallback` and must never be published in this folder. The run that produced
+these outputs used `--require_weights`, so a missing or unloadable checkpoint would have
+failed loudly.
 
 ## Provenance — what produced these outputs
 
 | field | value |
 |---|---|
-| Inputs | the **400 released test inputs**, `test_NoisyLR/000000.npy` … `000399.npy` |
-| Input properties | `.npy`, `float32`, 2-D `(128, 128)`, grayscale, values **not** clipped on input (observed range `[-0.28, 2.16]`) |
-| Outputs | 400 files, `.npy`, `float32`, `(256, 256)` — exactly 2× — clipped to `[0, 1]`, no renormalisation |
-| Filenames | **byte-identical** to the inputs; no suffix, no extension change |
-| Ground truth | **none exists.** The released test set ships inputs only, so no score can be computed against it locally. Every metric in this repository is measured on a held-out split of `train/` |
-| Checkpoint used | `weights/best.pt`, **EMA** weights, sha256 `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` (also in `weights/README.md`) |
-| Command used | `py -3.12 inference.py --input_dir C:/kla-data/test_NoisyLR --output_dir <out> --require_weights --verbose` |
-| Git SHA of the producing run | `c209cd213f6b4df0f5a6676a1671d5a8828a057c`, working tree clean |
-| Runtime | 400 images in **20.09 s** (19.9 img/s), `device=cuda precision=bf16 batch=32`, RTX 4060 Laptop; 0 unreadable inputs, 0 write errors |
-| Verified on reload | all 400 re-loaded from disk: `float32`, `ndim==2`, `(256, 256)`, all finite, observed global range exactly `[0.000000, 1.000000]`, filename set identical to the input set. **0 violations.** |
+| Inputs | the **400 released test inputs**, `C:\kla-data\test_NoisyLR\000000.npy` … `000399.npy` |
+| Input properties | `.npy`, `float32`, 2-D `(128, 128)`, grayscale |
+| Outputs | 400 files, `.npy`, `float32`, `(256, 256)` — exactly 2× — clipped to `[0, 1]` |
+| Filenames | **byte-identical** to the inputs; no suffix, no extension change (verified: `matching_input_exists = true` for all 400 rows) |
+| Ground truth | **none exists.** The released test set ships inputs only, so no score can be computed against it locally. Every metric below is measured on the held-out validation split of `train/` |
+| Checkpoint used | `weights/best.pt`, sha256 `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
+| Checkpoint validation metrics (disk-verified, full 400-pair val split — **not** a final-test score) | PSNR 28.7865 dB / SSIM 0.78287 / LPIPS 0.25324 |
+| Command used | `python inference.py --input_dir C:\kla-data\test_NoisyLR --output_dir <out> --require_weights --verbose` |
+| Runtime headline | See `results/runtime_report.md` — **NVIDIA GeForce RTX 4060 Laptop GPU**, not Mac CPU, not H100. |
+| Producing-run log | `loaded weights/best.pt (ema weights)` / `restored 400/400 in 25.08s (15.9 img/s) \| device=cuda precision=bf16 batch=32 shapes=[(128, 128)] weights=best unreadable=0 write_errors=0` |
+| Git SHA of the producing run | `4eeeb2e1e145fd25c3d61300a4de08e9932dcc82` (merge-reconciliation commit; checkpoint's own `git` key records its training-time SHA `80e7fb0…`) |
+
+**No PSNR/SSIM/LPIPS is computed on these 400 outputs.** The final test set has no ground
+truth, so no such score is possible; the 28.7865 dB / 0.78287 / 0.25324 figures above describe
+the checkpoint's validation-split performance, not this folder's outputs.
 
 **Filename collision hazard.** All 400 test filenames also exist under `train/`, referring to
 different images. Never key a cache, manifest or results structure on a bare filename — qualify
@@ -61,33 +65,25 @@ silently wrong results rather than an exception.
 
 ## Download and verify
 
-Releases page (live, returns HTTP 200): `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
+Releases page: `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
 
 | field | value |
 |---|---|
-| Release tag | `artifacts-v1` |
-| Asset name | `restored_test_outputs.zip` |
-| Asset URL | https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip |
-| sha256 of the asset | `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750` |
-| Asset size (bytes) | 91069597 |
-| File count inside | 400, flat at the archive root, no directory prefix |
+| Archive name | `restored_test_outputs.zip` |
+| Archive sha256 | `b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1` |
+| Archive size (bytes) | 90,990,452 |
+| File count inside | 400 |
+| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip` |
 
-**The digest is of the served bytes, not of the local copy.** The asset was re-fetched with
-`GITHUB_TOKEN` and `GH_TOKEN` cleared from the environment, so the fetch could not have
-succeeded on cached credentials: HTTP **200**, **91069597** bytes downloaded, and the sha256 of
-what the server returned equals the digest above. Reproduce it:
+Verified fetchable from a **logged-out** session (plain `urllib.request`, no auth header) with
+the sha256 above reproduced exactly before this README was written.
 
 ```
 curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip
-sha256sum restored_test_outputs.zip          # must equal the sha256 above
+sha256sum restored_test_outputs.zip   # must equal b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1
 ```
 
-These commands are recorded here rather than in the root `README.md`, where every fenced
-command is extracted and executed by V46 — a 91 MB download does not belong in a verification
-run.
-
-On Windows without `sha256sum`, either of these prints the same digest — both were run
-against a committed file in this repository to confirm the syntax, and they agree:
+On Windows without `sha256sum`, either of these prints the same digest:
 
 ```
 py -3.12 -c "import hashlib,pathlib,sys;print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())" restored_test_outputs.zip
@@ -96,31 +92,28 @@ powershell -Command "(Get-FileHash restored_test_outputs.zip -Algorithm SHA256).
 
 ## Manifest
 
-Two committed files let a reviewer verify the extracted archive file by file, without
-trusting the archive digest alone:
+`manifest.csv` in this directory lets a reviewer verify the extracted archive file by file,
+without trusting the archive digest alone. Header and first row:
 
-- **`manifest.json`** — machine-readable provenance. This is the file V56 reads. It carries
-  `release_url`, `archive_sha256`, `n_files`, `producing_git_sha`, `checkpoint_sha256` and the
-  exact `command`, plus the runtime and the on-reload validation result.
-- **`sha256sums.txt`** — 400 rows, `<sha256>  <filename>`, sorted by filename. After
-  extracting the archive, `sha256sum -c sha256sums.txt` checks every output individually.
+```
+filename,sha256,shape,dtype,min,max,finite,matching_input_exists
+000000.npy,<sha256>,"(256, 256)",float32,<min>,<max>,true,true
+```
 
-`manifest.csv` was the format originally sketched here; `manifest.json` shipped instead because
-V56 requires a machine-checkable JSON and explicitly rejects a `.csv`.
+Every row was measured on the file **reloaded from disk**, not the in-memory tensor: `float32`,
+shape `(256, 256)`, all-finite, `min >= 0.0`, `max <= 1.0`, and a matching input file confirmed
+present. All 400 rows satisfy every condition — verified with a NumPy scan of the on-disk
+outputs immediately after generation.
 
-Every row is asserted at generation time to satisfy the output contract in
-`docs/io_contract.md`: `float32`, `ndim == 2`, exactly 2× the corresponding input, no NaN, no
-Inf, `min >= 0.0`, `max <= 1.0` — measured on the file **reloaded from disk**, not on the
-in-memory tensor, so any dtype or quantisation loss is caught here rather than by KLA.
+`manifest.json` records archive-level provenance (checkpoint SHA, command, archive SHA/size,
+output contract), including the live `release_url`.
 
 ## Checklist before submission
 
 - [x] 400 outputs produced with `--require_weights` (no bicubic fallback in play)
 - [x] archive uploaded as a Release asset; URL fetched successfully from a **logged-out**
-      session — HTTP 200, 91069597 bytes, digest matched
-- [x] asset sha256 recorded above and in `weights/README.md`, matching the served bytes
-- [x] per-file hashes committed here — `sha256sums.txt`, 400 rows (as `manifest.json` +
-      `sha256sums.txt`, not `manifest.csv`; V56 requires JSON)
-- [x] every row satisfies the `docs/io_contract.md` contract, verified from disk — 400/400,
-      0 violations
+      session
+- [x] asset sha256 recorded in `manifest.json.release_url`, matching the served bytes
+- [x] `manifest.csv` committed here with 400 rows and per-file hashes
+- [x] every row satisfies the `docs/io_contract.md` contract, verified from disk
 - [x] this README updated so the "outputs do not exist yet" status no longer stands

@@ -174,3 +174,11 @@ Eager loading (71 ms for 400 files) beats every worker-pool `DataLoader` configu
 - Every number above is labelled with the device it was measured on: **NVIDIA GeForce RTX 4060 Laptop GPU**. No H100 number appears anywhere in this file.
 - Reproduce: `py -3.12 scripts/benchmark_runtime.py all` (each stage is independently resumable; already-completed configs are skipped on rerun).
 
+
+## Alternate (non-shipped) checkpoint's own runtime record
+
+A teammate's independently-developed checkpoint (closed-form LS5 + residual NAFSR, not shipped
+— see `docs/decisions.md` D48/D49) has its own runtime measurement on different hardware: 400
+images in 71.72 s (5.6 img/s), batch 32, fp32, **local Mac CPU** external-process benchmark. Not
+comparable to the RTX 4060 numbers above — different device, different checkpoint, kept
+separate per this file's own labelling discipline.

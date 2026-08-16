@@ -14,10 +14,38 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-16053fb1e64eed88e6d65a9dd491f9b1b18fabdc2c3e9e87613e9c6297d7a150  scripts/verify_all.py
+c0b71a9226357fd58f4b2e7c44b193672cc8458fb070c443208cfaf4cd64ca73  scripts/verify_all.py
 b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-16  V65's embedded OOM-probe script fixed to pass allow_bicubic_fallback=True,
+#             matching origin's inference.py semantic flip (require_weights -> the inverted
+#             allow_bicubic_fallback). Test-only change; inference.py's own behaviour and the
+#             property V65 verifies are both unchanged. See docs/decisions.md D51 point 3.
+#             prior pin: b774e2e124f26944283ac3e5f395b0b5c0c5e7832ca2b2147fe7eaacc9739909
+# 2026-08-16  V54 STRENGTHENED: a literal appearing ONLY as a comparison operand (a guard
+#             doing `if "test_noisylr" in x.lower():`) is exempt from the path-shaped rule,
+#             but ONLY if it is not ALSO passed to a filesystem call -- fs_literals is checked
+#             first and unconditionally, so a real violation is still caught even if the same
+#             literal happens to appear in a comparison too. Closes a false positive: the
+#             merge added a defensive F17 guard to train.py (_assert_never_touches_test_noisylr)
+#             that compares against this literal specifically to FORBID it, which V54's blunt
+#             substring scan read as a violation. Negative-controlled: a literal passed
+#             directly to open() is still flagged as `fs_literal` regardless of compare_only.
+#             See docs/decisions.md D50.
+#             prior pin: 92d0afd7210368b66f974dc977453da473522ab02302bc78f63e9f44cb0a0e4a
+# 2026-08-16  MERGE of origin/main (teammate shanmukh sai's line) into this session's line.
+#             docs/VERIFICATION_CONTRACT.md was untouched by origin (verified: byte-identical
+#             to the 9a0a4dd fork point on that branch) so this session's superset (V62
+#             strengthened, V63/V65 added, D43/D44/D46) survived the merge unchanged -- pin
+#             for that file is unchanged. scripts/verify_all.py combines both branches' prior,
+#             independently-justified strengthenings with no textual conflict: this session's
+#             V57/V58/V60/V61/V62/V63/V64/V65 plus origin's CHECKPOINT_BLOB_EXEMPTION addition
+#             to V51 (D48, one exact `weights/best.pt` path exemption, same mechanism this
+#             session's D15 already used for `sample_inputs/*.npy`). Net effect: strictly more
+#             checks, no check weakened, deleted, or skipped. See docs/decisions.md D49.
+#             prior pins (this session): 16053fb1e64eed88e6d65a9dd491f9b1b18fabdc2c3e9e87613e9c6297d7a150 (verify_all.py)
+#             prior pins (origin/main):   3b19876427809ed8b77f4ed53f620b9a7b8606813e518c1576d2d5350fba04d3 (verify_all.py)
 # 2026-08-16  V63 ADDED (proxy-OOD generalisation report, U-9) and V65 ADDED (real 256->512
 #             batch + genuinely-forced OOM-recovery). See docs/decisions.md D44, D46.
 # 2026-08-16  V62 STRENGTHENED: now observes the actual D/S/G call sequence (all 3! = 6
@@ -153,3 +181,7 @@ b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICAT
 #             temporarily removing the H4 fix: V64 correctly went red ("still exited 0"); fix
 #             restored byte-exact, V64 green again. See docs/decisions.md D39.
 #             prior pin: 001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf
+# 2026-08-16  STRENGTHENED V51 with one exact tracked-blob exemption for the mandatory
+#             `weights/best.pt` Route-A checkpoint. Every other `.pt` and dataset-like blob
+#             remains forbidden. See docs/decisions.md D41.
+#             prior pin: 2595f92d3131b67b20f0c4e588c982c7a4b24ece59e475bcf184cf20ec6c3818

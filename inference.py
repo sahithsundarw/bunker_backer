@@ -8,10 +8,10 @@ THE FILE KLA RUNS AS-IS. A crash here means the submission is unscored (CLAUDE.m
 Module-level imports are limited to EXACTLY the allowlist in CLAUDE.md STYLE:
     argparse os sys time pathlib concurrent.futures numpy torch
 NO image IO library. The dataset is .npy end to end. V23 (Tier 0) asserts this statically
-and caps `python -X importtime` at 3.0 s. Startup is ~85-95% of the scored wall-clock
-(docs/decisions.md D7), so every import costs real score. `src.model` and `src.io_utils`
-are imported lazily inside main() for the same reason -- and because `src` is not on V23's
-module-level allowlist.
+and caps `python -X importtime` at 3.0 s. The current external full-run benchmark measures
+1.38 s of process startup/import overhead, so every import still costs real score. `src.model`
+and `src.io_utils` are imported lazily inside main() for the same reason -- and because `src`
+is not on V23's module-level allowlist.
 
 Design notes that are deliberate and measured, not accidental:
 
@@ -117,9 +117,12 @@ def build_argparser() -> argparse.ArgumentParser:
                          "test set is 25 MB and worker spawn costs more (decisions.md D7)")
     ap.add_argument("--write_threads", type=int, default=0,
                     help="threaded .npy writers (0 = auto)")
+    ap.add_argument("--allow_bicubic_fallback", action="store_true",
+                    help="DEMO ONLY: allow bicubic outputs when the checkpoint or model "
+                         "path cannot be used")
     ap.add_argument("--require_weights", action="store_true",
-                    help="fail instead of falling back to the parameter-free upsampler when "
-                         "the checkpoint cannot be loaded")
+                    help="explicitly require model weights (the default submission behavior; "
+                         "overrides --allow_bicubic_fallback)")
     ap.add_argument("--verbose", action="store_true", help="one-line summary on stdout")
     return ap
 
@@ -220,14 +223,13 @@ def resolve_precision(requested: str, dev: torch.device) -> tuple[bool, torch.dt
 # Model
 # ======================================================================================
 class BicubicUpsampler(torch.nn.Module):
-    """Parameter-free 2x upsample, used only when no checkpoint can be loaded.
+    """Parameter-free 2x upsample for an explicitly requested demo fallback.
 
     Bicubic with antialias OFF is the measured inverse of the degradation kernel
-    (docs/decisions.md D1) and is the documented floor baseline (D3). Its purpose is that a
-    weights problem on KLA's machine degrades the score instead of zeroing it -- PD4: a
-    mediocre model with a flawless script scores, a great model with a broken script does
-    not. It runs in fp32 regardless of --precision: there is nothing to gain from bf16 on a
-    single interpolate, and staying fp32 keeps the fallback path bit-reproducible.
+    (docs/decisions.md D1) and is the documented floor baseline (D3). It is never selected
+    during normal submission inference: callers must pass --allow_bicubic_fallback. It runs
+    in fp32 regardless of --precision because there is nothing to gain from bf16 on a single
+    interpolate, and fp32 keeps the demo path bit-reproducible.
     """
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -237,17 +239,22 @@ class BicubicUpsampler(torch.nn.Module):
         )
 
 
-def load_net(weights: Path, dev: torch.device, verbose: bool) -> tuple[torch.nn.Module, bool]:
+def load_net(weights: Path, dev: torch.device, verbose: bool,
+             allow_bicubic_fallback: bool = False) -> tuple[torch.nn.Module, bool]:
     """Build the architecture from the checkpoint's own config and load its weights.
 
     Building via build_model(ckpt["config"]) means weights can never be paired with the
     wrong architecture. EMA weights are preferred when present and non-empty.
 
-    Returns (module, loaded_ok). Any failure is logged and falls back to BicubicUpsampler;
-    --require_weights turns that into a hard error instead.
+    Returns (module, loaded_ok). A checkpoint failure is fatal to normal submission
+    inference. Bicubic is returned only for the explicit demo fallback.
     """
     if not weights.is_file():
-        _err(f"checkpoint not found at {weights}; falling back to bicubic x{SCALE} upsample")
+        if allow_bicubic_fallback:
+            _err(f"checkpoint not found at {weights}; demo fallback enabled, using "
+                 f"bicubic x{SCALE} upsample")
+        else:
+            _err(f"checkpoint not found at {weights}; refusing to generate non-model outputs")
         return BicubicUpsampler(), False
     try:
         ckpt = torch.load(str(weights), map_location=dev, weights_only=True)
@@ -262,9 +269,12 @@ def load_net(weights: Path, dev: torch.device, verbose: bool) -> tuple[torch.nn.
         net.load_state_dict(state, strict=True)
         _say(verbose, f"loaded {weights} ({'ema' if ckpt.get('ema') else 'model'} weights)")
         return net, True
-    except Exception as exc:  # noqa: BLE001 - never let a weights problem abort the run
-        _err(f"could not load {weights} ({type(exc).__name__}: {_brief(exc)}); "
-             f"falling back to bicubic x{SCALE} upsample")
+    except Exception as exc:  # noqa: BLE001 - report one concise checkpoint diagnostic
+        detail = f"could not load {weights} ({type(exc).__name__}: {_brief(exc)})"
+        if allow_bicubic_fallback:
+            _err(f"{detail}; demo fallback enabled, using bicubic x{SCALE} upsample")
+        else:
+            _err(f"{detail}; refusing to generate non-model outputs")
         return BicubicUpsampler(), False
 
 
@@ -326,29 +336,18 @@ def _is_oom(exc: BaseException) -> bool:
         isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower())
 
 
-class _RequireWeightsViolation(RuntimeError):
-    """Raised only by infer_chunk's require_weights guard; caught narrowly in main() and
-    turned into a clean exit(1) rather than an uncaught traceback. Any OTHER exception from
-    this pipeline is deliberately left to propagate uncaught (CLAUDE.md PD4: a crash is
-    preferable to a silent wrong answer), so this type exists to avoid widening that net."""
+class _ModelOutputViolation(RuntimeError):
+    """Raised when strict submission inference would otherwise substitute bicubic output."""
 
 
 def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.device,
                 use_amp: bool, amp_dtype: torch.dtype, tta: bool,
-                require_weights: bool = False) -> np.ndarray:
+                allow_bicubic_fallback: bool = False) -> np.ndarray:
     """Run one same-shape batch and return a (B, 2H, 2W) float32 array, clipped to [0,1].
 
-    On CUDA OOM the batch is split and retried, and a single image that still will not fit
-    is degraded to a CPU bicubic upsample rather than aborting the run -- that fallback is a
-    genuine resource-exhaustion recovery and is not gated by ``require_weights``.
-
-    A shape-mismatched model output is different: it means a checkpoint LOADED successfully
-    (``weights_ok=True``) but does not actually implement the task -- a corrupt or
-    architecture-mismatched config, for instance. Silently substituting bicubic there would
-    let ``--require_weights`` be satisfied by a checkpoint whose predictions are never
-    actually used, while the run summary still reports ``weights=best`` (adversarial review
-    finding H1; this is exactly the failure V56's ``--require_weights`` requirement exists to
-    rule out for published results). Under ``require_weights`` this raises instead.
+    On CUDA OOM the batch is split and retried. A single image that still will not fit, or a
+    model output with the wrong shape, is a hard error unless the caller explicitly enabled
+    the demo-only bicubic fallback.
     """
     h, w = arrays[0].shape
     x = np.stack(arrays)[:, None]                      # B,1,H,W float32, unclipped
@@ -369,20 +368,25 @@ def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.devic
         if len(arrays) > 1:
             mid = len(arrays) // 2
             _err(f"CUDA OOM at batch {len(arrays)}; retrying in two halves")
-            a = infer_chunk(net, arrays[:mid], dev, use_amp, amp_dtype, tta, require_weights)
-            b = infer_chunk(net, arrays[mid:], dev, use_amp, amp_dtype, tta, require_weights)
+            a = infer_chunk(net, arrays[:mid], dev, use_amp, amp_dtype, tta,
+                            allow_bicubic_fallback)
+            b = infer_chunk(net, arrays[mid:], dev, use_amp, amp_dtype, tta,
+                            allow_bicubic_fallback)
             return np.concatenate([a, b], axis=0)
-        _err(f"CUDA OOM on a single {h}x{w} image; using CPU bicubic x{SCALE} for it")
+        if not allow_bicubic_fallback:
+            raise _ModelOutputViolation(
+                f"CUDA OOM on a single {h}x{w} image; refusing to substitute bicubic output"
+            ) from exc
+        _err(f"CUDA OOM on a single {h}x{w} image; demo fallback enabled, using CPU "
+             f"bicubic x{SCALE}")
         y = BicubicUpsampler()(torch.from_numpy(x))
     y = y.float()
     expect = (SCALE * h, SCALE * w)
     if tuple(y.shape[-2:]) != expect:
         msg = f"model returned {tuple(y.shape[-2:])} for a {h}x{w} input, expected {expect}"
-        if require_weights:
-            raise _RequireWeightsViolation(
-                f"{msg}; --require_weights forbids silently substituting bicubic for a "
-                f"loaded checkpoint's malformed output")
-        _err(f"{msg}; using bicubic x{SCALE} for this batch")
+        if not allow_bicubic_fallback:
+            raise _ModelOutputViolation(f"{msg}; refusing to substitute bicubic output")
+        _err(f"{msg}; demo fallback enabled, using bicubic x{SCALE} for this batch")
         y = BicubicUpsampler()(torch.from_numpy(x))
     y = y.clamp_(0.0, 1.0).contiguous()
     return y.detach().to("cpu").numpy()[:, 0]
@@ -428,9 +432,14 @@ def main(argv: list[str] | None = None) -> int:
     use_amp, amp_dtype, prec = resolve_precision(args.precision, dev)
     tune_backends(dev)
 
-    net, weights_ok = load_net(Path(args.weights), dev, verbose)
-    if args.require_weights and not weights_ok:
-        _err("--require_weights was given and the checkpoint could not be loaded")
+    allow_fallback = bool(args.allow_bicubic_fallback and not args.require_weights)
+    net, weights_ok = load_net(Path(args.weights), dev, verbose, allow_fallback)
+    if not weights_ok and not allow_fallback:
+        if args.require_weights:
+            _err("--require_weights was given and the checkpoint could not be loaded")
+        else:
+            _err("the default checkpoint is required for submission inference; "
+                 "--allow_bicubic_fallback is available only for explicit demo runs")
         return 1
     net.eval()
     net.to(dev)
@@ -493,8 +502,8 @@ def main(argv: list[str] | None = None) -> int:
                 chunk = batch_items[i:i + bs]
                 try:
                     y = infer_chunk(net, [a for _, a in chunk], dev, use_amp, amp_dtype,
-                                    args.tta, args.require_weights)
-                except _RequireWeightsViolation as exc:
+                                    args.tta, allow_fallback)
+                except _ModelOutputViolation as exc:
                     pool.shutdown(wait=True)
                     _err(str(exc))
                     return 1

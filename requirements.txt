@@ -47,9 +47,11 @@ opencv-python==5.0.0.93
 packaging==26.3
 pillow==12.3.0
 pyparsing==3.3.2
+pypdf==6.16.1
 python-dateutil==2.9.0.post0
 pytorch-msssim==1.0.0
 PyYAML==6.0.3
+reportlab==4.5.1
 scikit-image==0.26.0
 scipy==1.18.0
 setuptools==78.1.0

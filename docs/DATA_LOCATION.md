@@ -2,9 +2,26 @@
 
 ## Dataset root
 
+`src/dataset.py::resolve_data_root()` parses the **first fenced code block below** as its
+last-resort fallback path when neither `--data_root` nor `$KLA_DATA_ROOT` is passed — so that
+fence must be a bare path, nothing else. Do not put a shell command or anything other than the
+literal path in it, or every check that invokes `train.py`/`evaluate.py` without an explicit
+`--data_root` breaks (found the hard way post-merge, `docs/decisions.md` D51).
+
 ```
 C:\kla-data
 ```
+
+Dataset-dependent training and verifier checks on a different machine instead set
+`KLA_DATA_ROOT` explicitly — e.g. the measured Mac dataset lived at
+`/Users/shanmukhsai/Downloads` for a teammate's session:
+
+```bash
+KLA_DATA_ROOT=/path/to/dataset python scripts/verify_all.py --strict
+```
+
+The root must contain `train/GT` and `train/NoisyLR`. The released final-test inputs are under
+`NoisyLR` on the measured Mac and `test_NoisyLR` on the historical Windows extraction.
 
 Deliberately **outside** OneDrive and outside the repo. It is never committed, never synced,
 never copied into `C:\Users\sahit\OneDrive\Desktop\semi`.

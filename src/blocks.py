@@ -216,6 +216,7 @@ class NAFBlock(nn.Module):
         dw_expand: int = 2,
         ffn_expand: int = 2,
         layerscale_init: float = 1.0,
+        padding_mode: str = "zeros",
     ) -> None:
         super().__init__()
         dw_c = channels * dw_expand
@@ -230,7 +231,8 @@ class NAFBlock(nn.Module):
         self.norm1 = LayerNorm2d(channels)
         self.conv1 = nn.Conv2d(channels, dw_c, kernel_size=1, bias=True)
         self.dwconv = nn.Conv2d(
-            dw_c, dw_c, kernel_size=3, padding=1, groups=dw_c, bias=True
+            dw_c, dw_c, kernel_size=3, padding=1, groups=dw_c, bias=True,
+            padding_mode=str(padding_mode),
         )
         self.gate1 = SimpleGate()
         self.sca = SCA(dw_c // 2)
@@ -247,6 +249,10 @@ class NAFBlock(nn.Module):
         self.gamma = nn.Parameter(torch.full((1, channels, 1, 1), float(layerscale_init)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.training and not torch.is_grad_enabled():
+            if bool(torch.all(self.beta == 0).item()) and bool(torch.all(self.gamma == 0).item()):
+                return x
+
         y = self.norm1(x)
         y = self.conv1(y)
         y = self.dwconv(y)
@@ -270,14 +276,26 @@ class PixelShuffleHead(nn.Module):
     conv at HR resolution, which is the only HR-resolution work in the network.
     """
 
-    def __init__(self, channels: int, out_ch: int = 1, scale: int = 2) -> None:
+    def __init__(
+        self,
+        channels: int,
+        out_ch: int = 1,
+        scale: int = 2,
+        padding_mode: str = "zeros",
+    ) -> None:
         super().__init__()
         if scale < 1:
             raise ValueError(f"scale must be >= 1, got {scale}")
         self.scale = int(scale)
-        self.expand = nn.Conv2d(channels, channels * scale * scale, kernel_size=3, padding=1)
+        self.padding_mode = str(padding_mode)
+        self.expand = nn.Conv2d(
+            channels, channels * scale * scale, kernel_size=3, padding=1,
+            padding_mode=self.padding_mode,
+        )
         self.shuffle = nn.PixelShuffle(scale)
-        self.project = nn.Conv2d(channels, out_ch, kernel_size=3, padding=1)
+        self.project = nn.Conv2d(
+            channels, out_ch, kernel_size=3, padding=1, padding_mode=self.padding_mode
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.project(self.shuffle(self.expand(x)))

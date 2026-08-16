@@ -136,10 +136,19 @@ KLA's H100 sits idle, and the throughput score collapses with no error message a
 This is exactly the class of silent failure V04 exists to catch, and it would not have been
 caught by reading the file.
 
-**Resolution in flight:** torch/torchvision reinstalled from the cu128 index;
-`requirements.txt` must pin the index explicitly and `docs/ENVIRONMENT.md` must state the
-ordering hazard. Assigned to `docs-scribe` (owner of `requirements.txt`). Not yet verified
-end to end in a fresh venv — that is V04's job and V04 is still red.
+**Resolution:** `requirements.txt` pins the `+cu128` local version with an explicit
+`--extra-index-url` directive (see the file's header comment for the full mechanism).
+
+**Verified end to end, 2026-08-15** — but not by V04 on this particular dev machine, which is
+macOS/arm64 and has no `+cu128` wheel to install at all (that platform gap is itself the correct
+"loud failure" B8 describes, just triggered by the wrong platform rather than a silent
+downgrade). Independently verified on real Linux (`python:3.12-slim` Docker container): a fresh
+clone + fresh venv + bare `pip install -r requirements.txt` (no extra flags) installs exactly
+`torch==2.11.0+cu128` / `torchvision==0.26.0+cu128` with `torch.version.cuda == '12.8'`, and
+`python3 scripts/verify_all.py --strict --fresh-clone --only V04` / `--only V46` both PASS in
+that environment. Full evidence and commands logged in `docs/STATE.md` under "V04/V46
+fresh-clone dry run". The silent-CPU-downgrade failure mode B8 exists to catch has not
+reappeared since the index pin was added.
 
 ## B9 — RESOLVED 2026-08-15 by standing authorisation: GitHub Release + sha256
 
