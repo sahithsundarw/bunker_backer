@@ -1,0 +1,62 @@
+# THE ROUND-2 LONG RUN. Trains the sweep-chosen config (docs/decisions.md D55) on the
+# remaining ~7.2 GPU-hr / $18 of the HF Jobs A100 budget (docs/PLAN_CLOUD.md Step 4/§4).
+#
+# Config chosen: sweep_e (width=64, num_blocks=32, 1,170,945 base params + FiLM/uncertainty
+# heads). Won the Pareto sweep on LPIPS (best of all 6) and second-best PSNR/SSIM (within
+# 0.06 dB / 0.0007 of sweep_f, at under half sweep_f's parameters) -- see docs/decisions.md
+# D55 for the full frontier table and reasoning.
+#
+# total_iters set from MEASURED throughput, not guessed: sweep_e's own 2000-iter probe run
+# measured 375.71s wall-clock on an A100-large (docs/decisions.md D55) = 5.3233 iters/sec.
+# 7.2 GPU-hr (25,920s) at that rate is a theoretical max of 137,979 iters; 129,700 applies a
+# ~6% safety margin for validation/checkpoint-push overhead at this much longer horizon
+# (docs/PLAN_CLOUD.md's own stated policy: "the sweep's measured throughput, divided into the
+# remaining GPU-hours, sets the number" -- not pre-committed before the sweep existed).
+model:
+  name: NAFSR
+  width: 64
+  num_blocks: 32
+  scale: 2                # F2: exactly x2, verified on all 3200 pairs
+  in_ch: 1                # grayscale end to end, no BGR/RGB anywhere (V32)
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+  film_dim: 16          # Round-2 differentiator: FiLM noise-conditioning (docs/decisions.md D52)
+  uncertainty: true     # Round-2 differentiator: per-pixel log-variance head (D52)
+data:
+  lr_patch: 64            # -> 128 GT patch
+  batch_size: 32
+  synth_ratio: 0.5        # fraction generated on the fly from GT (SPEC F15)
+  # Degradation params are MEASURED, not from SPEC 6.4. See docs/decisions.md D12.
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253                 # shot / linear term
+    v: 0.015745                 # speckle / quadratic term
+    randomise_frac: 1.20        # widened +/-30% -> +/-120% to close F1 tail-coverage gap
+                                 # (measured synthetic max 2.0869 vs real train max 2.0735)
+    gauss_sigma_range: [0.0, 0.065]   # widened 0.02 -> 0.065, same F1 tail-coverage fix
+    clip_lr: false              # SPEC F5 -- never clip synthetic LR
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]       # NAFNet beta2=0.9, not 0.999
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 3000      # ~2.3% of total, matching final.yaml's 500/20000 (2.5%) fraction
+  total_iters: 129700     # MEASURED from sweep_e's throughput, see header -- not guessed
+loss:
+  weights:
+    uncertainty: 0.01   # small aux weight, same precedent as the LPIPS term (SPEC 8)
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 2000         # ~65 validation points across the run; scaled up from the sweep's
+                          # 500 so periodic validation overhead stays proportionally similar
+  save_best_on: psnr

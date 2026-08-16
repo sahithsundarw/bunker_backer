@@ -2677,3 +2677,54 @@ would need its own measurement if pursued. Also worth trying, not yet done: dyna
 quantization limited to the FiLM/`NoiseEstimator` `nn.Linear` layers specifically (a much
 smaller, targeted change, unlikely to move the needle given how few FLOPs they represent, but
 cheap to check if time remains).
+
+## D55 — Pareto sweep results (HF Jobs, A100-large): config `e` (w64n32) chosen for the long run
+
+**Date:** 2026-08-16/17. HF Jobs sweep dispatched per `docs/PLAN_PHASE2.md` §5 item 1, FiLM+
+uncertainty enabled per D52's gate. Job `6a821471c97db76cbdf3346c`, `windows-session` branch
+(main branch reconciliation with the teammate's second round of commits, `87af55c..f843e0b`,
+is a separate, non-urgent task — deliberately not repeated under time pressure a second time
+this session; see the git history for that pending work). All 6 configs completed cleanly
+(exit 0), checkpoints pushed to `Team-Ceciroleo67/kla-ps01-checkpoints`.
+
+**Full frontier, 2000 iters each, A100-large, full 400-image committed val split:**
+
+| config | width×blocks | params | PSNR dB | SSIM | LPIPS | train wall-clock |
+|---|---|---|---|---|---|---|
+| `sweep_a` | 32×16 | 238,194 | 28.2313 | 0.75505 | 0.28714 | — |
+| `sweep_b` | 48×16 | 502,978 | 28.3143 | 0.75985 | 0.28421 | — |
+| `sweep_c` | 64×16 | 866,578 | 28.3956 | 0.76298 | 0.27974 | — |
+| `sweep_d` | 48×32 | 812,482 | 28.3580 | 0.76150 | 0.28012 | — |
+| `sweep_e` | 64×32 | 1,393,938 | 28.4398 | 0.76655 | **0.27307** | 375.71 s |
+| `sweep_f` | 96×32 | 3,025,330 | **28.5007** | **0.76723** | 0.27859 | 490.85 s |
+
+**Width beats depth at matched params, confirmed again on this architecture:** `sweep_d`
+(more blocks, width 48) scores *below* `sweep_c` (more width, same depth as `sweep_b`) despite
+comparable parameter counts (812K vs 867K) — the same conclusion D21's profiling already
+reached (LayerNorm/bias-add/conv dominate forward time, none of it FLOP-bound), now confirmed
+by an actual quality measurement rather than just a throughput one.
+
+**`sweep_f` wins PSNR/SSIM but loses LPIPS to `sweep_e` despite 2.2× the parameters** —
+non-uniform, diminishing returns past ~1.4M params. The entire frontier spans only ~0.27 dB
+PSNR from smallest (238K) to largest (3.03M) config.
+
+**Decision (user, explicit): config `e` (width=64, num_blocks=32, 1.39M params) carries into
+the long run.** Best LPIPS of all six configs, second-best PSNR/SSIM (within 0.06 dB / 0.0007
+of `sweep_f`), under half `sweep_f`'s parameter count, and comfortably inside SPEC §7.1's
+originally-suggested 1–3M parameter band without chasing `sweep_f`'s weaker cost/benefit tail.
+
+**Long run config** (`configs/long_run_e.yaml`): `total_iters` set from `sweep_e`'s own
+measured throughput — 375.71 s / 2000 iters = 5.3233 iters/sec on A100-large. 7.2 GPU-hr
+(25,920 s, the 60% budget tier, `docs/PLAN_CLOUD.md` §4) at that rate is a theoretical max of
+137,979 iters; **129,700** applies a ~6% safety margin for validation/checkpoint-push overhead
+at a much longer horizon than the 2000-iter probe measured it on. Not pre-committed before the
+sweep existed, per this project's own standing rule against projecting an unmeasured number.
+
+**Gap, stated honestly:** the sweep measured training-time quality and wall-clock, not a
+separate A100 *inference*-throughput benchmark per config. Given D21's memory-bandwidth-bound
+finding, this is not expected to reorder the ranking, but it was not measured, so it is not
+claimed as measured.
+
+**Submittable state tagged before this run starts**, per the standing constraint: git tag
+`v0.1-submittable` on the `windows-session` branch tip (commit `61fb26b`), pushed to origin —
+a known-good, fully-verified state exists independent of whether the long run finishes.
