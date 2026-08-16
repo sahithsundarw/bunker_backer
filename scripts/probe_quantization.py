@@ -3,10 +3,13 @@
 python scripts/probe_quantization.py C:\\kla-data
 """
 
+import argparse
 import os
 import sys
 
 import numpy as np
+
+from dataset_paths import default_dataset_root, resolve_test_input_dir
 
 
 def grid_test(a, levels):
@@ -44,7 +47,7 @@ def folder_stats(d, files, n=300):
 def main(root):
     gt = os.path.join(root, "train", "GT")
     lr = os.path.join(root, "train", "NoisyLR")
-    te = os.path.join(root, "test_NoisyLR")
+    te = str(resolve_test_input_dir(root))
 
     print("=" * 78)
     print("A. QUANTISATION GRID TEST  (fraction of values on a k/L grid)")
@@ -112,4 +115,7 @@ def main(root):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "C:\\kla-data"))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("root", nargs="?", default=str(default_dataset_root()))
+    cli = parser.parse_args()
+    sys.exit(main(cli.root))

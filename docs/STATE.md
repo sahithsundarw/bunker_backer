@@ -1,5 +1,18 @@
 # STATE
 
+> **Current release status (2026-08-16):** final hardening supersedes the historical log below.
+> Tracked `weights/best.pt` is NAFSR w48/n16, SHA256
+> `cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054`, with validation
+> 28.7864 PSNR / 0.78286 SSIM / 0.25323 LPIPS. The 400-output archive is public at release tag
+> `artifacts-v1`, SHA256
+> `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`.
+> The runtime headline is the local Mac CPU external-process result, 106.43 s for 400 images.
+> No final-test quality metric or H100 runtime is claimed. Run `scripts/verify_all.py`; do not
+> treat an ignored local `results/verification_report.json` as authoritative.
+
+The remaining entries are an append-only engineering history and may describe checkpoints or
+blockers that were current at the time but are now superseded.
+
 ---
 
 # ⚠ CURRENT — branch `codex/residual-ls5-refinement` (2026-08-15)

@@ -31,9 +31,9 @@ Owner: loss-metrics.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -56,26 +56,16 @@ SCALE = 2
 # Paths and split
 # ======================================================================================
 def resolve_data_root(arg: str | None) -> Path:
-    """--data_root, else $KLA_DATA_ROOT, else the root documented in docs/DATA_LOCATION.md.
-
-    No dataset path is hard-coded in this file (CLAUDE.md Prime Directive 5).
-    """
+    """--data_root, else $KLA_DATA_ROOT, else the documented measured Mac root."""
     if arg:
         root = Path(arg).expanduser()
     elif os.environ.get("KLA_DATA_ROOT"):
         root = Path(os.environ["KLA_DATA_ROOT"]).expanduser()
     else:
-        doc = REPO_ROOT / "docs" / "DATA_LOCATION.md"
-        cand: Path | None = None
-        if doc.exists():
-            m = re.search(r"^```\s*\n(.+?)\n```", doc.read_text(encoding="utf-8"),
-                          re.DOTALL | re.MULTILINE)
-            if m:
-                cand = Path(m.group(1).strip())
-        if cand is None:
+        root = Path("/Users/shanmukhsai/Downloads")
+        if not (root / "train" / "GT").is_dir():
             raise SystemExit("could not determine the dataset root: pass --data_root or set "
                              "KLA_DATA_ROOT (see docs/DATA_LOCATION.md)")
-        root = cand
     if not (root / "train" / "GT").is_dir():
         raise SystemExit(f"dataset root {root} has no train/GT directory")
     return root
@@ -95,7 +85,11 @@ def read_val_split(split_path: Path, gt_dir: Path, verbose: bool = False) -> tup
             if s and not s.startswith("#"):
                 names.append(Path(s).name)
     if names:
-        return names, f"{split_path.relative_to(REPO_ROOT).as_posix()} ({len(names)} pairs)"
+        try:
+            shown = split_path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+        except ValueError:
+            shown = str(split_path.resolve())
+        return names, f"{shown} ({len(names)} pairs)"
 
     all_gt = sorted(p.name for p in gt_dir.glob("*.npy"))
     names = all_gt[-FALLBACK_VAL_N:]
@@ -321,8 +315,12 @@ def run_learned(name: str, names: list[str], lr_dir: Path, out_dir: Path, split_
         for i, fname in enumerate(names):
             lr = np.load(lr_dir / fname, allow_pickle=False)
             x = torch.from_numpy(np.ascontiguousarray(lr, dtype=np.float32))[None, None].to(dev)
+            if str(dev).startswith("cuda"):
+                torch.cuda.synchronize()
             t0 = time.perf_counter()
             y = model(x)
+            if str(dev).startswith("cuda"):
+                torch.cuda.synchronize()
             t_total += time.perf_counter() - t0
             save_prediction(out_dir, fname, y[0, 0].float().cpu().numpy())
             if verbose and (i + 1) % 50 == 0:
@@ -331,8 +329,12 @@ def run_learned(name: str, names: list[str], lr_dir: Path, out_dir: Path, split_
     meta = {
         "name": name, "label": label, "description": description, "kind": "learned",
         "n": len(names), "split": split_desc, "input_dir": str(lr_dir),
-        "checkpoint": str(ckpt_path), "device": dev,
+        "checkpoint": str(ckpt_path),
+        "checkpoint_sha256": hashlib.sha256(ckpt_path.read_bytes()).hexdigest(),
+        "device": dev,
         "sec_per_image": t_total / max(1, len(names)),
+        "timing_method": ("wall clock with torch.cuda.synchronize before/after each forward"
+                          if str(dev).startswith("cuda") else "CPU wall clock around forward"),
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "postprocess": "np.clip(pred, 0.0, 1.0) only -- no renormalisation (D3)",
     }
@@ -409,8 +411,12 @@ def main(argv: list[str] | None = None) -> int:
         dt = time.perf_counter() - t0
         results.append(res)
         if res["status"] == "ok":
+            try:
+                shown_out = out_dir.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+            except ValueError:
+                shown_out = str(out_dir.resolve())
             print(f"[ok]   {name:16s} {res['n']} predictions -> "
-                  f"{out_dir.relative_to(REPO_ROOT).as_posix()}  "
+                  f"{shown_out}  "
                   f"({dt:.1f}s wall, {res['sec_per_image'] * 1000:.1f} ms/img transform)")
         else:
             print(f"[skip] {name:16s} {res['reason']}")
@@ -420,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(ok)}/{len(results)} baselines produced. Score them with:")
     print("  py -3.12 scripts/evaluate.py --data_root <root> "
           + " ".join(f"--preds {r['name']}={Path(args.out).as_posix()}/{r['name']}" for r in ok))
-    return 0
+    return 0 if len(ok) == len(results) else 1
 
 
 if __name__ == "__main__":

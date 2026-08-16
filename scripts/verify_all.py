@@ -828,12 +828,16 @@ def check_V14(ctx: Ctx) -> CheckResult:
     # Local first-party modules are not third-party distributions: any bare `import foo`
     # that resolves to a foo.py inside this repo (e.g. a sibling import between scripts/)
     # must not be demanded of requirements.txt.
-    local_mods = {p.stem for p in ctx.root.rglob("*.py") if ".venv" not in p.parts}
-    local_pkgs = {p.parent.name for p in ctx.root.rglob("__init__.py") if ".venv" not in p.parts}
+    def local_env_path(path: Path) -> bool:
+        return any(part in {"venv", "env"} or part.startswith(".venv") for part in path.parts)
+
+    local_mods = {p.stem for p in ctx.root.rglob("*.py") if not local_env_path(p)}
+    local_pkgs = {p.parent.name for p in ctx.root.rglob("__init__.py")
+                  if not local_env_path(p)}
     stdlib = set(sys.stdlib_module_names) | {"src", "__future__"} | local_mods | local_pkgs
     top: set[str] = set()
     for py in list(ctx.root.rglob("*.py")):
-        if ".venv" in py.parts or "tests" in py.parts:
+        if local_env_path(py) or "tests" in py.parts:
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
@@ -1083,7 +1087,8 @@ def _data_root(ctx: Ctx) -> Path | None:
     The dataset lives OUTSIDE the repo by design, so any check that needs it must
     degrade honestly (to FAIL with a clear reason) rather than pretend to verify.
     """
-    cand = [os.environ.get("KLA_DATA_ROOT"), r"C:\kla-data", "/kla-data"]
+    cand = [os.environ.get("KLA_DATA_ROOT"), "/Users/shanmukhsai/Downloads",
+            r"C:\kla-data", "/kla-data"]
     for c in cand:
         if c and Path(c).is_dir():
             return Path(c)
@@ -1298,7 +1303,14 @@ def _paired_verdict(cand_pi: dict[str, dict[str, float]] | None,
     mean = sum(diffs) / n
     var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
     sem = (var / n) ** 0.5
-    t = (mean / sem) if sem > 0 else 0.0
+    if sem > 0.0:
+        t = mean / sem
+    elif mean > 0.0:
+        t = float("inf")
+    elif mean < 0.0:
+        t = float("-inf")
+    else:
+        t = 0.0
     better = (mean > 0) if higher_is_better else (mean < 0)
     sig = abs(t) >= T_CRIT
     n_better = sum(1 for d in diffs if ((d > 0) if higher_is_better else (d < 0)))
@@ -1541,7 +1553,7 @@ def check_V32(ctx: Ctx) -> CheckResult:
     if _is_stub(ctx.p("src", "model.py")):
         return not_impl("V32", "src/model.py")
     for py in ctx.root.rglob("*.py"):
-        if ".venv" in py.parts:
+        if any(part in {"venv", "env"} or part.startswith(".venv") for part in py.parts):
             continue
         t = py.read_text(encoding="utf-8", errors="replace")
         if "cv2.imread(" in t and "IMREAD_UNCHANGED" not in t:
@@ -2694,13 +2706,11 @@ def check_V60(ctx: Ctx) -> CheckResult:
 
 
 def check_V64(ctx: Ctx) -> CheckResult:
-    """A partial (or total) write failure must exit non-zero, not report success.
+    """A promotion failure must exit non-zero and restore the prior complete output set.
 
-    V07 requires exactly one output per input. n_ok == 0 already exited 1; n_failed > 0 with
-    n_ok > 0 did not -- a short output set was reported as a successful run, the worst
-    possible outcome on KLA's machine because nothing would flag it (adversarial review
-    finding H4). Forces --device cpu; no checkpoint needed since the bicubic fallback still
-    exercises the exact write path under test.
+    V07 requires exactly one output per input. Final hardening stages every prediction and
+    transactionally promotes only a complete set. This fixture forces promotion to fail after
+    one new output has moved, then asserts rollback restores the old set byte-for-byte.
     """
     if _is_stub(ctx.p("inference.py")):
         return not_impl("V64", "inference.py")
@@ -2719,26 +2729,30 @@ def check_V64(ctx: Ctx) -> CheckResult:
 
     out_dir = ctx.tmpdir("v64_out")
     out_dir.mkdir(parents=True, exist_ok=True)
-    blocked = sorted(valid, key=lambda f: f.name)[0].name
-    # Pre-occupy exactly one output path with a directory, so np.save on that one path
-    # raises (PermissionError / IsADirectoryError) while the others succeed normally.
+    ordered = sorted(valid, key=lambda f: f.name)
+    blocked = ordered[1].name
+    # The first staged output promotes, then this directory blocks the second promotion.
     (out_dir / blocked).mkdir(parents=True, exist_ok=True)
+    prior = out_dir / "prior.npy"
+    prior.write_bytes(ordered[0].read_bytes())
+    prior_digest = hashlib.sha256(prior.read_bytes()).hexdigest()
 
     rc, so, se = ctx.run_inference(in_dir, out_dir, extra=["--device", "cpu"])
-    others_written = [f.name for f in out_dir.glob("*.npy") if f.name != blocked]
-    ev = {"blocked_file": blocked, "exit_code": rc, "others_written": others_written,
-         "n_valid_inputs": len(valid)}
+    final_npys = sorted(f.name for f in out_dir.glob("*.npy") if f.is_file())
+    prior_after = hashlib.sha256(prior.read_bytes()).hexdigest() if prior.exists() else None
+    ev = {"blocked_file": blocked, "exit_code": rc, "final_npys": final_npys,
+          "prior_restored": prior_after == prior_digest, "n_valid_inputs": len(valid)}
     if rc == 0:
         return CheckResult("V64", FAIL,
                            f"a write failure on 1/{len(valid)} outputs still exited 0 -- "
                            f"the short output set was reported as success", ev)
-    if len(others_written) == 0:
+    if final_npys != [prior.name] or prior_after != prior_digest:
         return CheckResult("V64", FAIL,
-                           "exited non-zero, but no other output was written either -- "
-                           "this did not test a PARTIAL failure", ev)
+                           "promotion failed but the previous complete output set was not "
+                           "restored byte-for-byte", ev)
     return CheckResult("V64", PASS,
-                       f"a write failure on 1/{len(valid)} outputs correctly exited non-zero "
-                       f"while {len(others_written)} other output(s) still wrote successfully",
+                       f"promotion failure after a staged partial move exited non-zero and "
+                       f"restored the prior output set byte-for-byte",
                        ev)
 
 

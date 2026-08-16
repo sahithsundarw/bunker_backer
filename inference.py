@@ -45,11 +45,11 @@ import torch
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_WEIGHTS = SCRIPT_DIR / "weights" / "best.pt"
 
-#: Permissive glob per SPEC 11.1. Only the .npy branch is decodable -- the uint8/uint16
-#: rescaling branches of the SPEC 11.3 skeleton are deleted rather than left unreachable,
-#: because code that divides by 255 must not sit next to data that reaches 2.16
-#: (docs/SPEC_ADDENDUM.md section 5). A non-.npy file is reported on stderr, not guessed at.
-EXTS = {".npy", ".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"}
+#: The released data and the output contract are NumPy arrays end to end. Common raster image
+#: extensions are detected separately and rejected before inference instead of being advertised
+#: as inputs and then silently skipped.
+EXTS = {".npy"}
+UNSUPPORTED_IMAGE_EXTS = {".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"}
 
 #: Fixed by the task: output is exactly 2x the input in both spatial axes.
 SCALE = 2
@@ -393,14 +393,24 @@ def main(argv: list[str] | None = None) -> int:
         _err(f"--output_dir ({out_resolved}) is --input_dir or nested inside it; use a "
              f"separate directory for --output_dir")
         return 1
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     # Lazy, script-relative import: keeps `src` off V23's module-level allowlist and keeps
     # `--help` cheap. sys.path[0] is already SCRIPT_DIR when run as a script; this makes the
     # import work when main() is called in-process from another CWD as well.
     if str(SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPT_DIR))
     from src.io_utils import list_inputs, load_array, mirror_path, save_array
+
+    unsupported = sorted(
+        (p for p in in_dir.rglob("*")
+         if p.is_file() and p.suffix.lower() in UNSUPPORTED_IMAGE_EXTS),
+        key=lambda p: p.relative_to(in_dir).as_posix(),
+    )
+    if unsupported:
+        shown = ", ".join(str(p.relative_to(in_dir)) for p in unsupported[:5])
+        _err("unsupported raster image input(s): " + shown
+             + (" [...]" if len(unsupported) > 5 else "")
+             + "; this submission accepts only .npy arrays")
+        return 1
 
     files = list_inputs(in_dir, EXTS)
     if not files:
@@ -424,14 +434,17 @@ def main(argv: list[str] | None = None) -> int:
     net.to(dev)
     net.to(memory_format=torch.channels_last)
 
+    # Stage the complete run outside the destination. Existing outputs remain intact if model
+    # execution or any write fails; only a fully written set is promoted below.
+    import shutil
+    import tempfile
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    stage_dir = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.stage-", dir=str(out_dir.parent)))
+
     # ---- eager load, then group by shape (SPEC 7.3; 25 MB fits trivially in RAM) ----
     items: list[tuple[Path, np.ndarray]] = []
     unreadable: list[Path] = []
     for p in files:
-        if p.suffix.lower() != ".npy":
-            _err(f"skipping {p}: only .npy is decodable; this pipeline imports no image "
-                 f"library by design (docs/io_contract.md)")
-            continue
         try:
             items.append((p, load_array(p)))
         except Exception as exc:  # noqa: BLE001 - one bad file must not abort the run (V20)
@@ -470,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
         ph = np.full((SCALE * modal[0], SCALE * modal[1]), PLACEHOLDER_VALUE, dtype=np.float32)
         _err(f"writing a flat {PLACEHOLDER_VALUE} placeholder for {p.name} "
              f"at {ph.shape} (2x the modal input shape {modal})")
-        futures.append(pool.submit(save_array, mirror_path(in_dir, out_dir, p), ph))
+        futures.append(pool.submit(save_array, mirror_path(in_dir, stage_dir, p), ph))
         n_written += 1
 
     bs = max(1, int(args.batch_size))
@@ -484,12 +497,13 @@ def main(argv: list[str] | None = None) -> int:
                                     args.tta, allow_fallback)
                 except _ModelOutputViolation as exc:
                     pool.shutdown(wait=True)
+                    shutil.rmtree(stage_dir, ignore_errors=True)
                     _err(str(exc))
                     return 1
                 for (src, _), out in zip(chunk, y):
                     if not np.isfinite(out).all():
                         _err(f"non-finite prediction for {src.name}; neutralised on write")
-                    futures.append(pool.submit(save_array, mirror_path(in_dir, out_dir, src),
+                    futures.append(pool.submit(save_array, mirror_path(in_dir, stage_dir, src),
                                                out))
                     n_written += 1
 
@@ -509,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         # masquerade as success -- exit 0 with an empty output dir is the worst possible
         # outcome on KLA's machine, because nothing would flag it.
         _err(f"produced no outputs for {len(files)} discovered input file(s) in {dt:.2f}s")
+        shutil.rmtree(stage_dir, ignore_errors=True)
         return 1
     if n_failed > 0:
         # V07 requires exactly one output per input; a WRITE failure (disk full, quota,
@@ -518,7 +533,61 @@ def main(argv: list[str] | None = None) -> int:
         # finding H4 identified.
         _err(f"{n_failed} of {n_written} outputs failed to write ({n_ok}/{len(files)} usable, "
              f"{dt:.2f}s); exiting non-zero because the output set is incomplete")
+        shutil.rmtree(stage_dir, ignore_errors=True)
         return 1
+
+    expected = {p.relative_to(in_dir) for p in files}
+    staged = {p.relative_to(stage_dir) for p in stage_dir.rglob("*.npy") if p.is_file()}
+    if staged != expected:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        _err(f"staged output set mismatch: expected {len(expected)}, found {len(staged)}")
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir = stage_dir / "__previous_outputs__"
+    moved_previous: list[Path] = []
+    promoted: list[Path] = []
+    try:
+        # Every .npy beneath an inference output directory belongs to this contract. Move the
+        # complete prior set aside first; if any promotion fails, it can be restored exactly.
+        # Unrelated non-.npy files and directories are never touched.
+        for old in sorted((p for p in out_dir.rglob("*.npy") if p.is_file()),
+                          key=lambda p: p.relative_to(out_dir).as_posix()):
+            rel = old.relative_to(out_dir)
+            saved = backup_dir / rel
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(old, saved)
+            moved_previous.append(rel)
+        for rel in sorted(expected, key=lambda p: p.as_posix()):
+            dest = out_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(stage_dir / rel, dest)
+            promoted.append(rel)
+    except BaseException as exc:
+        for rel in promoted:
+            dest = out_dir / rel
+            if dest.is_file():
+                dest.unlink()
+        for rel in moved_previous:
+            saved = backup_dir / rel
+            if saved.is_file():
+                dest = out_dir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(saved, dest)
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        _err(f"could not promote staged output set; previous outputs restored: "
+             f"{type(exc).__name__}: {exc}")
+        return 130 if isinstance(exc, KeyboardInterrupt) else 1
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+
+    actual = {p.relative_to(out_dir) for p in out_dir.rglob("*.npy") if p.is_file()}
+    if actual != expected:
+        _err(f"final output set mismatch: expected {len(expected)}, found {len(actual)}")
+        return 1
+    # The reported main-pipeline timer includes staged writes, promotion, stale-output
+    # reconciliation, and the final exact-set scan. External benchmarking adds process startup.
+    dt = time.perf_counter() - t_start
     _say(verbose,
          f"restored {n_written - n_failed}/{len(files)} in {dt:.2f}s "
          f"({(n_written - n_failed) / max(dt, 1e-9):.1f} img/s) | device={dev.type} "

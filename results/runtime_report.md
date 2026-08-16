@@ -2,62 +2,63 @@
 
 ## Runtime headline
 
-**Local Mac CPU external-process benchmark: 400 images in 71.72 s (5.6 img/s), batch size 32,
-fp32.** This is the repository's single headline runtime measurement. It was measured on
-2026-08-16 by `scripts/benchmark_runtime.py`, which timed process creation through exit.
-
-## Headline measurement
+**Local Mac CPU external-process benchmark: 400 images in 106.43 s (3.8 img/s), batch size
+32, fp32.** This is the repository's single headline measurement. It was generated on
+2026-08-16 by `scripts/benchmark_runtime.py` after final output-staging hardening.
 
 | Field | Value |
 |---|---|
-| Device | Apple Silicon Mac CPU (`arm64`), macOS 26.6.1 |
 | Runtime label | **Local Mac CPU external-process benchmark** |
-| Timing scope | external subprocess timer, process creation through exit |
-| Image count | 400 |
-| Total end-to-end wall-clock | 71.72 s (one measured run) |
-| Throughput | 5.6 img/s |
-| Batch size | 32 |
-| Precision | fp32 |
+| Device | macOS 26.6.1 arm64 / inference device `cpu` |
+| End-to-end wall clock | 106.43 s, one measured run |
+| Throughput | 3.8 img/s |
+| Images | 400 |
+| Batch / precision | 32 / fp32 |
 | Torch | 2.13.0 |
-| Main pipeline, including model load, IO, compute, transfers, and writes | 70.34 s |
-| Process startup/import overhead | 1.38 s |
+| Main pipeline | 105.09 s |
+| Process startup and imports | 1.34 s |
 | Checkpoint | `weights/best.pt` |
-| Checkpoint SHA256 | `37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7` |
-| Checkpoint size | 2,068,091 bytes (1.97 MiB) |
-| Total parameter count | 246,529 (84,049 frozen + 162,480 trainable) |
-| Trainable parameter count | 162,480 |
+| Checkpoint SHA256 | `cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054` |
+| Checkpoint size | 3,291,621 bytes |
+| Model | NAFSR, 388,225 parameters |
 
-Benchmark command:
+The external timer starts immediately before process creation and ends after process exit. It
+includes interpreter startup, imports, checkpoint load, disk reads, preprocessing, CPU/device
+movement, model execution, post-processing, atomic writes, staging reconciliation, and final
+output validation. The main-pipeline number comes from `inference.py` only to show startup
+overhead; it is not substituted for the external headline.
+
+**Total end-to-end wall-clock** is the headline value above. The 105.09 s versus 1.34 s rows
+provide the required **startup-vs-compute breakdown**; model load and IO remain inside the main
+pipeline rather than being mislabeled as pure compute.
+
+Reproduce on the measured dataset:
 
 ```bash
 python scripts/benchmark_runtime.py \
   --input_dir /Users/shanmukhsai/Downloads/NoisyLR \
-  --out /tmp/kla-runtime-full-20260816.md \
+  --out /tmp/kla-runtime.md \
   --repeats 1 \
   --device cpu \
   --precision fp32
 ```
 
-Raw harness output:
+Raw harness output: `repeat 1/1: 106.43s external, 105.09s main pipeline`.
 
-```
-repeat 1/1: 71.72s external, 70.34s main pipeline
-```
+## Other Labeled Runs
 
-The external timing window includes interpreter startup, imports, checkpoint loading, input
-reads, CPU-to-device transfers, model execution, device-to-CPU transfers, clipping, and output
-writes. The main-pipeline number is parsed from `inference.py` only to estimate startup/import
-overhead; it is not substituted for the external headline.
+**Release-output generation on NVIDIA RTX 4060 Laptop CUDA:** the historical run that
+produced the published 400-file archive reported 20.09 s (19.9 img/s), batch size 32, bf16,
+from `inference.py`'s internal main-pipeline timer. It is provenance for those release bytes,
+not the runtime headline and not an external-process benchmark.
 
-## Other explicitly labeled runs
+**Linux/CUDA fresh clone:** dependency installation, checkpoint loading, and inference
+compatibility passed in the recorded CUDA 12.8 environment. No Linux/CUDA wall-clock runtime
+was measured in the final hardening run.
 
-**Release-output generation / local Mac CPU:** the earlier run that produced the archived
-outputs reported 56.73 s (7.1 img/s) from `inference.py`'s internal `main()` timer. It excludes
-interpreter and module-import startup and is provenance for those output bytes, not the runtime
-headline.
+**Not claimed:** no H100 or competition-server runtime has been measured. CUDA timing in
+`scripts/make_baselines.py` synchronizes immediately before and after each model forward;
+CPU timing is separately labeled as CPU wall clock.
 
-**Linux/CUDA fresh clone:** V04/V46 passed in a `python:3.12-slim` container with the pinned
-CUDA 12.8 packages. That was a compatibility check; no Linux/CUDA or H100 runtime was measured.
-
-The final test set has no ground truth. Runtime and throughput are reported for it; PSNR, SSIM,
-and LPIPS are not.
+The released final test set has no ground truth. Runtime is reported for it; no final-test
+PSNR, SSIM, or LPIPS is claimed.

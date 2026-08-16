@@ -1,58 +1,72 @@
 {
-  "checkpoint_sha256": "37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7",
-  "checkpoint_val_psnr_db": 28.0394,
-  "checkpoint_val_ssim": 0.74804,
-  "checkpoint_val_lpips": 0.29571,
+  "checkpoint": "weights/best.pt",
+  "checkpoint_sha256": "cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054",
+  "checkpoint_metrics": {
+    "val_psnr": 28.785068914429882,
+    "val_psnr_std": 4.53241375648352,
+    "val_ssim": 0.7827850579636485,
+    "val_ssim_std": 0.14168765176910125,
+    "val_lpips": 0.2523282776819542,
+    "val_lpips_std": 0.13150578916016104,
+    "val_n": 400,
+    "selection": "ema/psnr",
+    "selection_n": 100,
+    "split": "configs/split_val.txt",
+    "structural_kind": "ssim",
+    "best_iter": 20000,
+    "total_iters_run": 20000,
+    "wall_clock_s": 4303.46
+  },
   "validation_examples": [
     {
       "file": "001323.npy",
       "tag": "best",
-      "psnr": 39.5011,
-      "ssim": 0.9534,
-      "png": "val_001323_best_psnr39.50.png"
+      "psnr": 39.8694,
+      "ssim": 0.9564,
+      "png": "val_001323_best_psnr39.87.png"
     },
     {
       "file": "000960.npy",
       "tag": "strong",
-      "psnr": 36.8316,
-      "ssim": 0.9207,
-      "png": "val_000960_strong_psnr36.83.png"
+      "psnr": 40.3076,
+      "ssim": 0.971,
+      "png": "val_000960_strong_psnr40.31.png"
     },
     {
       "file": "003167.npy",
       "tag": "typical_near_mean",
-      "psnr": 28.0059,
-      "ssim": 0.8457,
-      "png": "val_003167_typical_near_mean_psnr28.01.png"
+      "psnr": 29.563,
+      "ssim": 0.8928,
+      "png": "val_003167_typical_near_mean_psnr29.56.png"
     },
     {
       "file": "001682.npy",
       "tag": "typical_near_mean",
-      "psnr": 28.0113,
-      "ssim": 0.8878,
-      "png": "val_001682_typical_near_mean_psnr28.01.png"
+      "psnr": 29.8146,
+      "ssim": 0.9434,
+      "png": "val_001682_typical_near_mean_psnr29.81.png"
     },
     {
       "file": "002041.npy",
       "tag": "weak_worst_in_split",
-      "psnr": 17.1335,
-      "ssim": 0.4499,
-      "png": "val_002041_weak_worst_in_split_psnr17.13.png"
+      "psnr": 17.2271,
+      "ssim": 0.5188,
+      "png": "val_002041_weak_worst_in_split_psnr17.23.png"
     },
     {
       "file": "000900.npy",
       "tag": "weak_lowest_ssim_in_worst8",
-      "psnr": 18.4195,
-      "ssim": 0.3195,
-      "png": "val_000900_weak_lowest_ssim_in_worst8_psnr18.42.png"
+      "psnr": 18.5328,
+      "ssim": 0.3658,
+      "png": "val_000900_weak_lowest_ssim_in_worst8_psnr18.53.png"
     }
   ],
   "d5_documented_failure_case": {
     "file": "000984.npy",
     "tag": "D5_documented_aliasing_broadband_texture_case",
-    "psnr": 10.515,
-    "ssim": 0.2587,
-    "png": "failurecase_D5_000984_D5_documented_aliasing_broadband_texture_case_psnr10.52.png"
+    "psnr": 10.8977,
+    "ssim": 0.31,
+    "png": "failurecase_D5_000984_D5_documented_aliasing_broadband_texture_case_psnr10.90.png"
   },
   "final_test_examples": [
     {
@@ -76,5 +90,5 @@
       "png": "finaltest_000399_no_gt.png"
     }
   ],
-  "note": "final_test_examples have no ground truth; no metric is computed for them. d5_documented_failure_case is NOT part of the 400-pair scored validation split; its PSNR/SSIM is a single-file illustrative measurement only, not part of the reported 28.0394 dB mean."
+  "note": "final_test_examples have no ground truth; no metric is computed for them. d5_documented_failure_case is NOT part of the 400-pair scored validation split; its PSNR/SSIM is a single-file illustrative measurement only, not part of the checkpoint's reported validation mean."
 }

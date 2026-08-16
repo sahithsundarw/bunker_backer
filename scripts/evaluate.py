@@ -126,6 +126,17 @@ def score_dir(name: str, pred_dir: Path, gt_dir: Path, names: list[str], *,
     meta_path = pred_dir / "pred_meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
 
+    checkpoint = meta.get("checkpoint")
+    checkpoint_sha256 = meta.get("checkpoint_sha256")
+    if checkpoint and not checkpoint_sha256:
+        checkpoint_path = Path(checkpoint)
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = REPO_ROOT / checkpoint_path
+        if checkpoint_path.is_file():
+            import hashlib
+
+            checkpoint_sha256 = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
+
     row: dict[str, Any] = {
         "name": name,
         "label": meta.get("label", name),
@@ -137,7 +148,9 @@ def score_dir(name: str, pred_dir: Path, gt_dir: Path, names: list[str], *,
         "pred_dir": str(pred_dir),
         "pred_dtype": sorted(dtypes),
         "sec_per_image": meta.get("sec_per_image"),
-        "checkpoint": meta.get("checkpoint"),
+        "checkpoint": checkpoint,
+        "checkpoint_sha256": checkpoint_sha256,
+        "timing_method": meta.get("timing_method"),
         "lpips_device": dev if with_lpips else None,
         "with_lpips": bool(with_lpips),
         "unclipped_files": unclipped,
@@ -360,7 +373,6 @@ def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
                "dependency; no pretrained weights are used in the shipped model.")
     out.append("- Filenames collide between `train/` and `test_NoisyLR/`, so every row is keyed "
                "by its prediction directory, never by bare filename.")
-    out.append("")
     return "\n".join(out) + "\n"
 
 

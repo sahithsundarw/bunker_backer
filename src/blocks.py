@@ -189,10 +189,6 @@ class NAFBlock(nn.Module):
         self.gamma = nn.Parameter(torch.full((1, channels, 1, 1), float(layerscale_init)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self.training and not torch.is_grad_enabled():
-            if bool(torch.all(self.beta == 0).item()) and bool(torch.all(self.gamma == 0).item()):
-                return x
-
         y = self.norm1(x)
         y = self.conv1(y)
         y = self.dwconv(y)

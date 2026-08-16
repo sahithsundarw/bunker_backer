@@ -53,7 +53,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -76,12 +76,15 @@ from src.model import build_model, count_parameters  # noqa: E402
 from src.utils import (  # noqa: E402
     EMA,
     append_experiment,
+    capture_rng_state,
+    capture_source_provenance,
     configure_backends,
     cosine_warmup_lr,
     format_hms,
     git_sha,
     load_config,
     resolve_device,
+    restore_rng_state,
     save_checkpoint,
     seed_everything,
     update_checkpoint_metrics,
@@ -89,6 +92,11 @@ from src.utils import (  # noqa: E402
 
 #: Where the run ledger lives (SPEC 9, V45).
 LEDGER = _ROOT / "results" / "experiments.csv"
+
+TRAINING_SOURCE_FILES = (
+    "train.py", "src/blocks.py", "src/dataset.py", "src/degrade.py", "src/losses.py",
+    "src/metrics.py", "src/model.py", "src/utils.py", "configs/split_val.txt",
+)
 
 #: V25's threshold. Written once, here, so it can never be quietly relaxed at a call site.
 OVERFIT_PSNR_TARGET_DB: float = 40.0
@@ -115,7 +123,8 @@ def build_argparser() -> argparse.ArgumentParser:
                          "4000-iter budget stalls at 39.78 dB because the cosine schedule "
                          "decays proportionally to the budget, so do not shorten it and then "
                          "read the result as a failure of alignment")
-    ap.add_argument("--resume", default=None, help="checkpoint to warm-start model+EMA from")
+    ap.add_argument("--resume", default=None,
+                    help="resume a checkpoint carrying complete training_state")
     ap.add_argument("--out", default=None,
                     help="checkpoint path (default weights/best.pt)")
     ap.add_argument("--iters", type=int, default=None, help="override optim.total_iters")
@@ -410,6 +419,7 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     tcfg = _section(cfg, "train")
     ocfg = _section(cfg, "optim")
     dblk = _section(cfg, "data")
+    source_provenance = capture_source_provenance((*TRAINING_SOURCE_FILES, args.config))
 
     batch_size = int(dblk.get("batch_size", 32))
     total_iters = int(args.iters if args.iters is not None else ocfg.get("total_iters", 20000))
@@ -443,15 +453,6 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     train_ds, val_ds = build_datasets(root, dcfg)
     build_s = time.perf_counter() - t_build
 
-    gen = torch.Generator()
-    gen.manual_seed(seed)
-    loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, drop_last=True,
-        num_workers=int(args.workers), generator=gen,
-        pin_memory=(device.type == "cuda"),
-        persistent_workers=False,
-    )
-
     model = build_model(cfg).to(device)
     if channels_last:
         model = model.to(memory_format=torch.channels_last)
@@ -461,8 +462,17 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     if channels_last:
         shadow = shadow.to(memory_format=torch.channels_last)
     start_iter = 0
+    resume_state: Mapping[str, Any] | None = None
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=True)
+        if ck.get("config") != cfg:
+            raise ValueError("--resume checkpoint config differs from the requested config")
+        resume_state = ck.get("training_state")
+        if not isinstance(resume_state, Mapping):
+            raise ValueError(
+                "--resume checkpoint has no complete training_state; legacy checkpoints may "
+                "be used for inference but cannot be resumed equivalently"
+            )
         model.load_state_dict(ck["model"], strict=True)
         if ck.get("ema"):
             ema.load_state_dict(ck["ema"])
@@ -473,6 +483,24 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     opt = torch.optim.AdamW(model.parameters(), lr=base_lr,
                             betas=tuple(ocfg.get("betas", (0.9, 0.9))),
                             weight_decay=float(ocfg.get("weight_decay", 0.0)))
+    if resume_state is not None:
+        if int(resume_state.get("global_step", -1)) != start_iter:
+            raise ValueError("resume training_state.global_step disagrees with checkpoint iter")
+        scheduler_state = resume_state.get("scheduler", {})
+        expected_scheduler = {
+            "kind": "cosine_warmup",
+            "base_lr": base_lr,
+            "min_lr": min_lr,
+            "warmup_iters": warmup,
+            "total_iters": total_iters,
+        }
+        if scheduler_state != expected_scheduler:
+            raise ValueError(
+                f"resume scheduler state differs from this run: {scheduler_state} != "
+                f"{expected_scheduler}"
+            )
+        opt.load_state_dict(resume_state["optimizer"])
+        ema.num_updates = int(resume_state["ema_num_updates"])
 
     out_path = Path(args.out) if args.out else (_ROOT / "weights" / "best.pt")
     if not out_path.is_absolute():
@@ -498,10 +526,39 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     t0 = time.perf_counter()
     it = start_iter
     epoch = 0
+    batch_in_epoch = 0
+    if resume_state is not None:
+        best = {
+            "psnr": float(resume_state["best"]["psnr"]),
+            "ssim": float(resume_state["best"]["ssim"]),
+            "iter": int(resume_state["best"]["iter"]),
+        }
+        epoch = int(resume_state["epoch"])
+        batch_in_epoch = int(resume_state["batch_in_epoch"])
+        restore_rng_state(resume_state["rng"])
     model.train()
 
     while it < total_iters:
         train_ds.set_epoch(epoch)
+        sampler_gen = torch.Generator()
+        sampler_gen.manual_seed(seed + epoch)
+        permutation = torch.randperm(len(train_ds), generator=sampler_gen).tolist()
+        usable = (len(permutation) // batch_size) * batch_size
+        start_sample = batch_in_epoch * batch_size
+        if start_sample >= usable:
+            epoch += 1
+            batch_in_epoch = 0
+            continue
+        loader = DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            sampler=permutation[start_sample:usable],
+            shuffle=False,
+            drop_last=True,
+            num_workers=int(args.workers),
+            pin_memory=(device.type == "cuda"),
+            persistent_workers=False,
+        )
         for batch in loader:
             if it >= total_iters:
                 break
@@ -531,6 +588,7 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
             structural_kind = str(logs["structural_kind"])
             loss_hist.append(float(logs["total"]))
             it += 1
+            batch_in_epoch += 1
 
             if smoke:
                 line = (f"SMOKE step={it:04d} lr={cur_lr:.12e} total={logs['total']:.12e} "
@@ -557,14 +615,33 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                      f"(n={v['n']}, held-out)")
                 if v["psnr"] > best["psnr"]:
                     best = {"psnr": v["psnr"], "ssim": v["ssim"], "iter": it}
+                    training_state = {
+                        "schema_version": 1,
+                        "optimizer": opt.state_dict(),
+                        "scheduler": {
+                            "kind": "cosine_warmup",
+                            "base_lr": base_lr,
+                            "min_lr": min_lr,
+                            "warmup_iters": warmup,
+                            "total_iters": total_iters,
+                        },
+                        "global_step": it,
+                        "best": dict(best),
+                        "ema_num_updates": ema.num_updates,
+                        "epoch": epoch,
+                        "batch_in_epoch": batch_in_epoch,
+                        "rng": capture_rng_state(),
+                    }
                     save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
                                     metrics={"val_psnr": v["psnr"], "val_ssim": v["ssim"],
                                              "val_n": v["n"], "selection": "ema/psnr",
                                              "split": "configs/split_val.txt",
                                              "structural_kind": structural_kind},
-                                    git=sha)
+                                    git=sha, training_state=training_state,
+                                    provenance=source_provenance)
                     _log(f"  [ckpt] new best {v['psnr']:.4f} dB -> {out_path}")
         epoch += 1
+        batch_in_epoch = 0
 
     wall = time.perf_counter() - t0
 
@@ -579,8 +656,23 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     # ---- final report: full committed split, EMA weights, LPIPS included ---------------
     if best["iter"] < 0:
         # no validation happened (e.g. --val_every 0): still ship something reproducible
+        training_state = {
+            "schema_version": 1,
+            "optimizer": opt.state_dict(),
+            "scheduler": {
+                "kind": "cosine_warmup", "base_lr": base_lr, "min_lr": min_lr,
+                "warmup_iters": warmup, "total_iters": total_iters,
+            },
+            "global_step": it,
+            "best": dict(best),
+            "ema_num_updates": ema.num_updates,
+            "epoch": epoch,
+            "batch_in_epoch": batch_in_epoch,
+            "rng": capture_rng_state(),
+        }
         save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
-                        metrics={"note": "no validation performed"}, git=sha)
+                        metrics={"note": "no validation performed"}, git=sha,
+                        training_state=training_state, provenance=source_provenance)
     ck = torch.load(out_path, map_location="cpu", weights_only=True)
     final_model = build_model(ck["config"]).to(device)
     if channels_last:
@@ -772,6 +864,16 @@ def _closed_form_embed_error(model: torch.nn.Module, filters: np.ndarray, root: 
     return float(np.max(np.abs(out - direct)))
 
 
+def promote_checkpoint_if_accepted(
+    accepted: bool, out_path: Path, writer: Callable[[Path], Any]
+) -> bool:
+    """Invoke the atomic checkpoint writer only after a candidate passes its quality gate."""
+    if not accepted:
+        return False
+    writer(out_path)
+    return True
+
+
 def run_closed_form_linear(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int:
     """Fit and checkpoint a train-split least-squares residual model.
 
@@ -780,6 +882,7 @@ def run_closed_form_linear(cfg: dict[str, Any], args: argparse.Namespace, seed: 
     mode as closed-form LS-5.
     """
     root = resolve_data_root(args.data_root)
+    source_provenance = capture_source_provenance((*TRAINING_SOURCE_FILES, args.config))
     train_names, val_names = train_val_names(root)
     out_path = Path(args.out) if args.out else (_ROOT / "weights" / "best.pt")
     if not out_path.is_absolute():
@@ -835,8 +938,12 @@ def run_closed_form_linear(cfg: dict[str, Any], args: argparse.Namespace, seed: 
         "fit_wall_clock_s": round(fit_s, 2),
     }
     sha = git_sha()
-    save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=0,
-                    metrics=metrics, git=sha)
+    promoted = promote_checkpoint_if_accepted(
+        passed_bar,
+        out_path,
+        lambda path: save_checkpoint(path, model=model, ema=ema, config=cfg, iteration=0,
+                                     metrics=metrics, git=sha, provenance=source_provenance),
+    )
 
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-" \
              f"{Path(args.config).stem}-closed-form-s{seed}"
@@ -874,6 +981,7 @@ def run_closed_form_linear(cfg: dict[str, Any], args: argparse.Namespace, seed: 
         "val_n": len(val_names),
         "params": n_params,
         "metrics": metrics,
+        "checkpoint_promoted": promoted,
     }
     _log(json.dumps(report, indent=2))
     return 0 if passed_bar else 2

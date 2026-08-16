@@ -4,8 +4,7 @@
 # `train.py --config configs/final.yaml --seed 42` twice and requires identical losses.
 #
 # Owner: model-core (model block) / trainer (optim, train blocks) / data-pipeline (data).
-# The `model` block is the submission truth. It may diverge from development variants when a
-# measured CPU-feasible checkpoint path needs an explicit architectural knob.
+# Every training-relevant default is explicit here; checkpoint metadata must compare equal.
 #
 # MEASURED cost (src/model.py self-test, `py -3.12 -m src.model`):
 #   params 388,225 (0.388 M)   MACs @128x128 = 5.584 G   FLOPs ~= 11.17 G per image
@@ -21,7 +20,7 @@ model:
   dw_expand: 2
   ffn_expand: 2
   layerscale_init: 1.0
-  padding_mode: replicate   # required by the closed-form LS-5 checkpoint embedder
+  padding_mode: zeros       # the 20k NAFSR run used Conv2d's default zero padding
 data:
   lr_patch: 64            # -> 128 GT patch
   batch_size: 32
@@ -53,3 +52,15 @@ train:
   channels_last: true
   val_every: 1000
   save_best_on: psnr
+loss:
+  weights:
+    charbonnier: 1.0
+    structural: 0.15
+    fft: 0.05
+    lpips: 0.02
+  use_lpips: false
+  lpips_start_frac: 0.5
+  lpips_net: alex
+  allow_ms_ssim: true
+  charbonnier_eps: 1.0e-3
+  data_range: 1.0

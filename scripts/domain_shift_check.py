@@ -14,6 +14,8 @@ import sys
 
 import numpy as np
 
+from dataset_paths import default_dataset_root, resolve_test_input_dir
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -63,11 +65,11 @@ def describe(d, files, label, n=400):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("root", nargs="?", default=r"C:\kla-data")
+    ap.add_argument("root", nargs="?", default=str(default_dataset_root()))
     args = ap.parse_args()
 
     lr = os.path.join(args.root, "train", "NoisyLR")
-    te = os.path.join(args.root, "test_NoisyLR")
+    te = str(resolve_test_input_dir(args.root))
 
     print("Train-vs-test content shift (both are noisy 128x128 inputs -- like for like)")
     p_tr, a_tr, g_tr = describe(lr, sorted(os.listdir(lr)), "train/NoisyLR")

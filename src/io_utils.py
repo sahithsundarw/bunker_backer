@@ -51,7 +51,7 @@ def load_array(path: Path) -> np.ndarray:
 
 
 def save_array(path: Path, arr: np.ndarray) -> None:
-    """Clip to [0,1], cast to float32, np.save. No renormalisation (docs/decisions.md D3).
+    """Atomically clip to [0,1], cast to float32, and save without renormalising.
 
     Per-image min-max renormalisation was measured at -4.66 dB PSNR, losing 191/200 held-out
     pairs, so the ONLY range handling is the clip that SPEC F5/section 5.1 mandates.
@@ -74,10 +74,29 @@ def save_array(path: Path, arr: np.ndarray) -> None:
         a = np.nan_to_num(a, nan=0.0, posinf=1.0, neginf=0.0)
     a = np.clip(a, 0.0, 1.0)
     a = np.ascontiguousarray(a, dtype=np.float32)
+    # Import locally: inference.py deliberately keeps its measured import path minimal.
+    import os
+    import tempfile
+
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "wb") as fh:
-        np.save(fh, a, allow_pickle=False)
+    fd, tmp = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            np.save(fh, a, allow_pickle=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def list_inputs(root: Path, exts: set[str]) -> list[Path]:

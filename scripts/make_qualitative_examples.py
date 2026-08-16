@@ -18,14 +18,15 @@ input/output directory -- the real production entry point, not a re-implemented 
 
 Usage:
     .venv-mac/bin/python scripts/make_qualitative_examples.py \\
-        --data_root /Users/shanmukhsai/Downloads \\
-        --final_test_pred_dir /tmp/semicon_final_outputs_28db
+        --data_root /path/to/dataset \\
+        --checkpoint weights/best.pt
 
 Owner: main session (submission-evidence utility, not on the parallel-agent ownership map).
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -37,10 +38,12 @@ from skimage.metrics import peak_signal_noise_ratio as sk_psnr
 from skimage.metrics import structural_similarity as sk_ssim
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-VAL_PRED_DIR = REPO_ROOT / "results/residual_experiments/r2_nb8_psnrloss/preds/final"
-CKPT_PATH = REPO_ROOT / "weights/best.pt"
-CKPT_SHA = "37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7"
+from dataset_paths import resolve_test_input_dir
+
+DEFAULT_CKPT_PATH = REPO_ROOT / "weights/best.pt"
 
 VAL_EXAMPLES = [
     ("001323.npy", "best"),
@@ -69,7 +72,7 @@ def show(ax, img, title, vmin=0.0, vmax=1.0, cmap="gray"):
 
 
 def val_panel(plt, out_dir, fname, tag, lr_dir, gt_dir, pred_dir, header, subtitle_extra,
-              out_prefix):
+              out_prefix, checkpoint_sha):
     lr = np.load(lr_dir / fname, allow_pickle=False)
     gt = np.load(gt_dir / fname, allow_pickle=False)
     pred = np.load(pred_dir / fname, allow_pickle=False)
@@ -87,7 +90,7 @@ def val_panel(plt, out_dir, fname, tag, lr_dir, gt_dir, pred_dir, header, subtit
 
     fig.suptitle(
         f"{header} | {fname} | PSNR {psnr:.2f} dB | SSIM {ssim:.4f} | "
-        f"checkpoint {CKPT_SHA[:12]}...{subtitle_extra}",
+        f"checkpoint {checkpoint_sha[:12]}...{subtitle_extra}",
         fontsize=10,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.90 if subtitle_extra else 0.93])
@@ -98,7 +101,7 @@ def val_panel(plt, out_dir, fname, tag, lr_dir, gt_dir, pred_dir, header, subtit
             "png": out_path.name}
 
 
-def test_panel(plt, out_dir, fname, lr_dir, pred_dir):
+def test_panel(plt, out_dir, fname, lr_dir, pred_dir, checkpoint_sha):
     lr = np.load(lr_dir / fname, allow_pickle=False)
     pred = np.load(pred_dir / fname, allow_pickle=False)
 
@@ -110,7 +113,7 @@ def test_panel(plt, out_dir, fname, lr_dir, pred_dir):
     fig.suptitle(
         f"FINAL TEST (released test_NoisyLR) | {fname}\n"
         f"NO GROUND TRUTH -- no PSNR/SSIM/LPIPS computed or claimed | "
-        f"checkpoint {CKPT_SHA[:12]}...",
+        f"checkpoint {checkpoint_sha[:12]}...",
         fontsize=10, color="firebrick",
     )
     fig.tight_layout(rect=[0, 0, 1, 0.87])
@@ -120,16 +123,17 @@ def test_panel(plt, out_dir, fname, lr_dir, pred_dir):
     return {"file": fname, "png": out_path.name}
 
 
-def make_d5_prediction(data_root: Path) -> Path:
-    """Restore the D5 out-of-split file with a real `inference.py --require_weights` run."""
-    lr_dir = data_root / "train" / "NoisyLR"
-    tmp_in = Path(tempfile.mkdtemp()) / "in"
-    tmp_out = Path(tempfile.mkdtemp()) / "out"
+def make_predictions(lr_dir: Path, filenames: list[str], checkpoint: Path, scratch: Path,
+                     label: str) -> Path:
+    """Restore selected files with the strict submission inference path."""
+    tmp_in = scratch / f"{label}-in"
+    tmp_out = scratch / f"{label}-out"
     tmp_in.mkdir(parents=True)
-    shutil.copy(lr_dir / D5_FILE, tmp_in / D5_FILE)
+    for filename in filenames:
+        shutil.copy(lr_dir / filename, tmp_in / filename)
     cmd = [sys.executable, str(REPO_ROOT / "inference.py"),
            "--input_dir", str(tmp_in), "--output_dir", str(tmp_out),
-           "--weights", str(CKPT_PATH), "--require_weights",
+           "--weights", str(checkpoint), "--require_weights",
            "--device", "cpu", "--precision", "fp32", "--verbose"]
     subprocess.run(cmd, check=True, cwd=REPO_ROOT)
     return tmp_out
@@ -142,8 +146,14 @@ def main() -> int:
     ap.add_argument("--final_test_lr_dir", default=None,
                      help="dir with the released test_NoisyLR inputs (default: "
                           "<data_root>/NoisyLR)")
-    ap.add_argument("--final_test_pred_dir", required=True,
-                     help="dir with the already-generated final-test restorations")
+    ap.add_argument("--final_test_pred_dir", default=None,
+                    help="optional existing final-test restorations; selected files are "
+                         "generated with strict inference when omitted")
+    ap.add_argument("--checkpoint", default=str(DEFAULT_CKPT_PATH),
+                    help="checkpoint used to generate and label examples")
+    ap.add_argument("--val_pred_dir", default=None,
+                    help="optional existing validation predictions; selected files are "
+                         "generated with strict inference when omitted")
     ap.add_argument("--out_dir", default=str(REPO_ROOT / "results" / "qualitative"))
     ap.add_argument("--skip_d5", action="store_true",
                      help="skip the D5 out-of-split failure-case panel (runs inference.py)")
@@ -156,46 +166,68 @@ def main() -> int:
     data_root = Path(args.data_root)
     val_gt_dir = data_root / "train" / "GT"
     val_lr_dir = data_root / "train" / "NoisyLR"
-    test_lr_dir = Path(args.final_test_lr_dir) if args.final_test_lr_dir else data_root / "NoisyLR"
-    test_pred_dir = Path(args.final_test_pred_dir)
+    test_lr_dir = (Path(args.final_test_lr_dir) if args.final_test_lr_dir else
+                   resolve_test_input_dir(data_root))
+    checkpoint = Path(args.checkpoint)
+    if not checkpoint.is_file():
+        raise SystemExit(f"checkpoint not found: {checkpoint}")
+    checkpoint_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    import torch
+    checkpoint_data = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    checkpoint_metrics = checkpoint_data.get("metrics", {})
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    for pattern in ("val_*.png", "finaltest_*.png", "failurecase_D5_*.png"):
+        for stale in out_dir.glob(pattern):
+            stale.unlink()
 
-    val_records = [
-        val_panel(plt, out_dir, f, tag, val_lr_dir, val_gt_dir, VAL_PRED_DIR,
-                   "Validation split", "", "val")
-        for f, tag in VAL_EXAMPLES
-    ]
-    test_records = [
-        test_panel(plt, out_dir, f, test_lr_dir, test_pred_dir) for f in TEST_EXAMPLES
-    ]
+    with tempfile.TemporaryDirectory(prefix="kla-qualitative-") as tmp:
+        scratch = Path(tmp)
+        val_pred_dir = (Path(args.val_pred_dir) if args.val_pred_dir else
+                        make_predictions(val_lr_dir, [f for f, _ in VAL_EXAMPLES], checkpoint,
+                                         scratch, "validation"))
+        test_pred_dir = (Path(args.final_test_pred_dir) if args.final_test_pred_dir else
+                         make_predictions(test_lr_dir, TEST_EXAMPLES, checkpoint, scratch,
+                                          "final-test"))
+        val_records = [
+            val_panel(plt, out_dir, f, tag, val_lr_dir, val_gt_dir, val_pred_dir,
+                      "Validation split", "", "val", checkpoint_sha)
+            for f, tag in VAL_EXAMPLES
+        ]
+        test_records = [
+            test_panel(plt, out_dir, f, test_lr_dir, test_pred_dir, checkpoint_sha)
+            for f in TEST_EXAMPLES
+        ]
 
-    d5_record = None
-    if not args.skip_d5:
-        d5_pred_dir = make_d5_prediction(data_root)
-        d5_record = val_panel(
-            plt, out_dir, D5_FILE, "D5_documented_aliasing_broadband_texture_case",
-            val_lr_dir, val_gt_dir, d5_pred_dir,
-            "D5 out-of-split case (NOT in configs/split_val.txt)",
-            "\n80.5% of GT spectral energy is above the LR Nyquist limit "
-            "(docs/decisions.md D5) -- provably unrecoverable, broadband texture, "
-            "not periodic aliasing",
-            "failurecase_D5",
-        )
+        d5_record = None
+        if not args.skip_d5:
+            d5_pred_dir = make_predictions(val_lr_dir, [D5_FILE], checkpoint, scratch, "d5")
+            d5_record = val_panel(
+                plt, out_dir, D5_FILE, "D5_documented_aliasing_broadband_texture_case",
+                val_lr_dir, val_gt_dir, d5_pred_dir,
+                "D5 out-of-split case (NOT in configs/split_val.txt)",
+                "\n80.5% of GT spectral energy is above the LR Nyquist limit "
+                "(docs/decisions.md D5) -- provably unrecoverable, broadband texture, "
+                "not periodic aliasing",
+                "failurecase_D5", checkpoint_sha,
+            )
 
     import json
+    try:
+        checkpoint_display = checkpoint.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        checkpoint_display = str(checkpoint.resolve())
     manifest = {
-        "checkpoint_sha256": CKPT_SHA,
-        "checkpoint_val_psnr_db": 28.0394,
-        "checkpoint_val_ssim": 0.74804,
-        "checkpoint_val_lpips": 0.29571,
+        "checkpoint": checkpoint_display,
+        "checkpoint_sha256": checkpoint_sha,
+        "checkpoint_metrics": checkpoint_metrics,
         "validation_examples": val_records,
         "d5_documented_failure_case": d5_record,
         "final_test_examples": test_records,
         "note": ("final_test_examples have no ground truth; no metric is computed for them. "
                  "d5_documented_failure_case is NOT part of the 400-pair scored validation "
                  "split; its PSNR/SSIM is a single-file illustrative measurement only, not "
-                 "part of the reported 28.0394 dB mean."),
+                 "part of the checkpoint's reported validation mean."),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     for r in val_records:

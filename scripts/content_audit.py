@@ -15,6 +15,8 @@ import sys
 
 import numpy as np
 
+from dataset_paths import default_dataset_root, resolve_test_input_dir
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -72,11 +74,11 @@ def stats(paths, label, upscale=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("root", nargs="?", default=r"C:\kla-data")
+    ap.add_argument("root", nargs="?", default=str(default_dataset_root()))
     args = ap.parse_args()
 
     gt_dir = os.path.join(args.root, "train", "GT")
-    te_dir = os.path.join(args.root, "test_NoisyLR")
+    te_dir = str(resolve_test_input_dir(args.root))
     out = os.path.join(REPO_ROOT, "results", "eda")
     os.makedirs(out, exist_ok=True)
 

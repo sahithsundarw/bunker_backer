@@ -16,6 +16,7 @@ Owner: trainer.
 from __future__ import annotations
 
 import csv
+import hashlib
 import math
 import os
 import random
@@ -32,6 +33,8 @@ __all__ = [
     "EMA",
     "LEDGER_COLUMNS",
     "append_experiment",
+    "capture_source_provenance",
+    "capture_rng_state",
     "configure_backends",
     "cosine_warmup_lr",
     "deep_update",
@@ -40,6 +43,7 @@ __all__ = [
     "load_config",
     "repo_root",
     "resolve_device",
+    "restore_rng_state",
     "save_checkpoint",
     "seed_everything",
     "to_plain",
@@ -74,6 +78,52 @@ def seed_everything(seed: int) -> int:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(s)
     return s
+
+
+def capture_rng_state() -> dict[str, Any]:
+    """Capture every process RNG in weights-only-safe tensor/plain form."""
+    np_state = np.random.get_state()
+    return {
+        "python": to_plain(random.getstate()),
+        "numpy": {
+            "bit_generator": str(np_state[0]),
+            "state": np.asarray(np_state[1], dtype=np.uint32).tolist(),
+            "pos": int(np_state[2]),
+            "has_gauss": int(np_state[3]),
+            "cached_gaussian": float(np_state[4]),
+        },
+        "torch_cpu": torch.get_rng_state().cpu(),
+        "torch_cuda": ([v.cpu() for v in torch.cuda.get_rng_state_all()]
+                       if torch.cuda.is_available() else []),
+    }
+
+
+def _nested_tuple(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_nested_tuple(v) for v in value)
+    return value
+
+
+def restore_rng_state(state: Mapping[str, Any]) -> None:
+    """Restore a state produced by :func:`capture_rng_state`."""
+    random.setstate(_nested_tuple(state["python"]))
+    ns = state["numpy"]
+    np.random.set_state((
+        str(ns["bit_generator"]),
+        np.asarray(ns["state"], dtype=np.uint32),
+        int(ns["pos"]),
+        int(ns["has_gauss"]),
+        float(ns["cached_gaussian"]),
+    ))
+    torch.set_rng_state(state["torch_cpu"].to("cpu", dtype=torch.uint8))
+    cuda_states = list(state.get("torch_cuda", []))
+    if cuda_states and torch.cuda.is_available():
+        if len(cuda_states) != torch.cuda.device_count():
+            raise ValueError(
+                f"checkpoint has {len(cuda_states)} CUDA RNG states, this host has "
+                f"{torch.cuda.device_count()} devices"
+            )
+        torch.cuda.set_rng_state_all([v.to("cpu", dtype=torch.uint8) for v in cuda_states])
 
 
 def configure_backends(deterministic: bool, allow_tf32: bool = True) -> dict[str, Any]:
@@ -145,6 +195,88 @@ def git_sha(short: bool = False) -> str:
         return out
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+def capture_source_provenance(paths: Sequence[str | os.PathLike[str]]) -> dict[str, Any]:
+    """Record exact training-source identities and preserve dirty relevant file contents.
+
+    A commit plus ``-dirty`` is not reconstructable. For each requested source/config file,
+    this records its working-tree SHA and HEAD blob identity. Files that differ from HEAD (or
+    are untracked/external) additionally carry their complete UTF-8 content. A unified patch is
+    included for human review; the full dirty contents are the authoritative reconstruction.
+    """
+    root = repo_root().resolve()
+    try:
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True, timeout=15
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        head = "unknown"
+
+    records: list[dict[str, Any]] = []
+    repo_paths: list[str] = []
+    for raw in paths:
+        path = Path(raw)
+        if not path.is_absolute():
+            path = root / path
+        path = path.resolve()
+        content = path.read_bytes()
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            rel = str(path)
+        record: dict[str, Any] = {
+            "path": rel,
+            "working_sha256": hashlib.sha256(content).hexdigest(),
+        }
+        if path.is_relative_to(root) and head != "unknown":
+            repo_paths.append(rel)
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", rel], cwd=root,
+                capture_output=True, text=True, timeout=15, check=False,
+            ).returncode == 0
+            record["tracked"] = tracked
+            head_content: bytes | None = None
+            if tracked:
+                try:
+                    head_content = subprocess.check_output(
+                        ["git", "show", f"{head}:{rel}"], cwd=root, timeout=15
+                    )
+                    record["head_blob"] = subprocess.check_output(
+                        ["git", "rev-parse", f"{head}:{rel}"], cwd=root,
+                        text=True, timeout=15,
+                    ).strip()
+                    record["head_sha256"] = hashlib.sha256(head_content).hexdigest()
+                except subprocess.SubprocessError:
+                    head_content = None
+            if head_content != content:
+                record["dirty_content_utf8"] = content.decode("utf-8")
+        else:
+            record["tracked"] = False
+            record["dirty_content_utf8"] = content.decode("utf-8")
+        records.append(record)
+
+    patch = ""
+    if repo_paths and head != "unknown":
+        proc = subprocess.run(
+            ["git", "diff", "--binary", head, "--", *repo_paths], cwd=root,
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if proc.returncode == 0:
+            patch = proc.stdout
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True,
+        timeout=30, check=False,
+    )
+    status_text = status.stdout if status.returncode == 0 else "unavailable"
+    return {
+        "schema_version": 1,
+        "git_commit": head,
+        "repository_worktree_clean": not bool(status_text.strip()),
+        "git_status_porcelain": status_text,
+        "relevant_source_patch": patch,
+        "source_files": records,
+    }
 
 
 # ======================================================================================
@@ -307,12 +439,14 @@ def save_checkpoint(
     iteration: int,
     metrics: Mapping[str, Any],
     git: str | None = None,
+    training_state: Mapping[str, Any] | None = None,
+    provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write the V35 checkpoint dict atomically.
 
-    Keys are exactly ``model, ema, config, iter, metrics, git``.  Values are tensors, plain
-    dicts, plain scalars and strings only, so ``torch.load(..., weights_only=True)`` -- the
-    load path ``inference.py`` and the verifier both use -- accepts the file.
+    Inference keys are ``model, ema, config, iter, metrics, git``. Resumable training
+    checkpoints additionally carry ``training_state``; release checkpoints may carry a plain
+    ``provenance`` block. All values remain compatible with ``weights_only=True``.
 
     The write goes to a temporary file in the destination directory and is then
     ``os.replace``d, so an interrupted save can never leave a truncated ``best.pt`` behind.
@@ -327,6 +461,10 @@ def save_checkpoint(
         "metrics": to_plain(metrics),
         "git": str(git if git is not None else git_sha()),
     }
+    if training_state is not None:
+        payload["training_state"] = dict(training_state)
+    if provenance is not None:
+        payload["provenance"] = to_plain(provenance)
     return _atomic_torch_save(payload, out)
 
 

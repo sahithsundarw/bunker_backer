@@ -6,15 +6,17 @@ Same CLI shape:  python scripts/inspect_dataset.py C:\\kla-data
 Emits numeric evidence only. No inference, no guesses.
 """
 
+import argparse
 import os
 import sys
 from collections import Counter
 
 import numpy as np
 
+from dataset_paths import default_dataset_root, resolve_test_input_dir
+
 GT_DIR = ("train", "GT")
 LR_DIR = ("train", "NoisyLR")
-TEST_DIR = ("test_NoisyLR",)
 
 
 def hr(title):
@@ -95,7 +97,11 @@ def main(root):
     root = os.path.abspath(root)
     gt_dir = os.path.join(root, *GT_DIR)
     lr_dir = os.path.join(root, *LR_DIR)
-    test_dir = os.path.join(root, *TEST_DIR)
+    try:
+        test_dir = str(resolve_test_input_dir(root))
+    except FileNotFoundError as exc:
+        print(f"FATAL: {exc}")
+        return 1
 
     for p in (gt_dir, lr_dir, test_dir):
         if not os.path.isdir(p):
@@ -268,4 +274,7 @@ def main(root):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "C:\\kla-data"))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("root", nargs="?", default=str(default_dataset_root()))
+    cli = parser.parse_args()
+    sys.exit(main(cli.root))

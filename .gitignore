@@ -82,6 +82,7 @@ Thumbs.db
 !results/eda/*.txt
 !results/restored_test_outputs/
 !results/restored_test_outputs/.gitkeep
+!results/restored_test_outputs/sha256sums.txt
 # V48 reads results/metrics_summary.md from a FRESH CLONE, and Definition-of-Done #2 requires
 # fresh-clone verification -- so the table must be tracked. results/baselines/** stays ignored
 # (1200 .npy predictions live there).

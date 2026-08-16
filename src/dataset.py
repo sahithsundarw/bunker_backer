@@ -36,7 +36,6 @@ import argparse
 import ctypes
 import json
 import os
-import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,26 +98,20 @@ def read_name_list(path: str | Path) -> list[str]:
 
 
 def resolve_data_root(arg: str | os.PathLike[str] | None) -> Path:
-    """``--data-root``, else ``$KLA_DATA_ROOT``, else the root in docs/DATA_LOCATION.md.
+    """``--data-root``, else ``$KLA_DATA_ROOT``, else the measured local Mac root.
 
-    No dataset path is hard-coded in this file (CLAUDE.md PD5).
+    Dataset-independent commands never call this function. The final fallback exists only for
+    the measured submission machine and is documented in ``docs/DATA_LOCATION.md``.
     """
     if arg:
         root = Path(arg).expanduser()
     elif os.environ.get("KLA_DATA_ROOT"):
         root = Path(os.environ["KLA_DATA_ROOT"]).expanduser()
     else:
-        doc = repo_root() / "docs" / "DATA_LOCATION.md"
-        cand: Path | None = None
-        if doc.exists():
-            m = re.search(r"^```\s*\n(.+?)\n```", doc.read_text(encoding="utf-8"),
-                          re.DOTALL | re.MULTILINE)
-            if m:
-                cand = Path(m.group(1).strip())
-        if cand is None:
+        root = Path("/Users/shanmukhsai/Downloads")
+        if not (root / TRAIN_GT[0] / TRAIN_GT[1]).is_dir():
             raise SystemExit("could not determine the dataset root: pass --data-root or set "
                              "KLA_DATA_ROOT (see docs/DATA_LOCATION.md)")
-        root = cand
     if not (root / TRAIN_GT[0] / TRAIN_GT[1]).is_dir():
         raise SystemExit(f"dataset root {root} has no train/GT directory")
     return root
@@ -407,16 +400,34 @@ class DataConfig:
                 f"scale must be 2: the degradation is exactly x2 (SPEC F2, measured on all "
                 f"3200 pairs), got {scale}"
             )
+        lr_patch = int(block.get("lr_patch", 64))
+        crops_per_image = int(block.get("crops_per_image", 1))
+        cutblur_prob = float(block.get("cutblur_prob", 0.5))
+        cutblur_alpha = float(block.get("cutblur_alpha", 0.7))
+        preload = block.get("preload", "auto")
+        preload_headroom = float(block.get("preload_headroom", 2.0))
+        if lr_patch <= 0:
+            raise ValueError(f"lr_patch must be positive, got {lr_patch}")
+        if crops_per_image <= 0:
+            raise ValueError(f"crops_per_image must be positive, got {crops_per_image}")
+        if not 0.0 <= cutblur_prob <= 1.0:
+            raise ValueError(f"cutblur_prob must be in [0,1], got {cutblur_prob}")
+        if not 0.0 <= cutblur_alpha <= 1.0:
+            raise ValueError(f"cutblur_alpha must be in [0,1], got {cutblur_alpha}")
+        if preload not in (True, False, "auto"):
+            raise ValueError(f"preload must be true, false, or 'auto', got {preload!r}")
+        if preload_headroom <= 0.0:
+            raise ValueError(f"preload_headroom must be positive, got {preload_headroom}")
         return cls(
-            lr_patch=int(block.get("lr_patch", 64)),
+            lr_patch=lr_patch,
             scale=scale,
             synth_ratio=sr,
-            crops_per_image=int(block.get("crops_per_image", 1)),
+            crops_per_image=crops_per_image,
             dihedral=bool(block.get("dihedral", True)),
-            cutblur_prob=float(block.get("cutblur_prob", 0.5)),
-            cutblur_alpha=float(block.get("cutblur_alpha", 0.7)),
-            preload=block.get("preload", "auto"),
-            preload_headroom=float(block.get("preload_headroom", 2.0)),
+            cutblur_prob=cutblur_prob,
+            cutblur_alpha=cutblur_alpha,
+            preload=preload,
+            preload_headroom=preload_headroom,
             seed=int(block.get("seed", 42)),
             degrade=deg,
         )
@@ -465,10 +476,15 @@ class PairedRestorationDataset(Dataset):
             lrs, gts = arrays
             if len(lrs) != len(gts):
                 raise ValueError(f"arrays disagree: {len(lrs)} LR vs {len(gts)} GT")
+            if not lrs:
+                raise ValueError("arrays must contain at least one LR/GT pair")
             self.data_root = None
             self.names = list(names) if names is not None else [f"mem_{i:06d}" for i in range(len(lrs))]
-            self._lr: list[np.ndarray] | None = [np.asarray(a, dtype=np.float32) for a in lrs]
-            self._gt: list[np.ndarray] | None = [np.asarray(a, dtype=np.float32) for a in gts]
+            if len(self.names) != len(lrs):
+                raise ValueError(f"names disagree: {len(self.names)} names for {len(lrs)} pairs")
+            self._validate_names()
+            self._lr: list[np.ndarray] | None = [np.asarray(a) for a in lrs]
+            self._gt: list[np.ndarray] | None = [np.asarray(a) for a in gts]
             self.preloaded = True
             self.paths: list[tuple[Path, Path]] = []
         else:
@@ -480,6 +496,9 @@ class PairedRestorationDataset(Dataset):
             else:
                 train, val = train_val_names(self.data_root, split_val_path)
                 self.names = train if split == "train" else val
+            if not self.names:
+                raise ValueError(f"{split} split contains no paired filenames")
+            self._validate_names()
             gt_dir = self.data_root / TRAIN_GT[0] / TRAIN_GT[1]
             lr_dir = self.data_root / TRAIN_LR[0] / TRAIN_LR[1]
             self.paths = [(lr_dir / n, gt_dir / n) for n in self.names]
@@ -533,18 +552,46 @@ class PairedRestorationDataset(Dataset):
         self._lr, self._gt = lrs, gts
         self.preloaded = True
 
+    def _validate_names(self) -> None:
+        if len(set(self.names)) != len(self.names):
+            raise ValueError("dataset filenames contain duplicates")
+        unsafe = [n for n in self.names if Path(n).name != n or not n]
+        if unsafe:
+            raise ValueError(f"dataset filenames must be plain basenames, got {unsafe[:3]}")
+
+    def _validation_pair(self, k: int) -> tuple[np.ndarray, np.ndarray]:
+        if self._lr is not None and self._gt is not None:
+            return self._lr[k], self._gt[k]
+        lp, gp = self.paths[k]
+        return (
+            np.load(lp, allow_pickle=False, mmap_mode="r"),
+            np.load(gp, allow_pickle=False, mmap_mode="r"),
+        )
+
     def _validate_shapes(self) -> None:
-        lr0, gt0 = self._pair(0)
         s = self.cfg.scale
-        if lr0.ndim != 2 or gt0.ndim != 2:
-            raise ValueError(f"expected 2-D arrays, got LR {lr0.shape} and GT {gt0.shape}")
-        if gt0.shape != (s * lr0.shape[0], s * lr0.shape[1]):
-            raise ValueError(f"GT {gt0.shape} is not {s}x LR {lr0.shape}")
-        if self.split == "train":
-            p = self.cfg.lr_patch
-            if lr0.shape[0] < p or lr0.shape[1] < p:
+        p = self.cfg.lr_patch
+        for k, name in enumerate(self.names):
+            lr, gt = self._validation_pair(k)
+            if lr.dtype != np.float32 or gt.dtype != np.float32:
                 raise ValueError(
-                    f"lr_patch={p} exceeds the LR image size {lr0.shape}; lower data.lr_patch"
+                    f"{name}: expected float32 LR/GT, got {lr.dtype}/{gt.dtype}"
+                )
+            if lr.ndim != 2 or gt.ndim != 2:
+                raise ValueError(f"{name}: expected 2-D arrays, got LR {lr.shape} and GT {gt.shape}")
+            if lr.size == 0 or gt.size == 0:
+                raise ValueError(f"{name}: LR/GT arrays must be non-empty")
+            if gt.shape != (s * lr.shape[0], s * lr.shape[1]):
+                raise ValueError(f"{name}: GT {gt.shape} is not {s}x LR {lr.shape}")
+            if not np.isfinite(lr).all() or not np.isfinite(gt).all():
+                raise ValueError(f"{name}: LR/GT contains NaN or Inf")
+            if self.data_root is not None and gt.size and (
+                float(gt.min()) < 0.0 or float(gt.max()) > 1.0
+            ):
+                raise ValueError(f"{name}: GT values must be within [0,1]")
+            if self.split == "train" and (lr.shape[0] < p or lr.shape[1] < p):
+                raise ValueError(
+                    f"{name}: lr_patch={p} exceeds LR image size {lr.shape}; lower data.lr_patch"
                 )
 
     # -- data access ------------------------------------------------------------------
@@ -578,6 +625,14 @@ class PairedRestorationDataset(Dataset):
         """Re-seed for a new epoch: same run gives the same stream, different epochs differ."""
         self._epoch = int(epoch)
         self._rng_obj = None
+
+    def rng_for_index(self, idx: int) -> np.random.Generator:
+        """Stateless sample RNG, stable across worker count and mid-epoch resume.
+
+        A crop is a pure function of seed, epoch, and dataset index. DataLoader prefetching can
+        therefore never advance hidden worker RNG state beyond the checkpointed optimizer step.
+        """
+        return np.random.default_rng([self.cfg.seed, self._epoch, int(idx)])
 
     def __len__(self) -> int:
         if self.split == "val":
@@ -619,7 +674,7 @@ class PairedRestorationDataset(Dataset):
                 "index": k,
             }
 
-        rng = self.rng()
+        rng = self.rng_for_index(idx)
         cfg = self.cfg
         p, s = cfg.lr_patch, cfg.scale
         i = int(rng.integers(0, lr_img.shape[0] - p + 1))

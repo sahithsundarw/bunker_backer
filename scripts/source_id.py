@@ -17,6 +17,8 @@ import sys
 
 import numpy as np
 
+from dataset_paths import default_dataset_root, resolve_test_input_dir
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,12 +68,12 @@ def group_score(F, K):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("root", nargs="?", default=r"C:\kla-data")
+    ap.add_argument("root", nargs="?", default=str(default_dataset_root()))
     ap.add_argument("--n", type=int, default=480)
     args = ap.parse_args()
 
     gt = os.path.join(args.root, "train", "GT")
-    te = os.path.join(args.root, "test_NoisyLR")
+    te = str(resolve_test_input_dir(args.root))
 
     print("=" * 78)
     print("A. .npy HEADER -- any embedded metadata?")

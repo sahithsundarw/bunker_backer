@@ -276,7 +276,14 @@ def paired_verdict(cand_per_image: Mapping[str, Mapping[str, float]],
     mean = sum(diffs) / n
     var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
     sem = (var / n) ** 0.5
-    t = (mean / sem) if sem > 0 else 0.0
+    if sem > 0.0:
+        t = mean / sem
+    elif mean > 0.0:
+        t = float("inf")
+    elif mean < 0.0:
+        t = float("-inf")
+    else:
+        t = 0.0
     better = (mean > 0) if higher_is_better else (mean < 0)
     sig = abs(t) >= PAIRED_T_CRIT
     n_better = sum(1 for d in diffs if ((d > 0) if higher_is_better else (d < 0)))
