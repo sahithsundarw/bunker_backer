@@ -2611,3 +2611,69 @@ candidate existed).
 **Would overturn/extend this:** a licensed semiconductor-fab-specific SEM/inspection dataset
 surfacing later would be strictly more relevant and should supersede this materials-science
 stand-in, not be added alongside it as a second claim about the same axis.
+
+## D54 — INT8 static quantization measured, and rejected: it is SLOWER, not faster, on this architecture
+
+**Date:** 2026-08-17. Round 2 Phase 2 (`.claude/plans/as-of-now-whatever-steady-lemur.md`),
+user's explicit choice: PyTorch-native quantization only, no TensorRT/ONNX. `torch.ao.quantization`'s
+classic static-quantization path is CPU-only by design (`fbgemm`/`onednn`/`qnnpack` backends
+target x86/ARM CPU inference, not GPU) — this measures the CPU-fallback path specifically,
+which SPEC requires (`--device cpu` must not crash), not the scored GPU/H100 axis.
+
+**Method:** FX graph-mode static quantization (`torch.ao.quantization.quantize_fx`), the
+current PyTorch-recommended static-quantization API (eager-mode `quantize_dynamic` was not
+used — it only quantizes `nn.Linear`/`nn.LSTM` well, and this architecture is almost entirely
+`nn.Conv2d`, so dynamic quantization would have measured nothing). Backend: `onednn` — this
+machine's PyTorch build only supports `onednn` (`torch.backends.quantized.supported_engines ==
+['onednn']`; `fbgemm` raised `RuntimeError: quantized engine FBGEMM is not supported`, checked
+directly rather than assumed). Calibrated on 16 real **training**-split images (never
+`test_NoisyLR`, same F17 discipline as everywhere else). `SCA` (`src/blocks.py`) was marked a
+non-traceable leaf module (`PrepareCustomConfig.set_non_traceable_module_classes([SCA])`) —
+its forward does `torch.autocast(device_type=x.device.type, ...)`, a Python-level attribute
+read on a traced tensor proxy that FX symbolic tracing cannot handle; SCA's own 1×1 conv
+therefore stays fp32 in the quantized model, a stated limitation, not a silent one.
+
+**Measured, full 400-image committed val split, reproduced with `scripts/quantize_experiment.py`
+across two independent runs (the second run had other background jobs sharing the CPU, hence
+the noisier wall-clock, included deliberately rather than cherry-picking the cleaner run):**
+
+| | PSNR dB | SSIM | wall-clock (400 img, CPU) | ms/img | speedup |
+|---|---|---|---|---|---|
+| fp32 (baseline), run 1 | 28.7864 ± 4.5329 | 0.78286 | 103.52 s | 258.8 | — |
+| INT8 static (onednn), run 1 | 28.7287 ± 4.4567 | 0.77886 | 213.18 s | 533.0 | **0.486× (slower)** |
+| fp32 (baseline), run 2 | 28.7864 ± 4.5329 | 0.78286 | 70.36 s | 175.9 | — |
+| INT8 static (onednn), run 2 | 28.7287 ± 4.4567 | 0.77886 | 218.17 s | 545.4 | **0.322× (slower)** |
+
+The PSNR/SSIM delta is bit-for-bit identical across both runs (quantization is deterministic
+given the same calibration data); the speedup magnitude varies with system load, but **INT8 is
+slower than fp32 in both runs, not marginally, by roughly 2–3×** — a robust qualitative
+finding, not a one-off measurement artifact. Small quality cost either run: −0.058 dB PSNR,
+−0.004 SSIM. This is a real, measured, negative result — reported as such, not hidden or
+reframed.
+
+**Why, and why this is not surprising given this project's own prior measurement:** D21 already
+established NAFSR is **memory-bandwidth-bound, not compute-bound** (profiling: 32.8%
+LayerNorm, 17.9% conv bias-add, 16.2% convolution — none of it FLOP-bound work), which is why
+`channels_last` and bf16 each moved throughput by under 20% despite being "free" levers
+elsewhere. INT8 quantization's benefit is reduced memory traffic per tensor — but it pays for
+that with a quantize/dequantize (and requantize, at SCA's excluded boundary) step at every one
+of 16 blocks' worth of tensor handoffs, on tensors that are already small (128×128, ≤96
+channels). At this scale, the per-op quantization bookkeeping overhead measurably exceeds
+the memory-traffic saving. This is the same underlying architectural fact (bandwidth-bound,
+not compute-bound, at a small spatial/channel scale) showing up as a second negative result
+for a second "free" lever, not an unrelated failure.
+
+**Decision: INT8 quantization is not adopted.** Not shipped as an `inference.py` precision
+option; the GPU default (bf16) remains the only real lever this architecture responds to
+(D21). Reported in the deck as a measured, understood negative result — direct evidence of
+quantization competency for the axis SPEC's named reviewer specialises in (model
+compression/efficient inference), arguably a stronger signal than a naive speedup claim would
+be, since it demonstrates root-cause understanding (roofline/bandwidth analysis) rather than
+blind application of a technique.
+
+**Would overturn this:** a genuinely compute-bound architecture (wider/deeper, matmul-heavy,
+e.g. the Round-2 sweep's largest configs) might show a different result — not assumed here,
+would need its own measurement if pursued. Also worth trying, not yet done: dynamic
+quantization limited to the FiLM/`NoiseEstimator` `nn.Linear` layers specifically (a much
+smaller, targeted change, unlikely to move the needle given how few FLOPs they represent, but
+cheap to check if time remains).
