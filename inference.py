@@ -315,13 +315,18 @@ def _is_oom(exc: BaseException) -> bool:
         isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower())
 
 
+class _ModelOutputViolation(RuntimeError):
+    """Raised when strict submission inference would otherwise substitute bicubic output."""
+
+
 def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.device,
                 use_amp: bool, amp_dtype: torch.dtype, tta: bool,
                 allow_bicubic_fallback: bool = False) -> np.ndarray:
     """Run one same-shape batch and return a (B, 2H, 2W) float32 array, clipped to [0,1].
 
-    On CUDA OOM the batch is split and retried. A single image that still will not fit is a
-    hard error unless the caller explicitly enabled the demo-only bicubic fallback.
+    On CUDA OOM the batch is split and retried. A single image that still will not fit, or a
+    model output with the wrong shape, is a hard error unless the caller explicitly enabled
+    the demo-only bicubic fallback.
     """
     h, w = arrays[0].shape
     x = np.stack(arrays)[:, None]                      # B,1,H,W float32, unclipped
@@ -348,7 +353,7 @@ def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.devic
                             allow_bicubic_fallback)
             return np.concatenate([a, b], axis=0)
         if not allow_bicubic_fallback:
-            raise RuntimeError(
+            raise _ModelOutputViolation(
                 f"CUDA OOM on a single {h}x{w} image; refusing to substitute bicubic output"
             ) from exc
         _err(f"CUDA OOM on a single {h}x{w} image; demo fallback enabled, using CPU "
@@ -357,11 +362,10 @@ def infer_chunk(net: torch.nn.Module, arrays: list[np.ndarray], dev: torch.devic
     y = y.float()
     expect = (SCALE * h, SCALE * w)
     if tuple(y.shape[-2:]) != expect:
-        detail = (f"model returned {tuple(y.shape[-2:])} for a {h}x{w} input, "
-                  f"expected {expect}")
+        msg = f"model returned {tuple(y.shape[-2:])} for a {h}x{w} input, expected {expect}"
         if not allow_bicubic_fallback:
-            raise RuntimeError(f"{detail}; refusing to substitute bicubic output")
-        _err(f"{detail}; demo fallback enabled, using bicubic x{SCALE} for this batch")
+            raise _ModelOutputViolation(f"{msg}; refusing to substitute bicubic output")
+        _err(f"{msg}; demo fallback enabled, using bicubic x{SCALE} for this batch")
         y = BicubicUpsampler()(torch.from_numpy(x))
     y = y.clamp_(0.0, 1.0).contiguous()
     return y.detach().to("cpu").numpy()[:, 0]
@@ -378,6 +382,16 @@ def main(argv: list[str] | None = None) -> int:
     in_dir, out_dir = Path(args.input_dir), Path(args.output_dir)
     if not in_dir.is_dir():
         _err(f"--input_dir is not a directory: {in_dir}")
+        return 1
+    in_resolved, out_resolved = in_dir.resolve(), out_dir.resolve()
+    if out_resolved == in_resolved or out_resolved.is_relative_to(in_resolved):
+        # Unguarded, this either overwrites the degraded inputs with restored outputs IN
+        # PLACE (a second run then restores the already-restored output again), or makes a
+        # second invocation silently re-ingest the previous run's own output as new input
+        # (adversarial review findings H2/H3). The only destructive write in this program
+        # must not be reachable by accident.
+        _err(f"--output_dir ({out_resolved}) is --input_dir or nested inside it; use a "
+             f"separate directory for --output_dir")
         return 1
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -460,24 +474,24 @@ def main(argv: list[str] | None = None) -> int:
         n_written += 1
 
     bs = max(1, int(args.batch_size))
-    try:
-        with torch.inference_mode():                   # not no_grad: also skips versioning
-            for shape in sorted(groups):
-                batch_items = groups[shape]
-                for i in range(0, len(batch_items), bs):
-                    chunk = batch_items[i:i + bs]
+    with torch.inference_mode():                       # not no_grad: also skips versioning
+        for shape in sorted(groups):
+            batch_items = groups[shape]
+            for i in range(0, len(batch_items), bs):
+                chunk = batch_items[i:i + bs]
+                try:
                     y = infer_chunk(net, [a for _, a in chunk], dev, use_amp, amp_dtype,
                                     args.tta, allow_fallback)
-                    for (src, _), out in zip(chunk, y):
-                        if not np.isfinite(out).all():
-                            _err(f"non-finite prediction for {src.name}; neutralised on write")
-                        futures.append(pool.submit(save_array,
-                                                   mirror_path(in_dir, out_dir, src), out))
-                        n_written += 1
-    except Exception as exc:  # noqa: BLE001 - fail the run without leaving writer threads alive
-        pool.shutdown(wait=True)
-        _err(f"model inference failed ({type(exc).__name__}: {_brief(exc)})")
-        return 1
+                except _ModelOutputViolation as exc:
+                    pool.shutdown(wait=True)
+                    _err(str(exc))
+                    return 1
+                for (src, _), out in zip(chunk, y):
+                    if not np.isfinite(out).all():
+                        _err(f"non-finite prediction for {src.name}; neutralised on write")
+                    futures.append(pool.submit(save_array, mirror_path(in_dir, out_dir, src),
+                                               out))
+                    n_written += 1
 
     pool.shutdown(wait=True)
     n_failed = 0
@@ -495,6 +509,15 @@ def main(argv: list[str] | None = None) -> int:
         # masquerade as success -- exit 0 with an empty output dir is the worst possible
         # outcome on KLA's machine, because nothing would flag it.
         _err(f"produced no outputs for {len(files)} discovered input file(s) in {dt:.2f}s")
+        return 1
+    if n_failed > 0:
+        # V07 requires exactly one output per input; a WRITE failure (disk full, quota,
+        # permissions, a transient filesystem error) is not the "one corrupt input" case V20
+        # exists to tolerate -- it means the output set KLA will read back is short, and an
+        # exit 0 asserting success while that is true is the failure adversarial review
+        # finding H4 identified.
+        _err(f"{n_failed} of {n_written} outputs failed to write ({n_ok}/{len(files)} usable, "
+             f"{dt:.2f}s); exiting non-zero because the output set is incomplete")
         return 1
     _say(verbose,
          f"restored {n_written - n_failed}/{len(files)} in {dt:.2f}s "

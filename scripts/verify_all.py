@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -69,6 +70,17 @@ TIERS["V54"] = 2
 TIERS["V55"] = 0
 TIERS["V56"] = 0
 TIERS["V59"] = 0
+
+# Checks added from the second requirements audit (docs/decisions.md D34), closing U-1 and
+# U-8 -- two requirements no prior check could turn red for.
+# V61 F2 size-agnosticism, forwarded on every architecture (V25-36 band: model correctness)
+# V62 F4 degradation order-randomisation, actually measured (same band: data/degradation)
+TIERS["V57"] = 0
+TIERS["V58"] = 4
+TIERS["V60"] = 1
+TIERS["V61"] = 2
+TIERS["V62"] = 2
+TIERS["V64"] = 1
 
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
@@ -221,32 +233,226 @@ def build_fixtures(root: Path) -> Path:
 # ======================================================================================
 # TIER 0
 # ======================================================================================
+#: Files whose hash pin V00 enforces. Both are pinned in docs/VERIFIER_SHA256; until
+#: 2026-08-15 V00 filtered that list down to the verifier and silently ignored the contract,
+#: so the document CLAUDE.md calls IMMUTABLE could have had a check deleted from it without
+#: the suite noticing (requirements-auditor H-6, docs/decisions.md D31).
+PINNED_FILES = ("scripts/verify_all.py", "docs/VERIFICATION_CONTRACT.md")
+
+
+# ======================================================================================
+# Published-artifact verification (requirements-audit-2 H-5, docs/decisions.md D32)
+# ======================================================================================
+#: Hard ceiling on a published-artifact download. The outputs archive is ~91 MB; this leaves
+#: headroom while refusing a redirect to something enormous.
+PUBLISHED_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024
+PUBLISHED_FETCH_TIMEOUT_S = 300
+
+#: Per-process memo so two checks verifying the same URL download it once.
+_FETCH_CACHE: dict[str, dict[str, Any]] = {}
+
+
+#: The ONLY hosts a published artifact may be fetched from. The URL is read out of a file in
+#: the repository, so it is untrusted input to this process: without an allowlist, that file
+#: can point the verifier at cloud metadata (169.254.169.254), at a service on localhost, or
+#: at file:///... . GitHub serves release assets by 302 from github.com to one of the
+#: githubusercontent hosts, so those hops must be permitted -- and validated (D33).
+PUBLISHED_ARTIFACT_HOSTS = frozenset({
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "raw.githubusercontent.com",
+})
+
+
+def _artifact_url_ok(url: str) -> tuple[bool, str]:
+    """Exact-match scheme/host validation. Anchored parsing, never a substring test."""
+    import urllib.parse
+
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError as e:
+        return False, f"unparseable URL ({e})"
+    if u.scheme != "https":
+        return False, (f"scheme {u.scheme!r} is not allowed; only https "
+                       f"(file/ftp/http would let a repo file read local paths or reach "
+                       f"internal services)")
+    if u.username or u.password:
+        return False, "URL embeds credentials"
+    host = (u.hostname or "").lower()
+    if host not in PUBLISHED_ARTIFACT_HOSTS:
+        return False, f"host {host!r} is not in the published-artifact allowlist"
+    try:
+        port = u.port
+    except ValueError:
+        return False, "invalid port"
+    if port not in (None, 443):
+        return False, f"port {port} is not 443"
+    return True, "ok"
+
+
+def _strict_opener():  # noqa: ANN202
+    """An opener with no auth/cookie handler that validates every redirect hop."""
+    import urllib.error
+    import urllib.request
+
+    class _StrictRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            ok, why = _artifact_url_ok(newurl)
+            if not ok:
+                raise urllib.error.HTTPError(
+                    newurl, code, f"blocked redirect to {newurl!r}: {why}", headers, fp)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(_StrictRedirect())
+
+
+def _fetch_digest(url: str) -> dict[str, Any]:
+    """Download `url` with NO credentials and return the sha256 of the served bytes.
+
+    A published artifact is only published if an anonymous stranger can get it. This uses a
+    bare urllib opener with no auth handler, no netrc, no cookie jar and no Authorization
+    header, and it removes GitHub token variables from the environment for the duration so
+    nothing downstream can pick them up. HTML is rejected explicitly: a 200 that returns a
+    sign-in page is the classic way a "public" URL is actually private.
+    """
+    if url in _FETCH_CACHE:
+        return _FETCH_CACHE[url]
+    import urllib.error
+    import urllib.request
+
+    res: dict[str, Any] = {"url": url}
+    allowed, why = _artifact_url_ok(url)
+    if not allowed:
+        res["error"] = f"refused to fetch: {why}"
+        _FETCH_CACHE[url] = res
+        return res
+    stripped = {k: os.environ.pop(k, None)
+                for k in ("GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN",
+                          "GITHUB_USER", "GIT_ASKPASS")}
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        opener = _strict_opener()  # no auth/cookie handlers; redirects re-validated
+        req = urllib.request.Request(url, headers={"User-Agent": "kla-verifier/1.0"})
+        with opener.open(req, timeout=PUBLISHED_FETCH_TIMEOUT_S) as r:
+            res["status"] = int(getattr(r, "status", 0) or 0)
+            res["content_type"] = (r.headers.get("Content-Type") or "").lower()
+            h = hashlib.sha256()
+            total = 0
+            first = b""
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                if not first:
+                    first = chunk[:64]
+                total += len(chunk)
+                if total > PUBLISHED_ARTIFACT_MAX_BYTES:
+                    res["error"] = f"exceeds {PUBLISHED_ARTIFACT_MAX_BYTES} B cap"
+                    break
+                h.update(chunk)
+            res.setdefault("bytes", total)
+            res["bytes"] = total
+            res["sha256"] = h.hexdigest()
+            head = first.lstrip()[:15].lower()
+            if head.startswith(b"<!doctype") or head.startswith(b"<html") \
+                    or "text/html" in res["content_type"]:
+                res["error"] = ("served HTML, not the artifact -- a sign-in or error page "
+                                "behind a 200")
+    except urllib.error.HTTPError as e:
+        res["status"] = int(e.code)
+        res["error"] = (f"HTTP {e.code}"
+                        + (" (authentication required -- the artifact is NOT public)"
+                           if e.code in (401, 403) else ""))
+    except Exception as e:  # noqa: BLE001 - network failure is a FAIL, never a skip
+        res["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        for k, v in stripped.items():
+            if v is not None:
+                os.environ[k] = v
+    _FETCH_CACHE[url] = res
+    return res
+
+
+def _verify_published(url: str, expected: set[str] | str) -> tuple[bool, str, dict[str, Any]]:
+    """Fetch `url` anonymously; the served digest must be (one of) `expected`."""
+    want = {expected} if isinstance(expected, str) else set(expected)
+    r = _fetch_digest(url)
+    ev = {k: r.get(k) for k in ("url", "status", "bytes", "content_type", "sha256", "error")}
+    if r.get("error"):
+        return False, f"{url} -> {r['error']}", ev
+    if r.get("status") != 200:
+        return False, f"{url} -> HTTP {r.get('status')}, expected 200", ev
+    if not r.get("bytes"):
+        return False, f"{url} -> served 0 bytes", ev
+    got = r.get("sha256", "")
+    if got not in want:
+        return False, (f"{url} -> served bytes hash {got}, which matches NO published digest "
+                       f"({sorted(want)[:2]}) -- the published digest is wrong or the asset "
+                       f"was replaced"), ev
+    return True, (f"anonymous fetch of {url.rsplit('/', 1)[-1]} returned HTTP 200, "
+                  f"{r['bytes']} B, sha256 {got[:16]}... matching the published digest"), ev
+
+
+def _published_digests(text: str) -> set[str]:
+    return set(re.findall(r"\b[0-9a-f]{64}\b", text))
+
+
+def _published_urls(text: str, suffix: str) -> list[str]:
+    urls = re.findall(r"https?://[^\s)\]|`<>]+", text)
+    seen, out = set(), []
+    for u in urls:
+        u = u.rstrip(".,;")
+        if u.lower().endswith(suffix) and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def check_V00(ctx: Ctx) -> CheckResult:
-    """Verifier self-hash integrity pin."""
-    digest = hashlib.sha256(SELF_PATH.read_bytes()).hexdigest()
+    """Integrity pin over EVERY pinned file, not just the verifier.
+
+    A digest that does not match its pin is only tolerated when the new digest appears
+    verbatim in docs/decisions.md -- i.e. the change was declared. That is the mechanism
+    Prime Directive 1 relies on, and it now covers docs/VERIFICATION_CONTRACT.md too.
+    """
     pin_file = ctx.p("docs", "VERIFIER_SHA256")
     if not pin_file.exists():
-        return CheckResult("V00", FAIL, "docs/VERIFIER_SHA256 missing", {"computed": digest})
-    pinned = None
+        return CheckResult("V00", FAIL, "docs/VERIFIER_SHA256 missing")
+    pins: dict[str, str] = {}
     for line in pin_file.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if s.startswith("#") or not s:
             continue
         parts = s.split()
-        if len(parts) >= 2 and parts[1].endswith("scripts/verify_all.py"):
-            pinned = parts[0]
-    if pinned is None:
-        return CheckResult("V00", FAIL, "no pin recorded for scripts/verify_all.py",
-                           {"computed": digest})
-    if pinned == digest:
-        return CheckResult("V00", PASS, "hash matches pin", {"sha256": digest})
+        if len(parts) >= 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+            pins[parts[1].replace("\\", "/")] = parts[0]
+    absent = [f for f in PINNED_FILES if f not in pins]
+    if absent:
+        return CheckResult("V00", FAIL, f"no pin recorded for {absent}",
+                           {"pinned_paths": sorted(pins)})
     dec = ctx.read("docs", "decisions.md") if ctx.exists("docs", "decisions.md") else ""
-    if digest in dec:
-        return CheckResult("V00", PASS, "hash changed but documented in decisions.md",
-                           {"computed": digest, "pinned": pinned})
-    return CheckResult("V00", FAIL,
-                       "verifier changed without a matching docs/decisions.md entry",
-                       {"computed": digest, "pinned": pinned})
+    ev: dict[str, Any] = {}
+    bad: list[str] = []
+    for rel in PINNED_FILES:
+        # The verifier hashes the file it is actually EXECUTING, so a pin cannot be
+        # satisfied by a second copy sitting in the tree.
+        f = SELF_PATH if rel == "scripts/verify_all.py" else ctx.p(*rel.split("/"))
+        if not f.exists():
+            bad.append(f"{rel}: pinned but missing from the tree")
+            continue
+        digest = hashlib.sha256(f.read_bytes()).hexdigest()
+        ev[rel] = {"computed": digest, "pinned": pins[rel]}
+        if digest == pins[rel]:
+            continue
+        if digest in dec:
+            ev[rel]["documented_in_decisions"] = True
+            continue
+        bad.append(f"{rel} changed without a matching docs/decisions.md entry "
+                   f"(computed {digest[:12]}..., pinned {pins[rel][:12]}...)")
+    if bad:
+        return CheckResult("V00", FAIL, "; ".join(bad), ev)
+    return CheckResult("V00", PASS, f"all {len(PINNED_FILES)} pinned files match", ev)
 
 
 def check_V01(ctx: Ctx) -> CheckResult:
@@ -369,16 +575,49 @@ def check_V06(ctx: Ctx) -> CheckResult:
                                {"size": size})
         if size <= 1024:
             return CheckResult("V06", FAIL, f"weights/best.pt is {size} B (<= 1 KB)", {"size": size})
+        # A local copy satisfies the contract's first route, but if this repo ALSO publishes a
+        # download URL then that URL is a claim made to reviewers and it is verified too.
+        # Otherwise V06 stays green on the author's disk while the published link rots -- the
+        # exact asymmetry V59 was added to catch (requirements-audit-2 H-5).
+        rd = ctx.p("weights", "README.md")
+        if rd.exists():
+            txt = rd.read_text(encoding="utf-8", errors="replace")
+            urls, digests = _published_urls(txt, ".pt"), _published_digests(txt)
+            if urls and digests:
+                ok, why, e = _verify_published(urls[0], digests)
+                if not ok:
+                    return CheckResult("V06", FAIL,
+                                       f"checkpoint present locally, but the URL published in "
+                                       f"weights/README.md does not check out: {why}",
+                                       {"size": size, "fetch": e})
+                return CheckResult("V06", PASS,
+                                   f"checkpoint present in clone ({size} B) and {why}",
+                                   {"size": size, "fetch": e})
         return CheckResult("V06", PASS, "checkpoint present in clone", {"size": size})
     rd = ctx.p("weights", "README.md")
     if rd.exists():
         txt = rd.read_text(encoding="utf-8", errors="replace")
-        urls = re.findall(r"https?://\S+", txt)
-        has_sha = re.search(r"\b[0-9a-f]{64}\b", txt) is not None
-        if urls and has_sha:
+        urls = _published_urls(txt, ".pt")
+        digests = _published_digests(txt)
+        if urls and digests:
+            # The contract's second route, implemented as the contract words it: "a URL that
+            # returns HTTP 200 from a logged-out session, plus a sha256 that matches after
+            # download". It previously returned an unconditional FAIL here, so the published
+            # route could never go green and nothing was ever fetched.
+            oks, details, ev = [], [], {}
+            for u in urls[:3]:
+                ok, why, e = _verify_published(u, digests)
+                oks.append(ok)
+                details.append(why)
+                ev[u] = e
+            if any(oks):
+                return CheckResult("V06", PASS, "; ".join(d for o, d in zip(oks, details) if o),
+                                   ev)
+            return CheckResult("V06", FAIL, "; ".join(details), ev)
+        if urls or digests:
             return CheckResult("V06", FAIL,
-                               "URL+sha256 present but not verified (needs a logged-out fetch)",
-                               {"urls": urls[:3]})
+                               "weights/README.md publishes a URL or a digest but not both",
+                               {"urls": urls[:3], "n_digests": len(digests)})
     rc, so, _ = ctx.run(["git", "remote", "-v"])
     if rc == 0 and not so.strip():
         return CheckResult("V06", SKIP, SKIP_WHITELIST["V06"])
@@ -1013,6 +1252,137 @@ def check_V27(ctx: Ctx) -> CheckResult:
                        f"{cand['lpips']['mean']:.5f} vs {ref['lpips']['mean']:.5f}", ev)
 
 
+#: Which results/baselines/<dir> supplied the U-Net reference, so the paired per-image
+#: reader looks in the same place the aggregate came from.
+_UNET_DIR_FOUND = [""]
+
+#: Two-sided normal critical value at alpha=0.05. A difference the paired test cannot
+#: separate from zero is a TIE, and a tie is not a win.
+T_CRIT = 1.96
+
+
+def _per_image(ctx: Ctx, name: str) -> dict[str, dict[str, float]] | None:
+    """Read the per-image rows of results/baselines/<name>/metrics.json, keyed by filename."""
+    if not name:
+        return None
+    p = ctx.p("results", "baselines", name, "metrics.json")
+    if not p.exists():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    rows = raw.get("per_image")
+    if not isinstance(rows, list) or not rows:
+        return None
+    out: dict[str, dict[str, float]] = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("file"):
+            out[str(r["file"])] = {k: float(v) for k, v in r.items()
+                                   if k != "file" and isinstance(v, (int, float))}
+    return out or None
+
+
+def _paired_verdict(cand_pi: dict[str, dict[str, float]] | None,
+                    ref_pi: dict[str, dict[str, float]] | None,
+                    key: str, higher_is_better: bool) -> dict[str, Any] | None:
+    """Paired t-statistic over the per-image differences. None if unavailable."""
+    if not cand_pi or not ref_pi:
+        return None
+    common = sorted(set(cand_pi) & set(ref_pi))
+    diffs = [cand_pi[f][key] - ref_pi[f][key] for f in common
+             if key in cand_pi[f] and key in ref_pi[f]]
+    n = len(diffs)
+    if n < 30:  # anti-vacuity: too few pairs to conclude anything
+        return None
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    sem = (var / n) ** 0.5
+    t = (mean / sem) if sem > 0 else 0.0
+    better = (mean > 0) if higher_is_better else (mean < 0)
+    sig = abs(t) >= T_CRIT
+    n_better = sum(1 for d in diffs if ((d > 0) if higher_is_better else (d < 0)))
+    return {"test": "paired", "n": n, "mean_diff": mean, "sem": sem, "t": t,
+            "images_better": n_better, "significant": sig,
+            "win": bool(better and sig), "loss": bool((not better) and sig)}
+
+
+def _unpaired_verdict(c: dict[str, Any], r: dict[str, Any],
+                      higher_is_better: bool) -> dict[str, Any]:
+    """Fallback when per-image data is absent: require the gap to exceed 2*SEM."""
+    delta = c["mean"] - r["mean"]
+    better = (delta > 0) if higher_is_better else (delta < 0)
+    sems = [s for s in (_sem(c), _sem(r)) if s is not None]
+    need = 2.0 * max(sems) if sems else 0.0
+    sig = abs(delta) > need
+    return {"test": "unpaired-2sem", "mean_diff": delta, "required_margin": need,
+            "significant": sig, "win": bool(better and sig),
+            "loss": bool((not better) and sig)}
+
+
+def _negative_result_documented(ctx: Ctx, cand: dict[str, dict[str, Any]],
+                                ref: dict[str, dict[str, Any]],
+                                need: tuple[str, ...]) -> tuple[bool, str]:
+    """Is the contract's negative-result escape hatch GENUINELY satisfied?
+
+    The previous test was ``"V28" in dec and "negative result" in dec.lower()``. The D22
+    paragraph that merely *describes* this hatch contains both strings, so the hatch was
+    permanently unlocked and ``wins`` did not gate the outcome at all: V28 would have
+    returned PASS with our model losing on all three metrics (requirements-auditor H-1).
+
+    A real entry must (a) be a structured, findable decision heading, (b) quote the six
+    measured means, which boilerplate cannot do, and (c) name the shipped model -- and that
+    name must match the architecture actually inside weights/best.pt, which is the
+    contract's "the better model shipped" clause.
+    """
+    if not ctx.exists("docs", "decisions.md"):
+        return False, "docs/decisions.md is missing"
+    dec = ctx.read("docs", "decisions.md")
+    blocks = re.split(r"^##\s+", dec, flags=re.M)
+    hit = None
+    for b in blocks:
+        head = b.splitlines()[0] if b.splitlines() else ""
+        if re.match(r"D\d+\b", head) and "NEGATIVE RESULT" in head.upper() and "V28" in b:
+            hit = b
+            break
+    if hit is None:
+        return False, ("no '## D<n> ... NEGATIVE RESULT' section mentioning V28 in "
+                       "docs/decisions.md; a passing mention of the words is not a record")
+    # (b) the six measured means, at the precision the summary table prints them
+    absent = []
+    for label, src_m in (("final", cand), ("unet", ref)):
+        for k in need:
+            dp = 4 if k == "psnr" else 5
+            if f"{src_m[k]['mean']:.{dp}f}" not in hit:
+                absent.append(f"{label}.{k}={src_m[k]['mean']:.{dp}f}")
+    if absent:
+        return False, (f"the negative-result entry does not quote the measured values "
+                       f"{absent} -- it was not written against this measurement")
+    # (c) the shipped model, cross-checked against the checkpoint itself
+    m = re.search(r"SHIPPED MODEL:\s*([A-Za-z0-9_.-]+)", hit)
+    if not m:
+        return False, ("the negative-result entry does not state 'SHIPPED MODEL: <name>', so "
+                       "the contract's 'better model shipped' clause cannot be checked")
+    claimed = m.group(1)
+    ck = ctx.p("weights", "best.pt")
+    if not ck.exists():
+        return False, f"claims SHIPPED MODEL: {claimed} but weights/best.pt does not exist"
+    try:
+        import torch
+
+        raw = torch.load(ck, map_location="cpu", weights_only=True)
+        cfg = raw.get("config", {}) if isinstance(raw, dict) else {}
+        mcfg = cfg.get("model", cfg) if isinstance(cfg, dict) else {}
+        actual = str(mcfg.get("name", ""))
+    except Exception as exc:  # noqa: BLE001
+        return False, f"could not read the architecture out of weights/best.pt ({exc})"
+    if actual.lower() != claimed.lower():
+        return False, (f"the entry says SHIPPED MODEL: {claimed} but weights/best.pt "
+                       f"contains {actual!r}")
+    return True, (f"structured entry present, quotes all six measured means, and "
+                  f"SHIPPED MODEL: {claimed} matches weights/best.pt")
+
+
 def check_V28(ctx: Ctx) -> CheckResult:
     """Final model must beat the U-Net baseline on at least 2 of the 3 metrics.
 
@@ -1024,9 +1394,11 @@ def check_V28(ctx: Ctx) -> CheckResult:
     if r:
         return r
     ref = None
+    _UNET_DIR_FOUND[0] = ""
     for nm in ("unet_baseline", "unet", "baseline_unet"):
         ref = _baseline_metrics(ctx, nm)
         if ref is not None:
+            _UNET_DIR_FOUND[0] = nm
             break
     if ref is None:
         return not_impl("V28", "results/baselines/unet_baseline/metrics.json")
@@ -1037,30 +1409,42 @@ def check_V28(ctx: Ctx) -> CheckResult:
     missing = [k for k in need if k not in cand or k not in ref]
     if missing:
         return CheckResult("V28", FAIL, f"metrics missing: {missing}")
-    wins = []
-    if cand["psnr"]["mean"] > ref["psnr"]["mean"]:
-        wins.append("psnr")
-    if cand["ssim"]["mean"] > ref["ssim"]["mean"]:
-        wins.append("ssim")
-    if cand["lpips"]["mean"] < ref["lpips"]["mean"]:
-        wins.append("lpips")
-    ev = {"wins": wins,
+
+    # "Outperforms" must mean outperforms. Both models score the SAME 400 images, so the
+    # correct statistic is the paired per-image difference, not the gap between two
+    # independent means. Counting a mean difference of +0.000135 SSIM -- which our model
+    # wins on only 172 of 400 images -- as a "win" is precisely the self-serving reading
+    # this check exists to prevent (docs/decisions.md D31).
+    cand_pi, ref_pi = _per_image(ctx, "final"), _per_image(ctx, _UNET_DIR_FOUND[0])
+    verdicts: dict[str, dict[str, Any]] = {}
+    for key in need:
+        v = _paired_verdict(cand_pi, ref_pi, key, higher_is_better=(key != "lpips"))
+        if v is None:  # no per-image data: fall back to 2*SEM on the unpaired means
+            v = _unpaired_verdict(cand[key], ref[key], higher_is_better=(key != "lpips"))
+        verdicts[key] = v
+    wins = sorted(k for k, v in verdicts.items() if v["win"])
+    losses = sorted(k for k, v in verdicts.items() if v["loss"])
+    ties = sorted(k for k, v in verdicts.items() if not v["win"] and not v["loss"])
+    ev = {"wins": wins, "losses": losses, "ties": ties, "verdicts": verdicts,
           "final": {k: cand[k]["mean"] for k in need},
-          "unet": {k: ref[k]["mean"] for k in need}}
+          "unet": {k: ref[k]["mean"] for k in need},
+          "paired": cand_pi is not None and ref_pi is not None}
     if len(wins) >= 2:
         return CheckResult("V28", PASS,
-                           f"beats the U-Net baseline on {len(wins)}/3 metrics: {wins}", ev)
-    dec = ctx.read("docs", "decisions.md") if ctx.exists("docs", "decisions.md") else ""
-    documented = "V28" in dec and "negative result" in dec.lower()
-    ev["negative_result_documented"] = documented
-    if documented:
+                           f"beats the U-Net baseline on {len(wins)}/3 metrics: {wins} "
+                           f"(losses {losses}, ties {ties})", ev)
+
+    ok, why = _negative_result_documented(ctx, cand, ref, need)
+    ev["negative_result"] = why
+    if ok:
         return CheckResult("V28", PASS,
-                           f"loses to the U-Net baseline ({len(wins)}/3) but the negative "
-                           "result is documented in docs/decisions.md as the contract permits",
-                           ev)
+                           f"does NOT beat the U-Net baseline (wins {wins}, losses {losses}, "
+                           f"ties {ties}) but the contract's escape hatch is properly "
+                           f"satisfied: {why}", ev)
     return CheckResult("V28", FAIL,
-                       f"beats the U-Net baseline on only {len(wins)}/3 metrics and no honest "
-                       "negative result is documented in docs/decisions.md", ev)
+                       f"beats the U-Net baseline on only {len(wins)}/3 metrics "
+                       f"(losses {losses}, ties {ties}) and the escape hatch is not "
+                       f"satisfied: {why}", ev)
 
 
 def check_V29(ctx: Ctx) -> CheckResult:
@@ -1579,15 +1963,73 @@ def check_V47(ctx: Ctx) -> CheckResult:
     return CheckResult("V47", PASS, f"{len(files)} samples in {dt:.1f}s", {"seconds": dt})
 
 
+#: Per-metric tolerance when reconciling the published table against the machine-written
+#: evaluation records. The table prints PSNR to 4 dp and SSIM/LPIPS to 5 dp, so these are
+#: a little over half a printed ulp -- tight enough that a stale number cannot hide.
+V48_TOL = {"psnr": 1e-3, "ssim": 1e-4, "lpips": 1e-4}
+
+
 def check_V48(ctx: Ctx) -> CheckResult:
+    """The results table must exist AND its numbers must match the evaluation records.
+
+    Until 2026-08-15 this counted lines starting with '|' and passed at >= 6. It never
+    opened a metrics.json, so a table whose numbers disagreed with the records passed --
+    which is the state the repo was actually in, with six documents publishing a PSNR the
+    evaluator had never produced (requirements-auditor H-4/H-2). The contract asks that
+    "the numbers match a fresh run of scripts/evaluate.py within tolerance"; the records in
+    results/baselines/*/metrics.json ARE that run's output, written by it and reloaded
+    from disk, so they are what the table is reconciled against.
+    """
     p = ctx.p("results", "metrics_summary.md")
     if not p.exists():
         return not_impl("V48", "results/metrics_summary.md")
-    txt = p.read_text(encoding="utf-8", errors="replace").lower()
-    rows = [l for l in txt.splitlines() if l.strip().startswith("|")]
+    rows = [l.strip() for l in p.read_text(encoding="utf-8", errors="replace").splitlines()
+            if l.strip().startswith("|")]
     if len(rows) < 6:
         return CheckResult("V48", FAIL, "fewer than 3 baselines + final in the table")
-    return CheckResult("V48", PASS, "results table present")
+    row_nums = [[float(x) for x in re.findall(r"-?\d+\.\d+", r)] for r in rows]
+
+    bdir = ctx.p("results", "baselines")
+    records: dict[str, dict[str, dict[str, Any]]] = {}
+    if bdir.is_dir():
+        for d in sorted(x for x in bdir.iterdir() if x.is_dir()):
+            m = _baseline_metrics(ctx, d.name)
+            if m and all(k in m for k in V48_TOL):
+                records[d.name] = m
+    if len(records) < 4:
+        return CheckResult("V48", FAIL,
+                           f"only {len(records)} evaluation records under results/baselines/; "
+                           "the contract requires >= 3 baselines + final",
+                           {"records": sorted(records)})
+    if "final" not in records:
+        return CheckResult("V48", FAIL,
+                           "no results/baselines/final/metrics.json, so the table cannot be "
+                           "reconciled against the final model", {"records": sorted(records)})
+
+    matched: dict[str, str] = {}
+    unmatched: list[dict[str, Any]] = []
+    for name, m in sorted(records.items()):
+        want = {k: m[k]["mean"] for k in V48_TOL}
+        hit = None
+        for row, nums in zip(rows, row_nums):
+            if all(any(abs(v - want[k]) <= V48_TOL[k] for v in nums) for k in V48_TOL):
+                hit = row[:70]
+                break
+        if hit is None:
+            unmatched.append({"record": name,
+                              "expected": {k: round(v, 6) for k, v in want.items()}})
+        else:
+            matched[name] = hit
+    if unmatched:
+        return CheckResult("V48", FAIL,
+                           f"{len(unmatched)} evaluation record(s) have no matching row in "
+                           "results/metrics_summary.md -- the published table disagrees with "
+                           "the measurement",
+                           {"unmatched": unmatched, "matched": sorted(matched)})
+    return CheckResult("V48", PASS,
+                       f"table reconciles against all {len(matched)} evaluation records "
+                       "(psnr 1e-3, ssim/lpips 1e-4)",
+                       {"matched": sorted(matched)})
 
 
 def check_V49(ctx: Ctx) -> CheckResult:
@@ -1630,7 +2072,7 @@ BLOB_EXTS = (".npz", ".pt", ".pth", ".zip", ".env", ".tar", ".gz", ".7z", ".ckpt
 #: directly, since it is 1.97 MiB -- far under MAX_TRACKED_FILE_BYTES) is the mechanism this
 #: repo uses. Mirrors .gitignore's own `!weights/best.pt` carve-out of its blanket `*.pt`
 #: rule. Deliberately narrow, same pattern as the sample_inputs/*.npy exemption below:
-#: exactly one path, no glob, no directory. See docs/decisions.md D30.
+#: exactly one path, no glob, no directory. See docs/decisions.md D41.
 CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"
 
 #: Path segments that would mean a slice of the dataset tree got committed.
@@ -1840,6 +2282,46 @@ def check_V54(ctx: Ctx) -> CheckResult:
                        f"({scanned} modules scanned)", {"modules_scanned": scanned})
 
 
+def _parse_github_remote(url: str) -> tuple[str, str] | None:
+    """Parse `owner, name` from a git remote, accepting ONLY a real github.com host.
+
+    Deliberately not a substring match. The first version of this used
+    ``re.search(r"github\\.com[:/]+([^/]+)/([^/\\s]+?)(?:\\.git)?$", url)``, which is
+    unanchored, so the host was never actually validated:
+
+        https://evil.example.com/github.com/attacker/payload.git  -> ("attacker", "payload")
+        https://notgithub.com/a/b                                 -> ("a", "b")
+
+    Both matched. Today V55 only clones the remote git already points at, so the blast
+    radius was small — but the owner/name it derives are exactly the values one would use
+    to build an `api.github.com/repos/<owner>/<name>` request, and at that point the
+    bypass becomes a live SSRF. Fixed at the parser rather than at the call site, so it
+    cannot be reintroduced by a later caller.
+    """
+    u = url.strip()
+    # scp-like syntax: git@github.com:owner/repo(.git)
+    m = re.fullmatch(r"(?:ssh://)?git@github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?", u)
+    if m:
+        return m.group(1), m.group(2)
+    try:
+        p = urllib.parse.urlsplit(u)
+    except ValueError:
+        return None
+    if p.scheme not in ("https", "http", "git", "ssh"):
+        return None
+    if (p.hostname or "").lower() not in ("github.com", "www.github.com"):
+        return None
+    parts = [s for s in p.path.split("/") if s]
+    if len(parts) != 2:
+        return None
+    owner, name = parts[0], parts[1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    if not owner or not name:
+        return None
+    return owner, name
+
+
 def check_V55(ctx: Ctx) -> CheckResult:
     """F12: the repository must be PUBLIC, proven without credentials.
 
@@ -1851,11 +2333,12 @@ def check_V55(ctx: Ctx) -> CheckResult:
     if rc != 0 or not url.strip():
         return CheckResult("V55", FAIL, "no origin remote configured")
     url = url.strip()
-    m = re.search(r"github\.com[:/]+([^/]+)/([^/\s]+?)(?:\.git)?$", url)
-    if not m:
-        return CheckResult("V55", FAIL, f"cannot parse a GitHub owner/name from {url}",
+    parsed = _parse_github_remote(url)
+    if parsed is None:
+        return CheckResult("V55", FAIL,
+                           f"origin is not a recognised github.com remote: {url}",
                            {"url": url})
-    owner, name = m.group(1), m.group(2)
+    owner, name = parsed
     # Strip every credential source: a pass here must mean genuinely public.
     anon = {"GITHUB_TOKEN": "", "GH_TOKEN": "", "GIT_ASKPASS": "",
             "GIT_TERMINAL_PROMPT": "0"}
@@ -1951,9 +2434,16 @@ def check_V56(ctx: Ctx) -> CheckResult:
                            "manifest command lacks --require_weights, so these outputs could "
                            "be the no-checkpoint bicubic fallback rather than model results",
                            {"command": str(mj["command"])[:200]})
+    ok, why, ev = _verify_published(str(mj["release_url"]).strip(),
+                                    str(mj["archive_sha256"]).strip())
+    if not ok:
+        return CheckResult("V56", FAIL,
+                           f"the manifest describes a published archive that does not check "
+                           f"out: {why}", {"fetch": ev, **{k: mj.get(k) for k in required}})
     return CheckResult("V56", PASS,
                        f"manifest describes {mj['n_files']} published outputs produced with "
-                       "--require_weights", {k: mj.get(k) for k in required})
+                       f"--require_weights, and {why}",
+                       {"fetch": ev, **{k: mj.get(k) for k in required}})
 
 
 def check_V59(ctx: Ctx) -> CheckResult:
@@ -1976,9 +2466,18 @@ def check_V59(ctx: Ctx) -> CheckResult:
     if tracked:
         return CheckResult("V59", PASS, "weights/best.pt is tracked in the repository")
     if published:
-        return CheckResult("V59", PASS,
-                           "checkpoint published via URL + sha256 in weights/README.md",
-                           {"sha256": sha.group(0), "urls": urls[:2]})
+        # Downloadability is the entire point of this check, so it is measured, not asserted.
+        pt_urls = _published_urls(txt, ".pt")
+        if not pt_urls:
+            return CheckResult("V59", FAIL,
+                               "weights/README.md carries a URL and a digest but no URL that "
+                               "points at a .pt asset", {"urls": urls[:3]})
+        ok, why, ev = _verify_published(pt_urls[0], _published_digests(txt))
+        if not ok:
+            return CheckResult("V59", FAIL,
+                               f"weights/best.pt is neither tracked nor genuinely "
+                               f"obtainable: {why}", ev)
+        return CheckResult("V59", PASS, f"checkpoint published and verified: {why}", ev)
     if ck.exists():
         return CheckResult("V59", FAIL,
                            f"weights/best.pt exists locally ({ck.stat().st_size} B) but is "
@@ -1986,6 +2485,424 @@ def check_V59(ctx: Ctx) -> CheckResult:
                            "who clones this repo",
                            {"ignored": True, "size": ck.stat().st_size})
     return not_impl("V59", "weights/best.pt (not trained yet) or a published URL + sha256")
+
+
+def check_V57(ctx: Ctx) -> CheckResult:
+    """The tensor ENTERING THE MODEL is unclipped -- tested on the real inference.py path.
+
+    V12 tests a helper (src.io_utils.load_array), not the model input; the contract's exact
+    wording is "the tensor entering the model" (requirements-auditor U-6). A clamp_ anywhere
+    in inference.py's stack/H2D/channels_last/autocast pipeline would leave V12 green. This
+    imports inference.py's own load_net() and infer_chunk() -- not a reimplementation of the
+    pipeline -- and attaches a forward pre-hook to the REAL net to capture exactly what it
+    receives, forcing --device cpu so it never contends for the GPU.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V57", "inference.py")
+    ck = ctx.p("weights", "best.pt")
+    if not ck.exists():
+        return not_impl("V57", "weights/best.pt (no trained checkpoint to test the real path)")
+    import importlib.util
+
+    import numpy as np
+
+    spec = importlib.util.spec_from_file_location("_v57_inference", ctx.p("inference.py"))
+    if spec is None or spec.loader is None:
+        return CheckResult("V57", FAIL, "could not load inference.py as a module")
+    # load_net() below does `from src.model import build_model` -- a deferred import that
+    # fires when load_net() is CALLED, not at exec_module time -- so the repo root has to
+    # stay on sys.path for the rest of this check, matching V22/V61/V62's convention of
+    # leaving it inserted for the life of the (one-shot) verifier process.
+    root_str = str(ctx.root)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+    try:
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V57", FAIL, f"inference.py failed to import: {type(exc).__name__}: {exc}")
+
+    try:
+        import torch
+
+        dev = mod.resolve_device("cpu")
+        net, loaded = mod.load_net(ck, dev, False)
+        if not loaded:
+            return CheckResult("V57", FAIL,
+                               "weights/best.pt exists but load_net() fell back to the "
+                               "bicubic upsampler -- cannot test the real model's input path")
+        use_amp, amp_dtype, _ = mod.resolve_precision("auto", dev)
+
+        seen: dict[str, Any] = {}
+
+        def _pre_hook(module, args):  # noqa: ANN001
+            if args:
+                t = args[0]
+                seen["min"] = float(t.min())
+                seen["max"] = float(t.max())
+
+        h = net.register_forward_pre_hook(_pre_hook)
+        try:
+            # SAME extreme-value construction V12 already uses (observed real range
+            # [-0.28, 2.16], SPEC_ADDENDUM section 4), routed through the ACTUAL pipeline
+            # function that every real inference.py run calls.
+            arr = np.array([[-0.28, 2.16], [0.5, 1.5]], dtype=np.float32)
+            arr = np.pad(arr, ((0, 126), (0, 126)), mode="wrap").astype(np.float32)
+            mod.infer_chunk(net, [arr], dev, use_amp, amp_dtype, False)
+        finally:
+            h.remove()
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V57", FAIL, f"exception exercising the real path: "
+                           f"{type(exc).__name__}: {exc}")
+
+    if "min" not in seen:
+        return CheckResult("V57", FAIL, "forward pre-hook never fired; net was not called "
+                           "the way infer_chunk normally calls it")
+    if seen["min"] > -0.27 or seen["max"] < 2.15:
+        return CheckResult("V57", FAIL,
+                           "the tensor ACTUALLY ENTERING THE MODEL was clipped somewhere in "
+                           "the stack/H2D/channels_last/autocast path, even though V12's "
+                           "helper-level check passed", seen)
+    return CheckResult("V57", PASS,
+                       f"real load_net()+infer_chunk() path delivers an unclipped tensor to "
+                       f"the model: min {seen['min']:.4f}, max {seen['max']:.4f}", seen)
+
+
+#: How long a docs/link_check.md re-fetch stays trusted before V58 requires a new one.
+LINK_CHECK_MAX_AGE_HOURS = 72
+
+
+def _spec_23_urls(ctx: Ctx) -> list[str]:
+    """Extract the official links from docs/SPEC.md's "### 2.3 Official links" table.
+
+    Read dynamically rather than hardcoded so the check cannot silently drift from SPEC.md
+    if a link is ever added or changed there.
+    """
+    sp = ctx.p("docs", "SPEC.md")
+    if not sp.exists():
+        return []
+    txt = sp.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"###\s*2\.3\s*Official links(.*?)(?:\n##|\Z)", txt, re.S)
+    if not m:
+        return []
+    return re.findall(r"https?://[^\s`|)]+", m.group(1))
+
+
+def check_V58(ctx: Ctx) -> CheckResult:
+    """SPEC 2.3's official links are independently re-verified, and the record has not gone
+    stale (requirements-auditor U-10: licence links were re-checked, these never were).
+    """
+    urls = _spec_23_urls(ctx)
+    if not urls:
+        return not_impl("V58", "docs/SPEC.md ### 2.3 Official links table")
+    lc = ctx.p("docs", "link_check.md")
+    if not lc.exists():
+        return not_impl("V58", "docs/link_check.md")
+    txt = lc.read_text(encoding="utf-8", errors="replace")
+
+    rows: dict[str, tuple[str, str]] = {}
+    for line in txt.splitlines():
+        m = re.match(
+            r"\|\s*`?(https?://[^\s`|]+)`?\s*\|\s*(\d{3})\s*\|\s*"
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*\|", line)
+        if m:
+            rows[m.group(1)] = (m.group(2), m.group(3))
+
+    missing = [u for u in urls if u not in rows]
+    if missing:
+        return CheckResult("V58", FAIL,
+                           f"{len(missing)} of {len(urls)} SPEC 2.3 URLs are not recorded in "
+                           "docs/link_check.md", {"missing": missing[:5]})
+    bad_status = {u: s for u, (s, _) in rows.items() if u in urls and s != "200"}
+    if bad_status:
+        return CheckResult("V58", FAIL, f"{len(bad_status)} link(s) did not return 200",
+                           {"bad_status": bad_status})
+
+    import datetime as _dt
+
+    timestamps = []
+    for u in urls:
+        try:
+            timestamps.append(
+                _dt.datetime.strptime(rows[u][1], "%Y-%m-%dT%H:%M:%SZ")
+                .replace(tzinfo=_dt.timezone.utc))
+        except ValueError:
+            return CheckResult("V58", FAIL, f"unparseable timestamp for {u}: {rows[u][1]}")
+    oldest = min(timestamps)
+    age_h = (_dt.datetime.now(_dt.timezone.utc) - oldest).total_seconds() / 3600.0
+    if age_h > LINK_CHECK_MAX_AGE_HOURS:
+        return CheckResult("V58", FAIL,
+                           f"docs/link_check.md's oldest entry is {age_h:.1f}h old, over the "
+                           f"{LINK_CHECK_MAX_AGE_HOURS}h freshness bound -- re-run the check",
+                           {"age_hours": age_h, "oldest": oldest.isoformat()})
+    return CheckResult("V58", PASS,
+                       f"all {len(urls)} SPEC 2.3 links recorded at 200, oldest entry "
+                       f"{age_h:.1f}h old (<= {LINK_CHECK_MAX_AGE_HOURS}h)",
+                       {"n_urls": len(urls), "age_hours": age_h})
+
+
+def check_V60(ctx: Ctx) -> CheckResult:
+    """--output_dir must be refused when it equals or nests inside --input_dir.
+
+    Unguarded, this either overwrites the degraded inputs with restored outputs IN PLACE, or
+    makes a second invocation silently re-ingest the previous run's own output as new input
+    (adversarial review findings H2, H3). The guard fires before the model loads, so this
+    needs no checkpoint and no GPU -- forced to --device cpu regardless.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V60", "inference.py")
+    import numpy as np
+
+    src_fixture = ctx.fixtures / "single"
+    if not src_fixture.exists():
+        return not_impl("V60", "tests/fixtures/single")
+
+    probs: list[str] = []
+
+    # Case 1: --output_dir == --input_dir. A real (small) directory, never the fixture dir
+    # itself, so a bug here corrupts a throwaway copy, not the committed fixtures.
+    same = ctx.tmpdir("v60_same")
+    same.mkdir(parents=True, exist_ok=True)
+    for f in src_fixture.glob("*.npy"):
+        (same / f.name).write_bytes(f.read_bytes())
+    before = {f.name: np.load(f, allow_pickle=False).shape for f in same.glob("*.npy")}
+    rc, _, se = ctx.run_inference(same, same, extra=["--device", "cpu"])
+    after = {f.name: np.load(f, allow_pickle=False).shape for f in same.glob("*.npy")}
+    if rc == 0:
+        probs.append(f"--output_dir == --input_dir was NOT refused (exit 0): {se.strip()[:150]}")
+    elif before != after:
+        probs.append(f"--output_dir == --input_dir mutated the inputs despite a non-zero "
+                     f"exit: before={before} after={after}")
+
+    # Case 2: --output_dir nested inside --input_dir.
+    nest_root = ctx.tmpdir("v60_nest")
+    nest_in = nest_root / "in"
+    nest_in.mkdir(parents=True, exist_ok=True)
+    for f in src_fixture.glob("*.npy"):
+        (nest_in / f.name).write_bytes(f.read_bytes())
+    nest_out = nest_in / "restored"
+    rc2, _, se2 = ctx.run_inference(nest_in, nest_out, extra=["--device", "cpu"])
+    if rc2 == 0:
+        probs.append(f"--output_dir nested inside --input_dir was NOT refused (exit 0): "
+                     f"{se2.strip()[:150]}")
+
+    if probs:
+        return CheckResult("V60", FAIL, "; ".join(probs))
+    return CheckResult("V60", PASS,
+                       "same-dir and nested-dir --output_dir are both refused before any "
+                       "write occurs")
+
+
+def check_V64(ctx: Ctx) -> CheckResult:
+    """A partial (or total) write failure must exit non-zero, not report success.
+
+    V07 requires exactly one output per input. n_ok == 0 already exited 1; n_failed > 0 with
+    n_ok > 0 did not -- a short output set was reported as a successful run, the worst
+    possible outcome on KLA's machine because nothing would flag it (adversarial review
+    finding H4). Forces --device cpu; no checkpoint needed since the bicubic fallback still
+    exercises the exact write path under test.
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V64", "inference.py")
+
+    src_fixture = ctx.fixtures / "mixed"
+    if not src_fixture.exists():
+        return not_impl("V64", "tests/fixtures/mixed")
+
+    in_dir = ctx.tmpdir("v64_in")
+    in_dir.mkdir(parents=True, exist_ok=True)
+    valid = [f for f in src_fixture.glob("*.npy")]
+    if len(valid) < 2:
+        return not_impl("V64", "tests/fixtures/mixed with >= 2 valid .npy files")
+    for f in valid:
+        (in_dir / f.name).write_bytes(f.read_bytes())
+
+    out_dir = ctx.tmpdir("v64_out")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    blocked = sorted(valid, key=lambda f: f.name)[0].name
+    # Pre-occupy exactly one output path with a directory, so np.save on that one path
+    # raises (PermissionError / IsADirectoryError) while the others succeed normally.
+    (out_dir / blocked).mkdir(parents=True, exist_ok=True)
+
+    rc, so, se = ctx.run_inference(in_dir, out_dir, extra=["--device", "cpu"])
+    others_written = [f.name for f in out_dir.glob("*.npy") if f.name != blocked]
+    ev = {"blocked_file": blocked, "exit_code": rc, "others_written": others_written,
+         "n_valid_inputs": len(valid)}
+    if rc == 0:
+        return CheckResult("V64", FAIL,
+                           f"a write failure on 1/{len(valid)} outputs still exited 0 -- "
+                           f"the short output set was reported as success", ev)
+    if len(others_written) == 0:
+        return CheckResult("V64", FAIL,
+                           "exited non-zero, but no other output was written either -- "
+                           "this did not test a PARTIAL failure", ev)
+    return CheckResult("V64", PASS,
+                       f"a write failure on 1/{len(valid)} outputs correctly exited non-zero "
+                       f"while {len(others_written)} other output(s) still wrote successfully",
+                       ev)
+
+
+#: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and
+#: non-multiple-of-8 shapes, because F2 says ANY (H,W) -> exactly (2H,2W) and the internal
+#: pad/crop-back in UNetSR is the likeliest home for an off-by-(pad*scale) error.
+V61_SIZES = ((128, 128), (256, 256), (61, 97), (1, 1), (130, 66))
+V61_ARCHS = ("NAFSR", "UNetSR")
+
+
+def check_V61(ctx: Ctx) -> CheckResult:
+    """F2 size-agnosticism, forwarded for real, on EVERY architecture.
+
+    The 256->512 fixture that docs/SPEC_ADDENDUM.md calls "the only guard against silently
+    baking in 128->256" lived in ``src/model.py::_selftest()``, which nothing invoked, and
+    UNetSR was forwarded by no check at all (requirements-auditor U-1). Dead code is not a
+    guard. This builds each architecture and forwards each shape.
+    """
+    if not ctx.exists("src", "model.py"):
+        return not_impl("V61", "src/model.py")
+    try:
+        import torch
+
+        sys.path.insert(0, str(ctx.root))
+        from src.model import build_model
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V61", FAIL, f"cannot import build_model: {type(exc).__name__}: {exc}")
+
+    ran, bad = 0, []
+    for arch in V61_ARCHS:
+        try:
+            net = build_model({"name": arch, "scale": 2, "in_ch": 1, "out_ch": 1}).eval()
+        except Exception as exc:  # noqa: BLE001
+            bad.append({"arch": arch, "size": None, "why": f"build failed: {exc}"})
+            continue
+        for (h, w) in V61_SIZES:
+            x = torch.zeros((1, 1, h, w))
+            try:
+                with torch.no_grad():
+                    y = net(x)
+            except Exception as exc:  # noqa: BLE001
+                bad.append({"arch": arch, "size": [h, w],
+                            "why": f"{type(exc).__name__}: {str(exc)[:160]}"})
+                continue
+            ran += 1
+            if tuple(y.shape) != (1, 1, 2 * h, 2 * w):
+                bad.append({"arch": arch, "size": [h, w],
+                            "why": f"got {tuple(y.shape)}, expected (1, 1, {2*h}, {2*w})"})
+            elif not bool(torch.isfinite(y).all()):
+                bad.append({"arch": arch, "size": [h, w], "why": "non-finite output"})
+    need = len(V61_ARCHS) * len(V61_SIZES)
+    if bad:
+        return CheckResult("V61", FAIL,
+                           f"{len(bad)} of {need} arch x size combinations violate F2",
+                           {"violations": bad[:8], "ran": ran, "required": need})
+    if ran < need:  # anti-vacuity: silence is not a pass
+        return CheckResult("V61", FAIL,
+                           f"only {ran} of {need} combinations actually ran",
+                           {"ran": ran, "required": need})
+    return CheckResult("V61", PASS,
+                       f"{ran} arch x size combinations all yield exactly (1,1,2H,2W), finite",
+                       {"archs": list(V61_ARCHS), "sizes": [list(s) for s in V61_SIZES]})
+
+
+#: V62's acceptance, owned by the VERIFIER and hash-pinned rather than read from
+#: src/degrade.py -- the same governance fix D24 applied to V33, so the subject under test
+#: cannot move its own pass mark.
+V62_SAMPLES = 2000
+V62_SPAN_FRAC = 0.90          # a and v must span >=90% of their permitted +/-range
+V62_SIGMA_HI = 0.015          # sigma must reach at least this
+V62_PRE_DOWN_LO, V62_PRE_DOWN_HI = 0.08, 0.22
+
+
+def check_V62(ctx: Ctx) -> CheckResult:
+    """F4: the degradation actually randomises, including the pre-downsample order hedge.
+
+    V33 compares only the variance curve, which the order hedge barely moves, so
+    GAUSS_PRE_DOWN_PROB and the whole pre-downsample branch could have been deleted with
+    every check staying green (requirements-auditor U-8). The branch is counted by
+    observing the REAL code path: src.degrade.downsample is wrapped so we can see whether
+    the array handed to it was modified before decimation.
+    """
+    if not ctx.exists("src", "degrade.py"):
+        return not_impl("V62", "src/degrade.py")
+    import numpy as np
+
+    try:
+        sys.path.insert(0, str(ctx.root))
+        from src import degrade as dg
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V62", FAIL, f"cannot import src.degrade: {exc}")
+
+    cfg = dg.DegradeConfig()
+    rng = np.random.default_rng(20260815)
+    a_s, v_s, sig = [], [], []
+    for _ in range(V62_SAMPLES):
+        p = dg.sample_noise_params(rng, cfg)
+        a_s.append(p.a)
+        v_s.append(p.v)
+        sig.append(p.sigma)
+    frac = float(getattr(cfg, "randomise_frac", dg.NOISE_RANDOMISE_FRAC))
+    ev: dict[str, Any] = {"n": V62_SAMPLES, "randomise_frac": frac,
+                          "a": [min(a_s), max(a_s)], "v": [min(v_s), max(v_s)],
+                          "sigma": [min(sig), max(sig)]}
+    problems = []
+    for nm, vals, base in (("a", a_s, dg.NOISE_A_FITTED), ("v", v_s, dg.NOISE_V_FITTED)):
+        lo, hi = base * (1 - frac), base * (1 + frac)
+        span = (max(vals) - min(vals)) / (hi - lo) if hi > lo else 0.0
+        ev[f"{nm}_span_frac"] = span
+        if span < V62_SPAN_FRAC:
+            problems.append(f"{nm} spans only {span:.3f} of its +/-{frac:.0%} range")
+        if min(vals) < lo - 1e-9 or max(vals) > hi + 1e-9:
+            problems.append(f"{nm} escapes its permitted range [{lo:.6g}, {hi:.6g}]")
+    # sigma is drawn from a CONTINUOUS uniform, so the sampled min is essentially never
+    # exactly 0.0 -- requiring that would test an event that cannot happen. Instead require
+    # the configured lower bound to genuinely be (approximately) zero, and separately require
+    # the sampled min to fall within the leftmost 5% of the configured span: with 2000 draws
+    # from a uniform, P(min > 5th-percentile-of-min) is astronomically small, so this only
+    # fires if the range was shifted away from zero or the sampler is broken.
+    sigma_lo, sigma_hi_cfg = (float(cfg.gauss_sigma_range[0]), float(cfg.gauss_sigma_range[1]))
+    ev["sigma_range_cfg"] = [sigma_lo, sigma_hi_cfg]
+    if sigma_lo > 1e-6:
+        problems.append(f"configured gauss_sigma_range does not start near 0 ({sigma_lo:.6g})")
+    span = sigma_hi_cfg - sigma_lo
+    near_zero_bound = sigma_lo + 0.05 * span if span > 0 else sigma_lo
+    if min(sig) > near_zero_bound:
+        problems.append(f"sigma's sampled min {min(sig):.6g} does not fall in the near-zero "
+                        f"5% of its configured range [{sigma_lo:.6g}, {sigma_hi_cfg:.6g}] over "
+                        f"{V62_SAMPLES} draws -- statistically implausible unless the sampler "
+                        f"is not actually uniform over the full range")
+    if max(sig) < V62_SIGMA_HI:
+        problems.append(f"sigma never exceeds {V62_SIGMA_HI} (max {max(sig):.6g})")
+
+    # --- count the pre-downsample branch by observing the real call -------------------
+    gt = np.clip(np.random.default_rng(7).random((32, 32)).astype(np.float32), 0, 1)
+    taken = [0]
+    real_downsample = dg.downsample
+
+    def _spy(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        if x.shape == gt.shape and not np.array_equal(x, gt):
+            taken[0] += 1
+        return real_downsample(x, *a, **k)
+
+    n_trials = 800
+    try:
+        dg.downsample = _spy
+        r2 = np.random.default_rng(4242)
+        for _ in range(n_trials):
+            dg.degrade(gt, r2, cfg)
+    finally:
+        dg.downsample = real_downsample
+    rate = taken[0] / n_trials
+    ev["pre_down_rate"] = rate
+    ev["pre_down_trials"] = n_trials
+    ev["GAUSS_PRE_DOWN_PROB"] = float(dg.GAUSS_PRE_DOWN_PROB)
+    if not (V62_PRE_DOWN_LO <= rate <= V62_PRE_DOWN_HI):
+        problems.append(f"pre-downsample gaussian branch taken {rate:.1%} of the time, "
+                        f"outside [{V62_PRE_DOWN_LO:.0%}, {V62_PRE_DOWN_HI:.0%}] -- the F4 "
+                        f"order hedge is missing, disabled or mis-tuned")
+    if problems:
+        return CheckResult("V62", FAIL, "; ".join(problems), ev)
+    return CheckResult("V62", PASS,
+                       f"a/v span >={V62_SPAN_FRAC:.0%} of +/-{frac:.0%}, sigma reaches both "
+                       f"0 and >{V62_SIGMA_HI}, pre-downsample branch taken {rate:.1%}", ev)
 
 
 # ======================================================================================

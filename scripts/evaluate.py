@@ -56,6 +56,7 @@ from src.metrics import (
     check_clipped,
     compare,
     format_mean_std,
+    paired_compare,
     resolve_device,
     score_pair,
 )
@@ -302,19 +303,47 @@ def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
                    "genuinely noisy. That is expected, not a bug.")
     for cand, ref, tag in (("final", "bicubic", "V27"), ("final", "unet_baseline", "V28")):
         if cand in by_name and ref in by_name:
-            cmp = compare(by_name[cand]["metrics"], by_name[ref]["metrics"])
-            wins = sum(1 for v in cmp.values() if v["better"])
-            detail = ", ".join(
-                f"{m} {v['delta']:+.4f} ({'better' if v['better'] else 'worse'})"
-                for m, v in cmp.items())
             if tag == "V27":
+                # V27 in verify_all.py compares two independent means (plus a 2*SEM margin
+                # check on PSNR), so an unpaired mean-delta comparison is the right statistic
+                # here and this verdict matches the verifier's.
+                cmp = compare(by_name[cand]["metrics"], by_name[ref]["metrics"])
+                detail = ", ".join(
+                    f"{m} {v['delta']:+.4f} ({'better' if v['better'] else 'worse'})"
+                    for m, v in cmp.items())
                 verdict = ("PASS" if all(cmp.get(m, {}).get("better") for m in METRIC_NAMES)
                            else "FAIL")
                 out.append(f"- {tag}: final vs {ref} -- {detail}. Requires higher PSNR **and** "
                            f"SSIM with lower LPIPS: **{verdict}**.")
             else:
-                out.append(f"- {tag}: final vs {ref} -- {detail}. Requires winning >= 2 of 3: "
-                           f"**{'PASS' if wins >= 2 else 'FAIL'}** ({wins}/3).")
+                # V28 in verify_all.py is a PAIRED per-image test (both models score the same
+                # images), not a comparison of two independent means -- counting a positive
+                # mean delta as a "win" here is exactly the defect D31 removed from the
+                # verifier (docs/decisions.md D31). This script must not re-introduce it, and
+                # must not self-grade a PASS/FAIL against a verification check it does not
+                # own: report the raw paired win/loss/tie counts only.
+                pv = paired_compare(by_name[cand].get("per_image"),
+                                    by_name[ref].get("per_image"))
+                if not pv:
+                    out.append(f"- {tag}: final vs {ref} -- fewer than "
+                               "`src.metrics.PAIRED_MIN_N` common per-image pairs (or "
+                               "per-image data missing), so no paired verdict is computed "
+                               "here. See `py -3.12 scripts/verify_all.py --only V28` for the "
+                               "authoritative result.")
+                else:
+                    detail = ", ".join(
+                        f"{m} mean_diff {v['mean_diff']:+.5f} t={v['t']:+.2f} n={v['n']} "
+                        f"({'win' if v['win'] else ('loss' if v['loss'] else 'tie')})"
+                        for m, v in pv.items())
+                    wins = sorted(k for k, v in pv.items() if v["win"])
+                    losses = sorted(k for k, v in pv.items() if v["loss"])
+                    ties = sorted(k for k, v in pv.items() if not v["win"] and not v["loss"])
+                    out.append(f"- {tag}: final vs {ref} (paired per-image test, matching "
+                               f"`scripts/verify_all.py`'s V28 statistic) -- {detail}. "
+                               f"wins={wins} losses={losses} ties={ties}. **This script does "
+                               "not declare a PASS/FAIL verdict for a verification check it "
+                               "does not own** -- run `py -3.12 scripts/verify_all.py "
+                               "--only V28` for that.")
         elif cand in by_name or ref in by_name:
             out.append(f"- {tag}: not computable yet -- missing the `{ref if ref not in by_name else cand}` row.")
     missing_rows = [n for n in CANONICAL_ORDER if n not in by_name]

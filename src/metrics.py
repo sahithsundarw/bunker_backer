@@ -34,6 +34,8 @@ __all__ = [
     "METRIC_NAMES",
     "METRIC_SETTINGS",
     "LOWER_IS_BETTER",
+    "PAIRED_T_CRIT",
+    "PAIRED_MIN_N",
     "psnr",
     "ssim",
     "lpips_score",
@@ -42,6 +44,9 @@ __all__ = [
     "format_mean_std",
     "clip_prediction",
     "check_clipped",
+    "compare",
+    "paired_verdict",
+    "paired_compare",
 ]
 
 #: Canonical metric order for every table and report we emit.
@@ -234,6 +239,77 @@ def compare(candidate: Mapping[str, Mapping[str, float]],
         delta = candidate[name]["mean"] - reference[name]["mean"]
         better = delta < 0.0 if name in LOWER_IS_BETTER else delta > 0.0
         out[name] = {"delta": float(delta), "better": bool(better)}
+    return out
+
+
+#: Two-tailed 95% critical value for the large-sample paired t-test below. Mirrors
+#: ``scripts/verify_all.py``'s V28 statistic exactly -- kept here too because V28 is a
+#: per-image PAIRED test, not a comparison of two independent means, and a scoring script
+#: must not substitute the latter for the former (docs/decisions.md D31).
+PAIRED_T_CRIT = 1.96
+#: Minimum number of paired observations before a per-image comparison is trusted at all.
+PAIRED_MIN_N = 30
+
+
+def paired_verdict(cand_per_image: Mapping[str, Mapping[str, float]],
+                    ref_per_image: Mapping[str, Mapping[str, float]],
+                    key: str, higher_is_better: bool) -> dict[str, Any] | None:
+    """Paired per-image significance test for one metric, keyed by filename.
+
+    Both directories must score the SAME images for a mean-delta comparison to be
+    meaningful; this computes the per-image differences on files common to both, then a
+    paired t-statistic over those differences. A win requires BOTH the correct sign AND
+    ``|t| >= PAIRED_T_CRIT``; anything else -- including a positive mean with no
+    significance -- is a tie, never a win. Returns ``None`` if fewer than ``PAIRED_MIN_N``
+    pairs are available (anti-vacuity: too few pairs to conclude anything).
+
+    This is the exact test ``scripts/verify_all.py``'s ``check_V28`` runs. Counting a mean
+    difference of e.g. +0.000135 SSIM as a "win" when the candidate only wins 172/400 images
+    is precisely the self-serving reading this test exists to prevent (docs/decisions.md D31).
+    """
+    common = sorted(set(cand_per_image) & set(ref_per_image))
+    diffs = [cand_per_image[f][key] - ref_per_image[f][key] for f in common
+             if key in cand_per_image[f] and key in ref_per_image[f]]
+    n = len(diffs)
+    if n < PAIRED_MIN_N:
+        return None
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    sem = (var / n) ** 0.5
+    t = (mean / sem) if sem > 0 else 0.0
+    better = (mean > 0) if higher_is_better else (mean < 0)
+    sig = abs(t) >= PAIRED_T_CRIT
+    n_better = sum(1 for d in diffs if ((d > 0) if higher_is_better else (d < 0)))
+    return {"test": "paired", "n": n, "mean_diff": mean, "sem": sem, "t": t,
+            "images_better": n_better, "significant": sig,
+            "win": bool(better and sig), "loss": bool((not better) and sig)}
+
+
+def paired_compare(cand_per_image: Iterable[Mapping[str, Any]] | None,
+                    ref_per_image: Iterable[Mapping[str, Any]] | None,
+                    metric_names: Sequence[str] = METRIC_NAMES) -> dict[str, dict[str, Any]]:
+    """Per-metric paired win/loss/tie verdicts, keyed by metric name.
+
+    ``cand_per_image`` / ``ref_per_image`` are lists of per-image score dicts (each with a
+    ``"file"`` key plus metric values), the same shape as ``score_dir``'s ``per_image``
+    output. Returns ``{}`` if either side is empty/missing or files don't overlap -- the
+    caller must NOT fall back to an unpaired mean-delta verdict in that case, only report
+    that no paired verdict is available (docs/decisions.md D31).
+    """
+    if not cand_per_image or not ref_per_image:
+        return {}
+    cand_by_file = {str(r["file"]): {k: float(v) for k, v in r.items()
+                                     if k != "file" and isinstance(v, (int, float))}
+                    for r in cand_per_image if isinstance(r, Mapping) and r.get("file")}
+    ref_by_file = {str(r["file"]): {k: float(v) for k, v in r.items()
+                                    if k != "file" and isinstance(v, (int, float))}
+                   for r in ref_per_image if isinstance(r, Mapping) and r.get("file")}
+    out: dict[str, dict[str, Any]] = {}
+    for name in metric_names:
+        v = paired_verdict(cand_by_file, ref_by_file, name,
+                           higher_is_better=(name not in LOWER_IS_BETTER))
+        if v is not None:
+            out[name] = v
     return out
 
 

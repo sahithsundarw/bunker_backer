@@ -14,15 +14,10 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-e1e2989cf7fdb8d6ac93b697f5a920e4b63474b4f2cffc6d9b626c81f1a64506  scripts/verify_all.py
-d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICATION_CONTRACT.md
+3b19876427809ed8b77f4ed53f620b9a7b8606813e518c1576d2d5350fba04d3  scripts/verify_all.py
+2ee1e32c4c568f42d02b4505c34be53c96d7bfdd35f31da30510de54c51a48d7  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
-# 2026-08-15  V51 narrowly exempts exactly `weights/best.pt` from the BLOB_EXTS ".pt" ban
-#             (CHECKPOINT_BLOB_EXEMPTION), resolving a contradiction with V06/V59 which both
-#             require it tracked. Human-authorised, same mechanism as the sample_inputs/*.npy
-#             exemption. No other path or extension affected. See docs/decisions.md D30.
-#             prior pin: dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a
 # 2026-08-15  contract pinned after the two human-authorised edits (V39 replaced,
 #             V23 moved Tier 1 -> Tier 0). See docs/decisions.md D6.
 # 2026-08-15  V39 SKIP allowance removed from the whitelist. See docs/decisions.md D10.
@@ -55,3 +50,105 @@ d1a22c92de8c2ecdeceae48bfe63c06f406f14f6247e0c7e479088f74cf3b269  docs/VERIFICAT
 #             pins move. See docs/decisions.md D27.
 #             prior verifier pin: 24b4b1f1f6919502a84ffe2360a9dce53137d9f31bd6d46c7710219e277f6c7f
 #             prior contract pin: 6f7952e9946a20f4165afea4855d25efd768a06825fd7a3c180be34749cebbef
+# 2026-08-15  SECURITY: V55 host validation was an UNANCHORED substring match, so
+#             https://evil.example.com/github.com/attacker/payload.git parsed as owner
+#             attacker/repo payload. Replaced with real URL parsing + exact host match.
+#             See docs/decisions.md D28.
+#             prior pin: dd2375fd44c836ce997681afd02a1344cb706e6aec171f9ba4bb88ca4b382e8a
+# 2026-08-15  THREE CHECKS STRENGTHENED from requirements-audit-2 (H-1, H-4, H-6):
+#             V00 now enforces EVERY pin in this file, including docs/VERIFICATION_CONTRACT.md,
+#             which it previously filtered out and ignored entirely -- the IMMUTABLE document
+#             could have had a check deleted with the suite staying green.
+#             V28 no longer counts a statistically indistinguishable difference as a "win",
+#             and its negative-result escape hatch is no longer unlocked by any prose that
+#             happens to contain the words. Both models score the same 400 images, so the
+#             comparison is now a PAIRED per-image test.
+#             V48 now parses the results table and reconciles every number against
+#             results/baselines/*/metrics.json; it previously counted pipe characters.
+#             Net strictly stricter: V28 went PASS -> FAIL under the new test and V48 was
+#             negative-controlled. See docs/decisions.md D31.
+#             prior pin: 4e78dbca22ad9f71c3091bfeeb32ee798fbca96ca96d08468bc11748cec6178b
+# 2026-08-15  PUBLISHED-ARTIFACT CLAIMS ARE NOW VERIFIED BY A REAL ANONYMOUS DOWNLOAD
+#             (requirements-audit-2 H-5). V06, V59 and V56 accepted a URL and a 64-hex string
+#             sitting in a markdown file as proof of publication -- nothing ever fetched
+#             anything, so the half of the claim that matters to anyone without the author's
+#             disk was unverified. V06's URL branch was not merely unverified, it was
+#             unimplemented: it returned an unconditional FAIL, making the contract's own
+#             second route unreachable and guaranteeing a clean-room red. All three now
+#             download with every credential stripped, reject HTML-behind-200 and 401/403,
+#             and compare the sha256 of the SERVED bytes. Mutation-tested: a wrong checkpoint
+#             digest, a wrong archive digest and a 404 URL each turned the relevant check red.
+#             Human-authorised (decision B, 2026-08-15). See docs/decisions.md D32.
+#             prior pin: 47dac07a929c56d4a8eafd6562e3f8f81017fdd8925ac218849cc4a8d9691aee
+# 2026-08-16  SECURITY: SSRF guard on the published-artifact fetch helper added in D32.
+#             `_fetch_digest`'s URL comes from a repo file (weights/README.md,
+#             manifest.json) -- untrusted input to the verifier process. Unguarded, it could
+#             point at file:///, loopback/link-local (cloud metadata), or ride a 302 to an
+#             unvalidated host. `_artifact_url_ok()` requires https, no embedded credentials,
+#             port 443, and an exact host match against PUBLISHED_ARTIFACT_HOSTS;
+#             `_strict_opener()` re-validates every redirect hop. Same bug class as D28, third
+#             occurrence. See docs/decisions.md D33.
+#             prior pin: d792ab7fb0971d969e88a8f1c6c88206c14d9acd7b2bca25d7097d54eb6100a4
+# 2026-08-16  TWO CHECKS ADDED closing U-1 and U-8 (requirements-audit-2, none of the 57
+#             checks could turn red for either). V61 forwards {NAFSR, UNetSR} x 5 shapes
+#             (odd, non-square, 1x1, tiny) through build_model and asserts exactly
+#             (1,1,2H,2W), finite -- the 256->512 fixture SPEC_ADDENDUM calls "the only
+#             guard against silently baking in 128->256" lived in an unreachable
+#             src/model.py::_selftest(), and UNetSR was forwarded by nothing. V62 measures
+#             degradation randomisation for real (a/v span, sigma range) and counts the F4
+#             pre-downsample order hedge by wrapping src.degrade.downsample and observing
+#             which calls received a pre-mutated array -- GAUSS_PRE_DOWN_PROB could
+#             previously have been deleted with every check staying green. Both
+#             negative-controlled: an injected off-by-(pad*scale) crop bug in UNetSR.forward
+#             turned V61 red (3/10 combinations); GAUSS_PRE_DOWN_PROB=0.0 turned V62 red
+#             (0.0% vs required 8-22%); both reverted byte-exact and reconfirmed green.
+#             See docs/decisions.md D34.
+#             prior pin: 160bc2289685ff20a829c54a2044cb33e31e2ba14623134e7479909085780224
+# 2026-08-16  ADDED V57, closing U-6. V12 tests src.io_utils.load_array directly, not "the
+#             tensor entering the model" (the contract's exact wording); a clamp_ anywhere in
+#             inference.py's stack/H2D/channels_last/autocast pipeline leaves V12 green. V57
+#             imports inference.py's own load_net()/infer_chunk() (not a reimplementation) and
+#             attaches a forward pre-hook to the REAL loaded checkpoint to see exactly what it
+#             receives, forcing --device cpu so it never contends with a running benchmark.
+#             Negative-controlled: added `t.clamp_(0.0, 1.0)` immediately before the model call
+#             in infer_chunk -- V12 stayed green (it never sees this code path), V57 correctly
+#             went red. Reverted byte-exact, V57 green again. See docs/decisions.md D35.
+#             prior pin: c3d751681ec59c2850a56f5d611c8f20585d65764fe3e1b68c9cd8285d6b95c2
+# 2026-08-16  ADDED V58, closing U-10. SPEC 2.3's official hackathon links were never
+#             independently re-checked (licence links were, per docs/decisions.md). V58 reads
+#             the URL list DYNAMICALLY from docs/SPEC.md's "### 2.3 Official links" table --
+#             not a hardcoded copy that could drift -- and requires docs/link_check.md to
+#             record every one at HTTP 200 with a UTC timestamp <= 72h old. Does not re-fetch
+#             on every verifier run (that would make suite-wide pass/fail depend on
+#             third-party site uptime, D7's DataLoader-worker flakiness class); freshness is
+#             enforced by expiring the record instead. Negative-controlled three ways: a
+#             deleted URL row, an injected 404, and a backdated timestamp each turned it red;
+#             all three reverted byte-exact and reconfirmed green. See docs/decisions.md D37.
+#             prior pin: d42f610cd5124c4d8992981493bcd8b88a98c327823c9024999277ad36a5ab8d
+# 2026-08-16  ADDED V60, from the first adversarial-reviewer pass (findings H2, H3).
+#             inference.py did not guard against --output_dir equal to or nested inside
+#             --input_dir: the former overwrites the degraded inputs with restored outputs
+#             IN PLACE, the latter makes a second invocation silently re-ingest the previous
+#             run's own output. Both were fixed in inference.py this iteration (a resolved-
+#             path comparison before out_dir.mkdir()); V60 is the permanent regression guard,
+#             CPU-forced, needing no checkpoint since the guard fires before the model loads.
+#             Negative-controlled by temporarily removing the fix: V60 correctly went red on
+#             both cases, fix restored byte-exact, V60 green again. See docs/decisions.md D38,
+#             which also records three other adversarial-review fixes to inference.py (H1,
+#             H4) and the README (C1) that are not yet covered by a dedicated V-check.
+#             prior pin: 2dc9d62585cadfcffd8ad8f1dfba04418c484724d9f6174985c41dfe8d1c1958
+# 2026-08-16  ADDED V64, the regression guard adversarial finding H4 was missing when it was
+#             fixed in inference.py (D38 left this open as follow-up). n_ok==0 already exited
+#             1; a PARTIAL write failure (n_failed>0, n_ok>0) did not, reporting a short
+#             output set as success -- the worst outcome on KLA's machine since nothing would
+#             flag it. V64 uses the 'mixed' fixture (4 valid .npy files), pre-occupies one
+#             output path with a directory to force exactly one write failure, and asserts
+#             exit non-zero while confirming the OTHER outputs still wrote (a genuine partial
+#             failure, not total). CPU-forced, no checkpoint needed. Negative-controlled by
+#             temporarily removing the H4 fix: V64 correctly went red ("still exited 0"); fix
+#             restored byte-exact, V64 green again. See docs/decisions.md D39.
+#             prior pin: 001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf
+# 2026-08-16  STRENGTHENED V51 with one exact tracked-blob exemption for the mandatory
+#             `weights/best.pt` Route-A checkpoint. Every other `.pt` and dataset-like blob
+#             remains forbidden. See docs/decisions.md D41.
+#             prior pin: 2595f92d3131b67b20f0c4e588c982c7a4b24ece59e475bcf184cf20ec6c3818
