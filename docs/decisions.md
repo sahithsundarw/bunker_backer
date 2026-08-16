@@ -2238,3 +2238,22 @@ resource-richer host (e.g. a cloud A100 with far more VRAM), the same fraction *
 constrains that device too, so the check is not hard-coded to this GPU's absolute capacity.
 
 `py -3.12 scripts/verify_all.py --only V65`: **PASS**.
+
+## D47 — `huggingface_hub` pinned: optional cloud-training Hub-push path only
+
+`train.py --hub_repo` (added for Phase 2 HF Jobs cloud training, see `docs/PLAN_CLOUD.md`) now
+calls `push_checkpoint_to_hub` in `src/utils.py`, which does a lazy, in-function
+`import huggingface_hub`. That made it a transitive dependency only (pulled in by something
+else in the environment), never a direct pin — a gap for a repo whose `requirements.txt` claims
+to be a complete `pip freeze`.
+
+Confirmed installed version still matches what the trainer agent found when writing the code:
+`python -c "import huggingface_hub; print(huggingface_hub.__version__)"` → `1.7.1`. Pinned as
+`huggingface_hub==1.7.1`, plain PyPI resolution — no index-URL hazard like torch's (D18/B8),
+since `huggingface_hub` has no CUDA-variant wheels to be silently swapped out.
+
+Confirmed zero-cost for everyone else: `inference.py`'s module-level import allowlist
+(`argparse os sys time pathlib concurrent.futures numpy torch`) is untouched — grep for
+`huggingface_hub` in `inference.py` returns no matches. Anyone running `train.py` without
+`--hub_repo` never triggers the lazy import either, so the added dependency costs nothing on
+any path except the optional Hub push.

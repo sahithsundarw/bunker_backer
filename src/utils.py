@@ -38,6 +38,7 @@ __all__ = [
     "format_hms",
     "git_sha",
     "load_config",
+    "push_checkpoint_to_hub",
     "repo_root",
     "resolve_device",
     "save_checkpoint",
@@ -340,6 +341,54 @@ def _atomic_torch_save(payload: Mapping[str, Any], out: Path) -> Path:
         if os.path.exists(tmp):
             os.unlink(tmp)
     return out
+
+
+def push_checkpoint_to_hub(
+    path: str | os.PathLike[str],
+    repo_id: str,
+    *,
+    path_in_repo: str,
+    repo_type: str = "model",
+    token: str | None = None,
+) -> str | None:
+    """Best-effort push of a checkpoint file to a private Hugging Face Hub repo.
+
+    Purely opt-in and used only by ``train.py --hub_repo`` (docs/PLAN_CLOUD.md): HF Jobs
+    storage is ephemeral, so a checkpoint that is never pushed off the box is lost the moment
+    the job ends. ``huggingface_hub`` is imported here, inside the function body, and nowhere
+    else in this module -- a run that never passes ``--hub_repo`` has zero Hub dependency,
+    exactly like a run on a machine where the package is not even installed.
+
+    The token is never read from a file: ``token=None`` (the default) makes
+    ``huggingface_hub`` fall back to the ``HF_TOKEN`` environment variable or a prior
+    ``huggingface-cli login``, matching the project's rule that the token lives only in the
+    process environment for the duration of a command.
+
+    Never raises. A transient network blip on a Jobs box must not kill an in-progress
+    training run when the checkpoint has already been written safely to local disk by
+    ``save_checkpoint``/``update_checkpoint_metrics`` -- the Hub push is an extra durability
+    measure on top of that, not a replacement for it. Failures are reported on stderr and the
+    caller is expected to keep training; returns ``None`` on failure, the commit URL (or a
+    string repr of the response) on success.
+    """
+    try:
+        from huggingface_hub import HfApi  # local: see docstring -- no Hub import otherwise
+
+        api = HfApi(token=token)
+        info = api.upload_file(
+            path_or_fileobj=str(path),
+            path_in_repo=str(path_in_repo),
+            repo_id=str(repo_id),
+            repo_type=repo_type,
+            commit_message=f"checkpoint {path_in_repo}",
+        )
+        return str(getattr(info, "commit_url", info))
+    except Exception as exc:  # noqa: BLE001 -- a Hub push must never crash a training run
+        sys.stderr.write(
+            f"push_checkpoint_to_hub: push of {path} to {repo_id}/{path_in_repo} failed "
+            f"(training continues, local checkpoint is unaffected): {exc!r}\n"
+        )
+        return None
 
 
 def update_checkpoint_metrics(path: str | os.PathLike[str],

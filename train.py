@@ -31,11 +31,20 @@ Things that are deliberate, not accidental
   zero the gradient of every saturated pixel, and ~3% of real pixels exceed 1.0.
 * Validation reads the committed ``configs/split_val.txt`` through ``src.dataset``; the
   split is never regenerated here (V29).  ``test_NoisyLR`` is never opened by this file --
-  it has no ground truth and training on it is forbidden (SPEC F17).
+  it has no ground truth and training on it is forbidden (SPEC F17).  A hard startup
+  assertion (``_assert_never_touches_test_noisylr``) checks the real, already-constructed
+  dataset objects for this before any training step runs -- belt-and-suspenders on top of
+  V54, reusing ``src.dataset``'s own split logic rather than a second glob.
 * Model selection uses held-out validation only.  No training image ever scores a
   checkpoint.
 * The shipped weights are the **EMA** weights (SPEC 9); ``inference.py`` reads
   ``ckpt['ema']`` in preference to ``ckpt['model']``.
+* ``--hub_repo <repo_id>`` is optional and flag-gated (docs/PLAN_CLOUD.md): when set, every
+  checkpoint save is also pushed to that HF Hub model repo, because HF Jobs storage is
+  ephemeral and anything not pushed off the box during the run is lost when the job ends.
+  ``huggingface_hub`` is imported lazily, only inside ``src.utils.push_checkpoint_to_hub``,
+  so a run without ``--hub_repo`` has zero Hub dependency and unchanged behaviour.
+  ``inference.py`` never gains this import; the allowlist there is untouched.
 
 Owner: trainer.
 """
@@ -81,6 +90,7 @@ from src.utils import (  # noqa: E402
     format_hms,
     git_sha,
     load_config,
+    push_checkpoint_to_hub,
     resolve_device,
     save_checkpoint,
     seed_everything,
@@ -118,6 +128,12 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--resume", default=None, help="checkpoint to warm-start model+EMA from")
     ap.add_argument("--out", default=None,
                     help="checkpoint path (default weights/best.pt)")
+    ap.add_argument("--hub_repo", default=None,
+                    help="optional HF Hub model repo id (e.g. org/name); if set, every "
+                         "checkpoint save is also pushed there (docs/PLAN_CLOUD.md). Requires "
+                         "huggingface_hub installed and an HF_TOKEN in the environment (never "
+                         "read from a file). Absent by default: zero Hub dependency, zero "
+                         "behaviour change, when this flag is not passed.")
     ap.add_argument("--iters", type=int, default=None, help="override optim.total_iters")
     ap.add_argument("--val_every", type=int, default=None, help="override train.val_every")
     ap.add_argument("--val_limit", type=int, default=100,
@@ -146,6 +162,69 @@ def _repo_relative(p: Path) -> str:
 def _log(msg: str) -> None:
     sys.stdout.write(msg + "\n")
     sys.stdout.flush()
+
+
+# ======================================================================================
+# F17 GUARD -- belt-and-suspenders, on top of V54 and src.dataset's own hard-coded
+# ``<root>/train/{GT,NoisyLR}`` paths.  This does not reimplement the split: it inspects the
+# paths a *real, already-constructed* dataset holds, using ``src.dataset``'s own
+# ``train_val_names``/``configs/split_val.txt`` machinery as the sole source of truth.
+# ======================================================================================
+def _assert_never_touches_test_noisylr(root: Path, *dataset_objs: Any, verbose: bool = False) -> None:
+    """Hard-fail before training starts if anything is about to read ``test_NoisyLR``.
+
+    Two independent checks, both on real objects rather than on a second parallel glob:
+
+    1. The resolved data root itself must not have ``test_NoisyLR`` anywhere in its path --
+       catches a caller pointing ``--data_root``/``$KLA_DATA_ROOT`` directly at the test
+       directory instead of the directory that contains ``train/``.
+    2. Every ``(lr_path, gt_path)`` pair the already-constructed ``PairedRestorationDataset``
+       objects hold (``ds.paths``, populated by ``src.dataset`` from
+       ``train_val_names()``/``configs/split_val.txt`` before any preloading happens) must not
+       reference ``test_NoisyLR`` either. ``test_NoisyLR`` has no ground truth and training or
+       validating on it is forbidden unconditionally, on any machine (SPEC F17).
+
+    Raises ``RuntimeError`` -- not a warning -- on any violation.
+    """
+    root_s = str(Path(root).resolve()).lower()
+    if "test_noisylr" in root_s:
+        raise RuntimeError(
+            f"F17 violation: the resolved data root {root!r} contains 'test_NoisyLR'. "
+            "test_NoisyLR has no ground truth and must never be trained or validated on, "
+            "on any machine. Point --data_root / $KLA_DATA_ROOT at the directory that "
+            "*contains* train/, not at test_NoisyLR itself."
+        )
+    checked = 0
+    for ds in dataset_objs:
+        for pair in getattr(ds, "paths", None) or []:
+            for p in pair:
+                checked += 1
+                if "test_noisylr" in str(p).lower():
+                    raise RuntimeError(
+                        f"F17 violation: the training data pipeline would open {p}, which "
+                        "lives under test_NoisyLR. This is forbidden unconditionally "
+                        "(SPEC F17) -- stopping before any training step runs."
+                    )
+    if verbose:
+        _log(f"  [F17 guard] {checked} dataset path(s) checked, none under test_NoisyLR")
+
+
+def _maybe_push_checkpoint_to_hub(args: argparse.Namespace, out_path: Path, run_id: str,
+                                  iteration: int) -> None:
+    """Push ``out_path`` to ``--hub_repo`` if the flag was passed; a no-op otherwise.
+
+    HF Jobs storage is ephemeral -- anything not pushed to the Hub during the run is lost the
+    moment the job ends (docs/PLAN_CLOUD.md Step 1). ``path_in_repo`` is keyed by ``run_id``
+    and the current iteration so multiple sweep runs, and multiple saves within one run, never
+    clobber each other's checkpoints on the Hub side.
+    """
+    repo_id = getattr(args, "hub_repo", None)
+    if not repo_id:
+        return
+    path_in_repo = f"{run_id}/step_{int(iteration):08d}/{out_path.name}"
+    url = push_checkpoint_to_hub(out_path, repo_id, path_in_repo=path_in_repo)
+    if url:
+        _log(f"  [hub] pushed {out_path} -> {repo_id}/{path_in_repo} ({url})")
 
 
 # ======================================================================================
@@ -268,6 +347,7 @@ def run_overfit(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> int
     dcfg = _data_config(cfg, seed, preload=True)
     dcfg = dataclasses.replace(dcfg, synth_ratio=0.0, cutblur_prob=0.0, dihedral=False)
     ds = PairedRestorationDataset(root, dcfg, "val", names=names)   # "val" = whole image, no aug
+    _assert_never_touches_test_noisylr(root, ds, verbose=bool(args.verbose))
 
     lr = torch.stack([ds[i]["lr"] for i in range(len(ds))]).to(device)
     gt = torch.stack([ds[i]["gt"] for i in range(len(ds))]).to(device)
@@ -432,6 +512,9 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     t_build = time.perf_counter()
     train_ds, val_ds = build_datasets(root, dcfg)
     build_s = time.perf_counter() - t_build
+    # F17 hard gate, before any training step runs (belt-and-suspenders on top of V54):
+    # reuses the real split/paths src.dataset already built, never a second glob.
+    _assert_never_touches_test_noisylr(root, train_ds, val_ds, verbose=bool(args.verbose))
 
     gen = torch.Generator()
     gen.manual_seed(seed)
@@ -554,6 +637,7 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                                              "structural_kind": structural_kind},
                                     git=sha)
                     _log(f"  [ckpt] new best {v['psnr']:.4f} dB -> {out_path}")
+                    _maybe_push_checkpoint_to_hub(args, out_path, run_id, it)
         epoch += 1
 
     wall = time.perf_counter() - t0
@@ -571,6 +655,7 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
         # no validation happened (e.g. --val_every 0): still ship something reproducible
         save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
                         metrics={"note": "no validation performed"}, git=sha)
+        _maybe_push_checkpoint_to_hub(args, out_path, run_id, it)
     ck = torch.load(out_path, map_location="cpu", weights_only=True)
     final_model = build_model(ck["config"]).to(device)
     if channels_last:
@@ -597,6 +682,13 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     # ONLY the metrics block is rewritten. The tensors stay the best-on-held-out ones that
     # were saved during the run; re-saving the live model here would ship the last weights.
     update_checkpoint_metrics(out_path, metrics)
+    # Final push so the Hub copy carries the full-split metrics, not just the last
+    # in-run "new best" snapshot -- keyed "final" so it never collides with a step-keyed one.
+    if getattr(args, "hub_repo", None):
+        path_in_repo = f"{run_id}/final/{out_path.name}"
+        url = push_checkpoint_to_hub(out_path, args.hub_repo, path_in_repo=path_in_repo)
+        if url:
+            _log(f"  [hub] pushed final {out_path} -> {args.hub_repo}/{path_in_repo} ({url})")
 
     # --no_ledger is an escape hatch around SPEC 9's "log every run" and V45's row-count
     # gate, and it was unconditional -- any real training run could skip the ledger

@@ -1,0 +1,66 @@
+# PARETO SWEEP -- probe config, NOT a submission candidate. Owner: model-core.
+# Part of the HF Jobs A100-large Pareto sweep (docs/PLAN_CLOUD.md Step 3, "Pareto sweep"
+# tier, ~2.4 GPU-hr budget across all sweep_*.yaml configs combined). Dispatch and result
+# recording are the main session's job, not model-core's -- this file only exists to pin
+# down width/num_blocks + a short, comparable training budget.
+#
+# Position in the grid: brackets the shipped 48x16 op point (D19) from BELOW -- the
+# smallest-width point in the sweep, testing whether quality falls off a cliff under
+# w48n16 or degrades gracefully (informs whether there is headroom to go *smaller* too,
+# not just bigger, now that the local-VRAM ceiling that motivated D20 is gone on the A100).
+#
+# MEASURED (src/model.py build_model + count_parameters/estimate_macs, actual forward-pass
+# hook count, not hand math; hardware-independent -- run on local CPU/RTX4060 box, no A100
+# access from this session):
+#   params 178,433 (0.178 M)   MACs @128x128 = 2.540 G   FLOPs ~= 5.08 G per image
+#   (for reference: shipped w48n16 = 388,225 params / 5.584 GMAC, D19)
+#
+# Everything outside `model:` is copied verbatim from configs/final.yaml (same optimizer,
+# same MEASURED degradation params, same data pipeline) so the sweep isolates architecture
+# width/depth, not training recipe. Only total_iters/warmup_iters/val_every are shortened:
+# this is a short probe run for a single val-metric + wall-clock point, not full
+# convergence, per docs/PLAN_CLOUD.md Step 3 ("4-6 configs, width/depth grid, short runs").
+model:
+  name: NAFSR
+  width: 32
+  num_blocks: 16
+  scale: 2                # F2: exactly x2, verified on all 3200 pairs
+  in_ch: 1                # grayscale end to end, no BGR/RGB anywhere (V32)
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+data:
+  lr_patch: 64            # -> 128 GT patch
+  batch_size: 32
+  synth_ratio: 0.5        # fraction generated on the fly from GT (SPEC F15)
+  # Degradation params are MEASURED, not from SPEC 6.4. See docs/decisions.md D12.
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253                 # shot / linear term
+    v: 0.015745                 # speckle / quadratic term
+    randomise_frac: 1.20        # widened +/-30% -> +/-120% to close F1 tail-coverage gap
+                                 # (measured synthetic max 2.0869 vs real train max 2.0735)
+    gauss_sigma_range: [0.0, 0.065]   # widened 0.02 -> 0.065, same F1 tail-coverage fix
+    clip_lr: false              # SPEC F5 -- never clip synthetic LR
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]       # NAFNet beta2=0.9, not 0.999
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 100       # scaled down from 500/20000 (2.5%) to keep the same warmup
+                          # fraction at a 2000-iter budget
+  total_iters: 2000       # SHORT PROBE, not full training -- PLAN_CLOUD.md Step 3
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 500          # >=4 val points inside the 2000-iter budget so save_best_on
+                          # and the frontier plot both have signal
+  save_best_on: psnr

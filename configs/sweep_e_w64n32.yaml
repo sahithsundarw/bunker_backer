@@ -1,0 +1,66 @@
+# PARETO SWEEP -- probe config, NOT a submission candidate. Owner: model-core.
+# Part of the HF Jobs A100-large Pareto sweep (docs/PLAN_CLOUD.md Step 3, "Pareto sweep"
+# tier, ~2.4 GPU-hr budget across all sweep_*.yaml configs combined). Dispatch and result
+# recording are the main session's job, not model-core's.
+#
+# Position in the grid: BOTH width and depth scaled up together, squarely PAST the region
+# D20 found blocked on the local 8 GB RTX 4060 (w64n28 spilled the allocator at 7925 MiB
+# and collapsed 12.5x in step time). D20 explicitly flagged that ceiling as local, not
+# fundamental, and named the A100's 80 GB as exactly what removes it -- this is the config
+# that tests that claim directly, going past both thresholds (width>=64 AND num_blocks>=28)
+# at once rather than one at a time (sweep_c, sweep_d each move only one axis).
+#
+# MEASURED (src/model.py build_model + count_parameters/estimate_macs, actual forward-pass
+# hook count; hardware-independent, no A100 access from this session -- this session did
+# NOT attempt to instantiate/train this config on the local 4060, since D20 already showed
+# w64n28 does not fit there and w64n32 is strictly larger):
+#   params 1,170,945 (1.171 M)   MACs @128x128 = 16.556 G   FLOPs ~= 33.11 G per image
+#   (for reference: shipped w48n16 = 388,225 params / 5.584 GMAC, D19; D20's blocked
+#   w64n28 = 1,047,809 params / 7925 MiB peak VRAM on the 4060)
+#
+# Everything outside `model:` is copied verbatim from configs/final.yaml apart from the
+# shortened iteration schedule (see sweep_a for the warmup-fraction rationale).
+model:
+  name: NAFSR
+  width: 64
+  num_blocks: 32
+  scale: 2                # F2: exactly x2, verified on all 3200 pairs
+  in_ch: 1                # grayscale end to end, no BGR/RGB anywhere (V32)
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+data:
+  lr_patch: 64            # -> 128 GT patch
+  batch_size: 32
+  synth_ratio: 0.5        # fraction generated on the fly from GT (SPEC F15)
+  # Degradation params are MEASURED, not from SPEC 6.4. See docs/decisions.md D12.
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253                 # shot / linear term
+    v: 0.015745                 # speckle / quadratic term
+    randomise_frac: 1.20        # widened +/-30% -> +/-120% to close F1 tail-coverage gap
+                                 # (measured synthetic max 2.0869 vs real train max 2.0735)
+    gauss_sigma_range: [0.0, 0.065]   # widened 0.02 -> 0.065, same F1 tail-coverage fix
+    clip_lr: false              # SPEC F5 -- never clip synthetic LR
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]       # NAFNet beta2=0.9, not 0.999
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 100       # scaled down from 500/20000 (2.5%) to keep the same warmup
+                          # fraction at a 2000-iter budget
+  total_iters: 2000       # SHORT PROBE, not full training -- PLAN_CLOUD.md Step 3
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 500          # >=4 val points inside the 2000-iter budget so save_best_on
+                          # and the frontier plot both have signal
+  save_best_on: psnr
