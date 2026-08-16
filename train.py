@@ -539,6 +539,10 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
     if channels_last:
         model = model.to(memory_format=torch.channels_last)
     n_params = count_parameters(model)
+    # Round-2 differentiator (docs/decisions.md): only True when the config's model.uncertainty
+    # is set, which is only true for configs that opt in -- every existing config, including
+    # configs/final.yaml, leaves this False and the training loop below is unchanged for them.
+    has_uncertainty = bool(getattr(model, "has_uncertainty", False))
     ema = EMA(model, decay=float(tcfg.get("ema_decay", 0.999)))
     shadow = build_model(cfg).to(device)          # built once; EMA weights are copied in
     if channels_last:
@@ -599,10 +603,16 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                 g["lr"] = cur_lr
 
             with _autocast(device, amp):
-                pred = model(lr_b)
+                if has_uncertainty:
+                    pred, log_var = model(lr_b, return_uncertainty=True)
+                    log_var = log_var.float()
+                else:
+                    pred = model(lr_b)
+                    log_var = None
             # UNCLIPPED output into the loss (SPEC 8): clipping here would zero the gradient
             # of every saturated pixel, and ~3% of real pixels legitimately exceed 1.0.
-            loss, logs = crit(pred.float(), gt_b, progress=it / max(1, total_iters))
+            loss, logs = crit(pred.float(), gt_b, progress=it / max(1, total_iters),
+                              log_var=log_var)
             if not math.isfinite(float(logs["total"])):
                 _log(f"FATAL: non-finite loss at iter {it}: {logs}")
                 return 2

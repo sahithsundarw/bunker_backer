@@ -30,6 +30,7 @@ import torch.nn as nn
 __all__ = [
     "CHARBONNIER_EPS",
     "MS_SSIM_MIN_SIDE",
+    "LOG_VAR_CLAMP",
     "DEFAULT_WEIGHTS",
     "charbonnier",
     "fft_loss",
@@ -38,6 +39,7 @@ __all__ = [
     "structural_loss",
     "supports_ms_ssim",
     "lpips_loss",
+    "heteroscedastic_nll_loss",
     "RestorationLoss",
     "build_loss",
 ]
@@ -48,12 +50,22 @@ CHARBONNIER_EPS: float = 1e-3
 #: pytorch-msssim's 5-scale pyramid with win_size=11 needs min(H,W) > (11-1)*2**4 = 160.
 MS_SSIM_MIN_SIDE: int = 161
 
-#: SPEC 8 blend. Keys are the component names used in the returned log dict.
+#: Clamp range for the predicted log-variance before `exp()` -- an unclamped log-variance
+#: can drift to a value whose exp() overflows fp32 (or, at the other end, underflows to a
+#: near-zero denominator that blows up the NLL), especially early in training before the
+#: uncertainty head has learned anything. This is a numerical-safety measure, not a
+#: modelling choice: +/-10 covers a variance range of ~4.5e-5 to ~2.2e4, far wider than any
+#: plausible pixel-intensity variance in a [0,1]-ish signal.
+LOG_VAR_CLAMP: tuple[float, float] = (-10.0, 10.0)
+
+#: SPEC 8 blend. Keys are the component names used in the returned log dict. `uncertainty`
+#: defaults to 0.0 (off) -- Round-2 differentiator, opt-in only (docs/decisions.md).
 DEFAULT_WEIGHTS: dict[str, float] = {
     "charbonnier": 1.0,
     "structural": 0.15,
     "fft": 0.05,
     "lpips": 0.02,
+    "uncertainty": 0.0,
 }
 
 #: LPIPS turns on only after this fraction of training (SPEC 8: "~50%").
@@ -191,6 +203,31 @@ def lpips_loss(pred: torch.Tensor, target: torch.Tensor, net: str = "alex") -> t
 
 
 # --------------------------------------------------------------------------------------
+# 5. Heteroscedastic NLL -- the uncertainty head's supervision (Round 2 differentiator)
+# --------------------------------------------------------------------------------------
+def heteroscedastic_nll_loss(pred: torch.Tensor, log_var: torch.Tensor,
+                             target: torch.Tensor) -> torch.Tensor:
+    """Gaussian negative log-likelihood with a learned per-pixel log-variance.
+
+    ``0.5 * exp(-log_var) * (pred-target)^2 + 0.5 * log_var``, mean-reduced. This is what
+    lets the uncertainty head's output mean something (a calibrated confidence estimate,
+    not a hand-tuned "distance from clean-looking"): the network is only rewarded for a
+    high-uncertainty prediction on a pixel where the restoration is *actually* far from the
+    target, and is penalised for claiming high confidence on a pixel it gets wrong.
+
+    ``log_var`` is clamped to ``LOG_VAR_CLAMP`` before use -- see that constant's docstring
+    for why an unclamped exp() is a real numerical hazard here, not a hypothetical one.
+    """
+    p, t = _pair(pred, target)
+    lv = _as_nchw(log_var, "log_var")
+    if lv.shape != p.shape:
+        raise ValueError(f"log_var shape {tuple(lv.shape)} != pred shape {tuple(p.shape)}")
+    lv = lv.clamp(*LOG_VAR_CLAMP)
+    diff2 = (p - t) ** 2
+    return (0.5 * torch.exp(-lv) * diff2 + 0.5 * lv).mean()
+
+
+# --------------------------------------------------------------------------------------
 # The composite loss
 # --------------------------------------------------------------------------------------
 class RestorationLoss(nn.Module):
@@ -236,7 +273,8 @@ class RestorationLoss(nn.Module):
                 and float(progress) >= self.lpips_start_frac)
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor,
-                progress: float = 0.0) -> tuple[torch.Tensor, dict[str, Any]]:
+                progress: float = 0.0,
+                log_var: torch.Tensor | None = None) -> tuple[torch.Tensor, dict[str, Any]]:
         p, t = _pair(pred, target)
 
         terms: dict[str, torch.Tensor] = {}
@@ -249,6 +287,14 @@ class RestorationLoss(nn.Module):
         lp_on = self.lpips_enabled(progress)
         if lp_on:
             terms["lpips"] = lpips_loss(p, t, net=self.lpips_net_name)
+
+        # Uncertainty term: only computed when the caller actually has a log_var to supply
+        # (i.e. the model was built with uncertainty=True and the trainer requested it via
+        # return_uncertainty=True) AND it is weighted. `log_var is None` is the default for
+        # every model/config that predates this feature -- zero cost, zero behaviour
+        # change, same as the LPIPS gate above.
+        if log_var is not None and self.weights.get("uncertainty", 0.0) != 0.0:
+            terms["uncertainty"] = heteroscedastic_nll_loss(p, log_var, t)
 
         total = p.new_zeros(())
         for name, value in terms.items():
@@ -310,6 +356,29 @@ def _self_test(seed: int = 20260815) -> int:
         show(f"structural ({kind})", s)
         show("fft", fft_loss(pred, target))
         print("    supports_ms_ssim(%d,%d) = %s" % (side, side, supports_ms_ssim(side, side)))
+
+    # Heteroscedastic NLL: finite for a real log_var, and a confident-but-wrong prediction
+    # must score worse than an equally-wrong prediction that honestly reports high variance.
+    pred_u = torch.rand(2, 1, 64, 64)
+    target_u = torch.rand(2, 1, 64, 64)
+    diff = (pred_u - target_u) ** 2
+    confident = torch.full_like(diff, -6.0)   # claims low variance everywhere
+    honest = torch.full_like(diff, 6.0)       # claims high variance everywhere
+    nll_confident = heteroscedastic_nll_loss(pred_u, confident, target_u)
+    nll_honest = heteroscedastic_nll_loss(pred_u, honest, target_u)
+    show("heteroscedastic_nll (confident)", nll_confident)
+    show("heteroscedastic_nll (honest)", nll_honest)
+    ok = ok and bool(nll_confident > nll_honest)  # over-confidence on real error is punished
+    print("  confident > honest (over-confidence punished): %s" % (nll_confident > nll_honest))
+
+    # RestorationLoss with log_var wired through: off by default (weight 0.0), on when
+    # both a nonzero weight AND a log_var are supplied.
+    crit_unc = build_loss({"weights": {"uncertainty": 0.01}})
+    t_no_lv, l_no_lv = crit_unc(pred_u, target_u, log_var=None)
+    assert "uncertainty" not in l_no_lv, "uncertainty term must be absent without log_var"
+    t_lv, l_lv = crit_unc(pred_u, target_u, log_var=confident)
+    assert "uncertainty" in l_lv, "uncertainty term must appear once log_var is supplied"
+    print("  logs (with log_var): uncertainty=%.6f" % l_lv["uncertainty"])
 
     # MS-SSIM at 128 must raise, not silently produce garbage.
     try:

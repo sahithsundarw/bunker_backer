@@ -15,6 +15,12 @@ Contract (frozen -- `inference.py`, `train.py` and `scripts/evaluate.py` code ag
 
     forward: (B, in_ch, h, w) float32, UNCLIPPED  ->  (B, out_ch, scale*h, scale*w)
 
+    NAFSR's `forward` additionally accepts `return_uncertainty: bool = False` (default
+    False everywhere this frozen contract is exercised -- `inference.py` never passes it);
+    when True AND the checkpoint was built with `uncertainty=True`, it returns
+    `(tensor, log_var_tensor)` instead. This is an opt-in addition for `train.py`'s
+    auxiliary loss and offline demo tooling, never the default single-tensor path above.
+
 `cfg` is a plain mapping -- never a path, never a YAML file, never an ``argparse.Namespace``.
 Reading YAML is `train.py`'s job. Every key is optional and falls back to a documented
 default, because ``build_model(ckpt["config"])`` is called on configs written months apart
@@ -51,7 +57,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .blocks import ConvReLU, NAFBlock, PixelShuffleHead, bilinear_upsample
+from .blocks import ConvReLU, NAFBlock, NoiseEstimator, PixelShuffleHead, bilinear_upsample
 
 __all__ = ["build_model", "NAFSR", "UNetSR", "count_parameters", "estimate_macs"]
 
@@ -73,6 +79,8 @@ _DEFAULTS: dict[str, Any] = {
     "ffn_expand": 2,
     "layerscale_init": 1.0,
     "padding_mode": "zeros",
+    "film_dim": 0,        # 0 = FiLM noise-conditioning disabled (default, unchanged behaviour)
+    "uncertainty": False, # add an optional per-pixel log-variance head (NAFSR only)
 }
 
 # Name aliases. "UNetBaseline" is accepted because early configs used it; keeping the
@@ -107,6 +115,19 @@ class NAFSR(nn.Module):
        model: the measured degradation is a *sharpening* downsample plus signal-dependent
        noise applied after decimation (docs/decisions.md D1, D2), so denoising and
        upsampling are learned jointly in one pass.
+
+    Two optional, additive, default-off Round-2 differentiators (docs/decisions.md, Round-2
+    plan): **FiLM noise-level conditioning** (`film_dim > 0`) adds a small `NoiseEstimator`
+    (src/blocks.py) whose output conditions every `NAFBlock` via FiLM, targeting SPEC F7's
+    "generalise beyond observed noise levels" -- and **an uncertainty head**
+    (`uncertainty=True`) adds a second, LR-resolution-fed `PixelShuffleHead` predicting a
+    per-pixel log-variance map. Both default OFF and add zero parameters when off, so a
+    checkpoint trained before this feature existed loads unchanged under V35's
+    `strict=True`. Neither changes the frozen `forward(x) -> tensor` contract used by
+    `inference.py`: FiLM is computed internally from `x`, and the uncertainty map is
+    returned only when the caller explicitly opts in via `return_uncertainty=True` (never
+    done by `inference.py`, only by `train.py`'s optional auxiliary loss and by the
+    standalone demo script that renders uncertainty maps for the deck).
     """
 
     def __init__(
@@ -120,6 +141,8 @@ class NAFSR(nn.Module):
         ffn_expand: int = 2,
         layerscale_init: float = 1.0,
         padding_mode: str = "zeros",
+        film_dim: int = 0,
+        uncertainty: bool = False,
     ) -> None:
         super().__init__()
         if width < 1 or num_blocks < 1:
@@ -130,18 +153,26 @@ class NAFSR(nn.Module):
         self.width = int(width)
         self.num_blocks = int(num_blocks)
         self.padding_mode = str(padding_mode)
+        self.film_dim = int(film_dim)
+        self.has_uncertainty = bool(uncertainty)
 
         self.stem = nn.Conv2d(
             in_ch, width, kernel_size=3, padding=1, padding_mode=self.padding_mode
         )
-        self.body = nn.Sequential(
-            *[
+        # A ModuleList, not nn.Sequential: FiLM conditioning must reach every block, and
+        # nn.Sequential only ever forwards a single positional argument between modules.
+        # Integer-indexed submodules ("body.0.*", "body.1.*", ...) serialise identically
+        # either way, so this does NOT change the state_dict layout of any existing
+        # checkpoint.
+        self.body = nn.ModuleList(
+            [
                 NAFBlock(
                     width,
                     dw_expand=dw_expand,
                     ffn_expand=ffn_expand,
                     layerscale_init=layerscale_init,
                     padding_mode=self.padding_mode,
+                    film_dim=self.film_dim,
                 )
                 for _ in range(num_blocks)
             ]
@@ -152,15 +183,33 @@ class NAFSR(nn.Module):
         self.head = PixelShuffleHead(
             width, out_ch=out_ch, scale=self.scale, padding_mode=self.padding_mode
         )
+        self.noise_est = (
+            NoiseEstimator(in_ch=in_ch, film_dim=self.film_dim) if self.film_dim > 0 else None
+        )
+        self.uncertainty_head = (
+            PixelShuffleHead(width, out_ch=1, scale=self.scale, padding_mode=self.padding_mode)
+            if self.has_uncertainty else None
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, return_uncertainty: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         skip = bilinear_upsample(x, self.scale)
         if self.out_ch != self.in_ch:
             # Only reachable for a non 1->1 config; keeps the skip well-defined.
             skip = skip.mean(dim=1, keepdim=True).expand(-1, self.out_ch, -1, -1)
         feat = self.stem(x)
-        y = self.body_tail(self.body(feat)) + feat
-        return self.head(y) + skip
+        cond = self.noise_est(x) if self.noise_est is not None else None
+        y = feat
+        for blk in self.body:
+            y = blk(y, cond=cond)
+        y = self.body_tail(y) + feat
+        out = self.head(y) + skip
+        if self.uncertainty_head is not None and return_uncertainty:
+            # Log-variance is not a pixel value: no global skip, no [0,1] framing.
+            log_var = self.uncertainty_head(y)
+            return out, log_var
+        return out
 
 
 class UNetSR(nn.Module):
@@ -283,8 +332,9 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
         cfg: model hyper-parameters, or a full training config containing a ``model``
             sub-mapping. Recognised keys: ``name`` (``"NAFSR"`` | ``"UNetSR"``), ``width``,
             ``num_blocks`` (NAFSR), ``levels`` (UNetSR), ``scale``, ``in_ch``, ``out_ch``,
-            ``dw_expand``, ``ffn_expand``, ``layerscale_init`` and ``padding_mode``. Every
-            key is optional; missing keys fall back to ``_DEFAULTS``. Unrecognised keys are
+            ``dw_expand``, ``ffn_expand``, ``layerscale_init``, ``padding_mode``,
+            ``film_dim`` and ``uncertainty`` (both NAFSR-only, default off). Every key is
+            optional; missing keys fall back to ``_DEFAULTS``. Unrecognised keys are
             ignored, so a config carrying extra sections or future keys still loads.
 
     Returns:
@@ -324,6 +374,8 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
             ffn_expand=int(get("ffn_expand")),
             layerscale_init=float(get("layerscale_init")),
             padding_mode=str(get("padding_mode")),
+            film_dim=int(get("film_dim")),
+            uncertainty=bool(get("uncertainty")),
         )
 
     # UNetSR. `num_blocks` is accepted as a synonym for `levels` only if `levels` is
@@ -392,6 +444,10 @@ def _selftest() -> int:
                           "in_ch": 1, "out_ch": 1},
         "UNetSR w32 L4": {"name": "UNetSR", "width": 32, "levels": 4, "scale": 2,
                           "in_ch": 1, "out_ch": 1},
+        "NAFSR w48 n16 FiLM+uncertainty": {
+            "name": "NAFSR", "width": 48, "num_blocks": 16, "scale": 2,
+            "in_ch": 1, "out_ch": 1, "film_dim": 16, "uncertainty": True,
+        },
     }
     bad = 0
     for label, cfg in configs.items():
@@ -421,6 +477,40 @@ def _selftest() -> int:
             same = torch.equal(model(x), model(x))
         print(f"  {'ok ' if same else 'FAIL'} bit-identical on repeat: {same}")
         bad += 0 if same else 1
+
+        if getattr(model, "has_uncertainty", False):
+            with torch.no_grad():
+                x = torch.randn(1, 1, 64, 64)
+                out_only = model(x)
+                out_pair, log_var = model(x, return_uncertainty=True)
+                shapes_ok = (
+                    tuple(out_only.shape) == (1, 1, 128, 128)
+                    and tuple(log_var.shape) == (1, 1, 128, 128)
+                    and torch.equal(out_only, out_pair)  # same restoration either way
+                    and torch.isfinite(log_var).all().item()
+                )
+            print(f"  {'ok ' if shapes_ok else 'FAIL'} return_uncertainty=True gives "
+                  f"(restoration, log_var) of matching shape, restoration unchanged")
+            bad += 0 if shapes_ok else 1
+
+        if getattr(model, "film_dim", 0) > 0:
+            # Zero-init sanity control: at construction, FiLM's Linear is zero-initialised,
+            # so conditioning must be an exact identity -- output must match a twin model
+            # with film_dim=0 given the SAME body/head weights. Confirms "no scary
+            # surprises at init" is true, not just asserted.
+            plain_cfg = dict(cfg)
+            plain_cfg["film_dim"] = 0
+            plain_cfg["uncertainty"] = False
+            twin = build_model(plain_cfg).eval()
+            twin.load_state_dict(model.state_dict(), strict=False)
+            with torch.no_grad():
+                x = torch.randn(1, 1, 48, 48)
+                film_out = model(x)
+                twin_out = twin(x)
+            film_identity_ok = torch.equal(film_out, twin_out)
+            print(f"  {'ok ' if film_identity_ok else 'FAIL'} FiLM zero-init is an exact "
+                  f"identity vs an un-conditioned twin")
+            bad += 0 if film_identity_ok else 1
     print("SELFTEST", "PASS" if bad == 0 else f"FAIL ({bad} problems)")
     return 0 if bad == 0 else 1
 

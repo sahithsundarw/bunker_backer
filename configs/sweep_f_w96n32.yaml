@@ -29,6 +29,8 @@ model:
   dw_expand: 2
   ffn_expand: 2
   layerscale_init: 1.0
+  film_dim: 16          # Round-2 differentiator: FiLM noise-conditioning (docs/decisions.md D52)
+  uncertainty: true     # Round-2 differentiator: per-pixel log-variance head (D52)
 data:
   lr_patch: 64            # -> 128 GT patch
   batch_size: 32
@@ -54,6 +56,9 @@ optim:
   warmup_iters: 100       # scaled down from 500/20000 (2.5%) to keep the same warmup
                           # fraction at a 2000-iter budget
   total_iters: 2000       # SHORT PROBE, not full training -- PLAN_CLOUD.md Step 3
+loss:
+  weights:
+    uncertainty: 0.01   # small aux weight, same precedent as the LPIPS term (SPEC 8)
 train:
   amp: bf16
   grad_clip: 1.0

@@ -1,0 +1,53 @@
+# LOCAL VALIDATION CONFIG for the Round-2 FiLM + uncertainty differentiator
+# (.claude/plans/as-of-now-whatever-steady-lemur.md Phase 0). NOT the submission config --
+# configs/final.yaml stays the truth for weights/best.pt until this feature clears its own
+# validation gate and a decision is made to carry it into the sweep/long run.
+#
+# Same data/optim/train blocks as configs/final.yaml except a short total_iters, since this
+# config exists to answer one question: does FiLM+uncertainty converge at least as well as
+# the plain architecture on a short local run, before any cloud budget is spent on it.
+model:
+  name: NAFSR
+  width: 48
+  num_blocks: 16
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+  film_dim: 16          # Round-2 differentiator: noise-level FiLM conditioning (0 = off)
+  uncertainty: true     # Round-2 differentiator: per-pixel log-variance head
+data:
+  lr_patch: 64
+  batch_size: 32
+  synth_ratio: 0.5
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 1.20
+    gauss_sigma_range: [0.0, 0.065]
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 150
+  total_iters: 3000     # short local validation run, not the long run
+loss:
+  weights:
+    uncertainty: 0.01   # small, matches the LPIPS-term precedent (SPEC 8: keep aux terms small)
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 500
+  save_best_on: psnr

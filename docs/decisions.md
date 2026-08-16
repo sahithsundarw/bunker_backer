@@ -2450,3 +2450,93 @@ None of the four required weakening any check. (1) and (4) are data/config corre
 outside the verifier. (2) restores a pre-existing, working contract that a documentation edit
 broke by accident. (3) updates a test's own call site to match a real, intentional behavioural
 change elsewhere, without altering what the test verifies.
+
+## D52 — FiLM noise-level conditioning + uncertainty head: implemented, validated, additive-only
+
+**Date:** 2026-08-16/17. Round-2 differentiation plan (`.claude/plans/as-of-now-whatever-steady-lemur.md`
+Phase 0, user-approved), sequenced explicitly before any HF Jobs cloud spend (`docs/PLAN_PHASE2.md`
+§5 item 0). Targets SPEC F7 ("generalise beyond observed noise levels") and SPEC §19's
+"memorable finale demo" note on uncertainty output.
+
+**What was built:**
+- `src/blocks.py`: `NoiseEstimator` (tiny conv stack + global pool, estimates a per-image
+  embedding from the raw input) and `NAFBlock` gained an optional `film_dim` param + `cond`
+  forward argument, applying FiLM scale/shift (`y*(1+scale)+shift`) after `norm1` on the
+  spatial branch. The `film` Linear is zero-initialised, so FiLM is an exact identity at step 0
+  (same "no scary surprises" reasoning `layerscale_init` already documents in this class).
+- `src/model.py`: `NAFSR` gained `film_dim: int = 0` and `uncertainty: bool = False`, both in
+  `_DEFAULTS` at their off-value. `self.body` changed from `nn.Sequential` to `nn.ModuleList`
+  (state_dict keys are integer-indexed either way — "body.0.*" etc. — so this is NOT a
+  checkpoint-format change) so FiLM conditioning can reach every block. `forward` gained
+  `return_uncertainty: bool = False`; when the checkpoint has an uncertainty head AND the caller
+  passes `True`, returns `(restoration, log_var)` instead of the single tensor. `inference.py`
+  never passes this flag, so the frozen `forward(x) -> tensor` contract it depends on is
+  untouched.
+- `src/losses.py`: `heteroscedastic_nll_loss(pred, log_var, target)` (`0.5*exp(-log_var)*(pred-target)^2
+  + 0.5*log_var`, `log_var` clamped to `LOG_VAR_CLAMP = (-10, 10)` before `exp()` — an
+  unclamped log-variance is a real overflow/underflow hazard early in training, not a
+  hypothetical one). `RestorationLoss.forward` gained an optional `log_var` argument; the term
+  is computed only when `log_var is not None` AND its weight is nonzero — zero cost, zero
+  behaviour change for every existing call site and config.
+- `train.py`: `run_training`'s main loop calls `model(lr_b, return_uncertainty=has_uncertainty)`
+  where `has_uncertainty = getattr(model, "has_uncertainty", False)` — `False` for every
+  existing config including `configs/final.yaml`, so the training loop is byte-for-byte
+  unchanged for them.
+- `configs/film_validation.yaml`: a **local validation config, not a submission config** —
+  `configs/final.yaml` remains the truth for `weights/best.pt` until/unless a later decision
+  promotes this feature into it.
+
+**Confirmed additive, not a checkpoint-format change:** the shipped checkpoint
+(`weights/best.pt`, sha256 `9c0f39a7...`) still loads with `build_model(ckpt["config"])` +
+`load_state_dict(..., strict=True)` under the updated `src/model.py`/`src/blocks.py` — verified
+directly, not assumed (`film_dim=0`, `has_uncertainty=False` read back from the loaded model).
+
+**Self-test validation** (`py -3.12 -m src.model`, `py -3.12 -m src.losses`), all PASS:
+- Shape/purity/determinism checks (mirroring V07–V12/V24) now include a FiLM+uncertainty
+  config: 502,978 params (388,225 base + ~115K for FiLM projections + `NoiseEstimator` +
+  the extra `PixelShuffleHead`), MACs 5.599G vs 5.584G base (negligible compute overhead at
+  inference, as designed).
+- **Zero-init identity, verified not asserted:** a FiLM-enabled model and a `film_dim=0` twin
+  loaded with the *same* body/stem/head weights (`strict=False`, ignoring the twin's missing
+  FiLM/uncertainty keys) produce bit-identical output. Confirms FiLM genuinely starts as a
+  no-op rather than merely being designed to.
+- `return_uncertainty=True` returns `(restoration, log_var)` of matching shape, with the
+  restoration tensor identical to the default single-tensor call — confirms the uncertainty
+  path never perturbs the primary output.
+- `heteroscedastic_nll_loss`: a confident-but-wrong prediction scores worse than an
+  equally-wrong prediction that honestly reports high variance (31.05 vs 3.00 on a synthetic
+  fixture) — confirms the loss actually calibrates confidence rather than being a numerically-
+  finite no-op.
+
+**Overfit sanity gate** (mirrors V25): `configs/film_validation.yaml`, `--overfit 2`, 6000
+iters — best PSNR **44.50 dB** (raw) / EMA 44.25 dB, clearing the 40 dB gate by a wide margin.
+Confirms the new heads do not interfere with optimisation on a trivial case.
+
+**Equal-budget local training comparison, the real Phase-0 gate** (`results/experiments.csv`,
+both seed 42, both 3000 iters, `C:\kla-data`, RTX 4060, full 400-image committed val split,
+disk-verified):
+
+| | PSNR dB | SSIM | LPIPS | wall-clock |
+|---|---|---|---|---|
+| Plain NAFSR (`configs/final.yaml --iters 3000`, control) | 28.4145 ± 4.3573 | 0.76429 | 0.28146 | 659.3 s |
+| FiLM + uncertainty (`configs/film_validation.yaml`) | 28.4077 ± 4.3413 | 0.76613 | 0.27551 | 750.6 s |
+
+**Read honestly:** PSNR is a statistical wash (Δ −0.0068 dB, well inside noise at this sample
+size/iteration budget); SSIM and LPIPS both favour FiLM by a small margin (+0.00184 SSIM,
+−0.00595 LPIPS). No paired significance test run at this stage — that is not the claim being
+made. The claim is narrower and already fully supported: **FiLM+uncertainty does not regress
+quality at equal training budget, and shows a small perceptual-metric edge**, which is enough to
+clear the gate the plan set ("not worse than baseline") before spending any cloud budget on it.
+Training wall-clock is ~14% higher (the uncertainty head's backward pass, training-only —
+`inference.py` never calls `return_uncertainty=True` so this does not touch the scored
+throughput axis).
+
+**Decision: Phase 0's local validation gate is cleared.** Proceeds to updating the sweep
+configs (`docs/PLAN_PHASE2.md` §5 item 0) and dispatching the cloud sweep with FiLM+uncertainty
+enabled, per the approved plan. Whether FiLM/uncertainty is ultimately promoted into
+`configs/final.yaml` (the actual submission config) is a decision for after the sweep/long run
+produce real, longer-budget numbers — not asserted here.
+
+**Would overturn this:** the sweep or long run showing FiLM+uncertainty underperforms the
+plain architecture at a longer, properly-converged budget, or a paired significance test on a
+larger sample showing the small SSIM/LPIPS edge above does not replicate.

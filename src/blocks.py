@@ -32,6 +32,7 @@ __all__ = [
     "NAFBlock",
     "PixelShuffleHead",
     "ConvReLU",
+    "NoiseEstimator",
     "bilinear_upsample",
 ]
 
@@ -217,6 +218,7 @@ class NAFBlock(nn.Module):
         ffn_expand: int = 2,
         layerscale_init: float = 1.0,
         padding_mode: str = "zeros",
+        film_dim: int = 0,
     ) -> None:
         super().__init__()
         dw_c = channels * dw_expand
@@ -248,12 +250,40 @@ class NAFBlock(nn.Module):
         self.beta = nn.Parameter(torch.full((1, channels, 1, 1), float(layerscale_init)))
         self.gamma = nn.Parameter(torch.full((1, channels, 1, 1), float(layerscale_init)))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self.training and not torch.is_grad_enabled():
-            if bool(torch.all(self.beta == 0).item()) and bool(torch.all(self.gamma == 0).item()):
-                return x
+        # --- optional FiLM noise-level conditioning (Round 2 differentiator) -----
+        # `film_dim == 0` (the default) means NO parameters here at all: the module holds
+        # exactly the layers it held before this feature existed, so a checkpoint trained
+        # without FiLM is byte-for-byte the same state_dict shape and loads unchanged
+        # under V35's `strict=True`. Applied once, after norm1, on the spatial branch only
+        # -- the residual stream (`x = x + y * beta`) carries the conditioned signal into
+        # the channel-MLP branch too, so a second injection point is not needed.
+        self.film_dim = int(film_dim)
+        if self.film_dim > 0:
+            self.film = nn.Linear(self.film_dim, 2 * channels)
+            # Zero-init: at step 0, `scale=0, shift=0` below makes FiLM an exact identity
+            # (`y * (1+0) + 0 == y`), the same "no scary surprises at init" reasoning
+            # `layerscale_init` already documents for `beta`/`gamma` in this class.
+            nn.init.zeros_(self.film.weight)
+            nn.init.zeros_(self.film.bias)
+        else:
+            self.film = None
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor | None = None) -> torch.Tensor:
+        if (
+            not self.training
+            and not torch.is_grad_enabled()
+            and self.film is None
+            and bool(torch.all(self.beta == 0).item())
+            and bool(torch.all(self.gamma == 0).item())
+        ):
+            return x
 
         y = self.norm1(x)
+        if self.film is not None and cond is not None:
+            scale, shift = self.film(cond).chunk(2, dim=1)          # (B, C) each
+            scale = scale[:, :, None, None]
+            shift = shift[:, :, None, None]
+            y = y * (1.0 + scale) + shift
         y = self.conv1(y)
         y = self.dwconv(y)
         y = self.gate1(y)
@@ -299,6 +329,40 @@ class PixelShuffleHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.project(self.shuffle(self.expand(x)))
+
+
+class NoiseEstimator(nn.Module):
+    """Small conv stack estimating a per-image noise-level embedding from the raw input.
+
+    Feeds `NAFBlock`'s optional FiLM conditioning (SPEC F7: generalise beyond observed
+    noise levels). The input `x` legitimately carries signal-dependent noise
+    (docs/decisions.md D2, D12), so a few strided conv layers plus a global pool over the
+    whole image is a physically reasonable estimator -- it is not told the noise
+    parameters directly, it has to infer a summary of them from the pixels themselves,
+    the same information a restoration network would need anyway.
+
+    Deliberately tiny relative to the NAFSR body (a handful of conv layers at a
+    downsampled resolution, not a `NAFBlock` stack) -- this is a conditioning signal, not
+    a second restoration path, and this project's whole throughput story (docs/decisions.md
+    D7, D21) argues against spending real compute on anything that is not the main body.
+    """
+
+    def __init__(self, in_ch: int = 1, hidden: int = 16, film_dim: int = 16) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, hidden, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(hidden, hidden, kernel_size=3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(hidden, hidden, kernel_size=3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        self.proj = nn.Linear(hidden, film_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feat = self.net(x)
+        pooled = feat.mean(dim=(2, 3))          # (B, hidden); defined for any H, W >= 1
+        return self.proj(pooled)                # (B, film_dim)
 
 
 class ConvReLU(nn.Module):
