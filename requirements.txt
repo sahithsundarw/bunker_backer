@@ -1,10 +1,10 @@
-# requirements.txt -- complete `pip freeze` of the environment this repo was built in.
-# Python 3.12.10, Windows 11, CUDA 12.8, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB).
+# requirements.txt -- pinned Python 3.11/3.12 environment for CUDA scoring and CPU verification.
+# The training environment was Windows 11 / CUDA 12.8 / RTX 4060 Laptop GPU (8 GB).
 #
 # WHY THE FIRST LINE IS AN INDEX DIRECTIVE
 # ----------------------------------------
-# `torch==2.11.0+cu128` is a CUDA build. The `+cu128` local version is published ONLY on
-# download.pytorch.org, never on PyPI, so the directive below is what makes a bare
+# `torch==2.11.0+cu128` is a CUDA build. The `+cu128` local version is published only on
+# download.pytorch.org, never on PyPI, so the directive below makes a bare
 #     pip install -r requirements.txt
 # resolve it with no extra flags, no env vars and no manual steps.
 #
@@ -22,8 +22,9 @@
 # (no other flags) yields torch 2.11.0+cu128 / torchvision 0.26.0+cu128 with
 # torch.version.cuda == '12.8' and torch.cuda.is_available() == True.
 #
-# On a machine with no NVIDIA GPU the same wheels install and torch falls back to CPU at
-# runtime; inference.py handles that (--device cpu is automatic).
+# CUDA wheels are selected only on Linux x86-64, the H100 scoring platform. macOS and other
+# development hosts install the matching standard build so a fresh clone can exercise CPU
+# fallback instead of failing wheel resolution before the code runs.
 --extra-index-url https://download.pytorch.org/whl/cu128   # sole publisher of torch==2.11.0+cu128
 
 colorama==0.4.6
@@ -41,7 +42,7 @@ MarkupSafe==3.0.3
 matplotlib==3.11.1
 mpmath==1.3.0
 networkx==3.6.1
-numpy==2.5.2
+numpy==2.4.6
 opencv-python==5.0.0.93
 packaging==26.3
 pillow==12.3.0
@@ -50,12 +51,14 @@ python-dateutil==2.9.0.post0
 pytorch-msssim==1.0.0
 PyYAML==6.0.3
 scikit-image==0.26.0
-scipy==1.18.0
+scipy==1.17.1
 setuptools==78.1.0
 six==1.17.0
 sympy==1.14.0
-tifffile==2026.7.31
-torch==2.11.0+cu128
-torchvision==0.26.0+cu128
+tifffile==2026.3.3
+torch==2.11.0+cu128; sys_platform == "linux" and platform_machine == "x86_64"
+torch==2.11.0; sys_platform != "linux" or platform_machine != "x86_64"
+torchvision==0.26.0+cu128; sys_platform == "linux" and platform_machine == "x86_64"
+torchvision==0.26.0; sys_platform != "linux" or platform_machine != "x86_64"
 tqdm==4.70.0
 typing_extensions==4.16.0
