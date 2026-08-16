@@ -38,11 +38,11 @@ honest paired result and selection rationale.
 ## Published final outputs
 
 - URL: https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip
-- SHA256: `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`
-- Size: 91,069,597 bytes
+- SHA256: `b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1`
+- Size: 90,990,452 bytes
 - Files: 400, flat `.npy` archive
 - `manifest.csv` checkout SHA256:
-  `2c792ae225f1555d951b8edad7d34f74538d187c659a4230383d5c1d9a611c3b`
+  `30e8a921b7b55c365ca337da6ca73732e4fd0779ea940eebc7725efd76ce1ba6`
 - `sha256sums.txt`: 400 per-file digests
 
 The final test set has no GT. No final-test PSNR, SSIM, or LPIPS is claimed.

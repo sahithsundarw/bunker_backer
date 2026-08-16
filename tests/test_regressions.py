@@ -22,13 +22,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.dataset_paths import resolve_test_input_dir
+from scripts.benchmark_runtime import _render
 from src.blocks import NAFBlock
 from src.dataset import DataConfig, PairedRestorationDataset
 from src.io_utils import save_array
 from src.metrics import paired_verdict
 from src.utils import (EMA, capture_rng_state, capture_source_provenance, restore_rng_state,
                        save_checkpoint, seed_everything)
-from train import fixed_overfit_regions, promote_checkpoint_if_accepted
+from train import (build_argparser, fixed_overfit_regions, initialize_from_checkpoint,
+                   promote_checkpoint_if_accepted)
 
 
 def digest(path: Path) -> str:
@@ -36,6 +38,22 @@ def digest(path: Path) -> str:
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_runtime_report_template_records_target_environment(self) -> None:
+        run = {
+            "external_s": 2.0, "internal_s": 1.5, "startup_import_s": 0.5,
+            "images": 400, "device": "cuda", "precision": "bf16", "batch": 32,
+        }
+        checkpoint = {
+            "path": Path("weights/best.pt"), "sha256": "a" * 64, "bytes": 1,
+            "parameters": 2, "hardware": "NVIDIA H100", "python": "3.12.0",
+            "numpy": "2.4.0", "torch": "2.11.0+cu128", "cuda_runtime": "12.8",
+            "cudnn": "91002",
+        }
+        report = _render([run], ["python", "benchmark.py"], checkpoint)
+        for expected in ("NVIDIA H100", "Python", "NumPy", "PyTorch", "CUDA runtime",
+                         "cuDNN", "400 images in 2.00 s"):
+            self.assertIn(expected, report)
+
     def test_release_manifest_and_checkout_checksum(self) -> None:
         manifest_dir = ROOT / "results" / "restored_test_outputs"
         manifest = json.loads((manifest_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -140,6 +158,38 @@ class ResumeAndGateTests(unittest.TestCase):
             torch.testing.assert_close(value, expected_model[key], rtol=0, atol=0)
         for key, value in resumed_ema.state_dict().items():
             torch.testing.assert_close(value, expected_ema[key], rtol=0, atol=0)
+
+    def test_inference_checkpoint_can_initialize_but_not_fake_resume(self) -> None:
+        source_model = torch.nn.Linear(2, 1)
+        with torch.no_grad():
+            source_model.weight.fill_(0.25)
+            source_model.bias.fill_(-0.5)
+        source_ema = EMA(source_model, decay=0.999)
+        config = {"model": {"name": "test"}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "inference-only.pt"
+            save_checkpoint(path, model=source_model, ema=source_ema, config=config,
+                            iteration=20, metrics={})
+            target = torch.nn.Linear(2, 1)
+            target_ema = EMA(target, decay=0.999)
+            metadata = initialize_from_checkpoint(target, target_ema, path, config)
+
+        self.assertEqual(metadata["source_iter"], 20)
+        self.assertEqual(metadata["source_weights"], "ema")
+        self.assertFalse(metadata["optimizer_state_reused"])
+        self.assertEqual(metadata["new_run_starts_at_iter"], 0)
+        for key, value in target.state_dict().items():
+            torch.testing.assert_close(value, source_ema.state_dict()[key], rtol=0, atol=0)
+
+    def test_init_checkpoint_and_resume_are_mutually_exclusive(self) -> None:
+        parser = build_argparser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args([
+                "--config", "configs/final.yaml",
+                "--resume", "resume.pt",
+                "--init_checkpoint", "weights/best.pt",
+            ])
 
     def test_rejected_quality_gate_preserves_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

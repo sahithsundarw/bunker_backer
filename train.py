@@ -120,8 +120,16 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--overfit_iters", type=int, default=6000,
                     help="maximum iteration budget for --overfit (default 6000; the gate may "
                          "exit earlier only after a live score exceeds 40 dB)")
-    ap.add_argument("--resume", default=None,
-                    help="resume a checkpoint carrying complete training_state")
+    checkpoint_mode = ap.add_mutually_exclusive_group()
+    checkpoint_mode.add_argument(
+        "--resume", default=None,
+        help="exactly resume a checkpoint carrying complete training_state",
+    )
+    checkpoint_mode.add_argument(
+        "--init_checkpoint", default=None,
+        help="initialize model and EMA weights from an inference checkpoint, then start a "
+             "new optimizer/scheduler run at iteration zero",
+    )
     ap.add_argument("--out", default=None,
                     help="checkpoint path (default weights/best.pt)")
     ap.add_argument("--iters", type=int, default=None, help="override optim.total_iters")
@@ -162,6 +170,39 @@ def _repo_relative(p: Path) -> str:
 def _log(msg: str) -> None:
     sys.stdout.write(msg + "\n")
     sys.stdout.flush()
+
+
+def initialize_from_checkpoint(
+    model: torch.nn.Module,
+    ema: EMA,
+    checkpoint_path: str | Path,
+    config: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Load model initialization weights without pretending to resume optimizer state.
+
+    Release checkpoints may intentionally contain only inference state. They are valid
+    starting points for a new fine-tuning run, but they cannot reproduce an interrupted
+    optimizer trajectory. ``--resume`` remains the only exact-continuation path.
+    """
+    path = Path(checkpoint_path)
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(checkpoint, Mapping):
+        raise ValueError(f"--init_checkpoint {path} is not a checkpoint mapping")
+    if checkpoint.get("config") != config:
+        raise ValueError("--init_checkpoint config differs from the requested config")
+    state = checkpoint.get("ema") or checkpoint.get("model")
+    if not isinstance(state, Mapping) or not state:
+        raise ValueError("--init_checkpoint has no usable model or EMA state")
+    model.load_state_dict(state, strict=True)
+    ema.load_state_dict(state)
+    return {
+        "path": _repo_relative(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "source_iter": int(checkpoint.get("iter", 0)),
+        "source_weights": "ema" if checkpoint.get("ema") else "model",
+        "new_run_starts_at_iter": 0,
+        "optimizer_state_reused": False,
+    }
 
 
 # ======================================================================================
@@ -499,6 +540,12 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
         shadow = shadow.to(memory_format=torch.channels_last)
     start_iter = 0
     resume_state: Mapping[str, Any] | None = None
+    initialization: dict[str, Any] | None = None
+    if args.init_checkpoint:
+        initialization = initialize_from_checkpoint(model, ema, args.init_checkpoint, cfg)
+        _log(f"initialized new run from {args.init_checkpoint} "
+             f"({initialization['source_weights']} at source iter "
+             f"{initialization['source_iter']})")
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=True)
         if ck.get("config") != cfg:
@@ -553,6 +600,7 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
         "preloaded": bool(train_ds.preloaded), "dataset_build_s": round(build_s, 2),
         "device": str(device), "backend": backend, "amp": amp,
         "channels_last": channels_last, "smoke": smoke, "out": str(out_path),
+        "initialization": initialization,
     }))
 
     best = {"psnr": float("-inf"), "ssim": float("nan"), "iter": -1}
@@ -668,11 +716,16 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                         "batch_in_epoch": batch_in_epoch,
                         "rng": capture_rng_state(),
                     }
+                    checkpoint_metrics = {
+                        "val_psnr": v["psnr"], "val_ssim": v["ssim"],
+                        "val_n": v["n"], "selection": "ema/psnr",
+                        "split": "configs/split_val.txt",
+                        "structural_kind": structural_kind,
+                    }
+                    if initialization is not None:
+                        checkpoint_metrics["initialization"] = initialization
                     save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
-                                    metrics={"val_psnr": v["psnr"], "val_ssim": v["ssim"],
-                                             "val_n": v["n"], "selection": "ema/psnr",
-                                             "split": "configs/split_val.txt",
-                                             "structural_kind": structural_kind},
+                                    metrics=checkpoint_metrics,
                                     git=sha, training_state=training_state,
                                     provenance=source_provenance)
                     _log(f"  [ckpt] new best {v['psnr']:.4f} dB -> {out_path}")
@@ -706,8 +759,11 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
             "batch_in_epoch": batch_in_epoch,
             "rng": capture_rng_state(),
         }
+        no_val_metrics: dict[str, Any] = {"note": "no validation performed"}
+        if initialization is not None:
+            no_val_metrics["initialization"] = initialization
         save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
-                        metrics={"note": "no validation performed"}, git=sha,
+                        metrics=no_val_metrics, git=sha,
                         training_state=training_state, provenance=source_provenance)
     ck = torch.load(out_path, map_location="cpu", weights_only=True)
     final_model = build_model(ck["config"]).to(device)

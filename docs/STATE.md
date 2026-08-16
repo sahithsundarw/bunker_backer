@@ -5,7 +5,7 @@
 > `cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054`, with validation
 > 28.7864 PSNR / 0.78286 SSIM / 0.25323 LPIPS. The 400-output archive is public at release tag
 > `artifacts-v1`, SHA256
-> `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`.
+> `b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1`.
 > The runtime headline is the local Mac CPU external-process result, 106.43 s for 400 images.
 > No final-test quality metric or H100 runtime is claimed. Run `scripts/verify_all.py`; do not
 > treat an ignored local `results/verification_report.json` as authoritative.

@@ -117,6 +117,18 @@ as inference-only. Its provenance block preserves the original release digest an
 pins the canonical source commit, and records Git blob plus SHA256 identities for every relevant
 training source file. The original model and EMA tensors are unchanged.
 
+It can also initialize a new fine-tuning run without misrepresenting that operation as an exact
+resume. This starts a fresh optimizer and scheduler at iteration zero; checkpoints written by the
+new run include complete resumable state:
+
+```bash
+python train.py --config configs/final.yaml --data_root /path/to/dataset \
+  --init_checkpoint weights/best.pt --out /path/to/fine-tuned.pt --seed 42
+```
+
+`--init_checkpoint` and `--resume` are mutually exclusive. Use `--resume` only for exact
+continuation from a checkpoint produced with `training_state`.
+
 ## Evaluation
 
 Generate and score the submitted model on the fixed validation split:
@@ -146,8 +158,8 @@ generated through strict production inference.
 The release asset `restored_test_outputs.zip` contains all 400 required final-test outputs:
 
 - URL: https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip
-- SHA256: `fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750`
-- Size: 91,069,597 bytes
+- SHA256: `b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1`
+- Size: 90,990,452 bytes
 
 `results/restored_test_outputs/manifest.json`, `manifest.csv`, and `sha256sums.txt` provide
 archive-level and per-file verification. The CSV is generated with canonical LF endings so its
@@ -163,6 +175,18 @@ The historical **release-output generation** run used an NVIDIA RTX 4060 Laptop 
 reported 20.09 s from the internal CUDA/bf16 pipeline timer. Linux/CUDA fresh-clone
 compatibility passed, but no final Linux/CUDA or H100 runtime was measured. These measurements
 are not presented as the same benchmark. See `results/runtime_report.md`.
+
+Run the external-process harness on the target H100 without changing inference code:
+
+```bash
+python scripts/benchmark_runtime.py --input_dir /path/to/NoisyLR \
+  --device cuda --precision bf16 --batch_size 32 --repeats 3 \
+  --out results/runtime_report_h100.md
+```
+
+The generated report records the exact GPU, OS, Python, NumPy, PyTorch, CUDA, and cuDNN
+versions. Do not replace the headline above until this command has actually run on the named
+hardware and all 400 outputs have been verified.
 
 ## Verification
 

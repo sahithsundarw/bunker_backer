@@ -5,21 +5,21 @@
   "release_url": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip",
   "release_page": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/tag/artifacts-v1",
   "archive_name": "restored_test_outputs.zip",
-  "archive_sha256": "fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750",
-  "archive_size_bytes": 91069597,
+  "archive_sha256": "b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1",
+  "archive_size_bytes": 90990452,
   "archive_layout": "flat zip containing 400 .npy files at the archive root",
   "archive_verification": {
     "public_download_http_status": 200,
-    "downloaded_size_bytes": 91069597,
-    "downloaded_sha256": "fbdf8a652d26168cf41e01842ca28d38c53d1da1547bd8ce602b5b8e5d6ac750",
+    "downloaded_size_bytes": 90990452,
+    "downloaded_sha256": "b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1",
     "contract_valid_files": 400
   },
-  "producing_git_sha": "c209cd213f6b4df0f5a6676a1671d5a8828a057c",
+  "producing_git_sha": "659fa26024567c151eeb7d5efda1489398926403",
   "producing_tree_clean": true,
   "checkpoint": "weights/best.pt",
-  "checkpoint_sha256": "9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313",
+  "checkpoint_sha256": "cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054",
   "tracked_checkpoint_sha256": "cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054",
-  "checkpoint_tensor_equivalence": "tracked model and EMA tensors are byte-identical to the producing release checkpoint; only canonical config/provenance metadata was added",
+  "checkpoint_tensor_equivalence": "the public arrays were cross-checked against a fresh tracked-checkpoint CPU-fp32 reproduction; numerical equivalence is measured below, but cross-device byte identity is not claimed",
   "checkpoint_weights_used": "ema",
   "checkpoint_validation_cpu_fp32": {
     "split": "configs/split_val.txt",
@@ -29,10 +29,23 @@
     "lpips": 0.2532281204499304
   },
   "manifest_csv": "manifest.csv",
-  "manifest_csv_sha256": "2c792ae225f1555d951b8edad7d34f74538d187c659a4230383d5c1d9a611c3b",
+  "manifest_csv_sha256": "30e8a921b7b55c365ca337da6ca73732e4fd0779ea940eebc7725efd76ce1ba6",
   "sha256sums": "sha256sums.txt",
-  "sha256sums_sha256": "21ecccb7a1bce5e7ade012af6cd1cf097e739781b994b7d63525083c4dc29637",
-  "command": "py -3.12 inference.py --input_dir C:/kla-data/test_NoisyLR --output_dir <out> --require_weights --verbose",
+  "sha256sums_sha256": "e94aea5a216d4c0cbb949ac0d642dc1580ca615e7192397305ebaceb219af7e3",
+  "command": "python inference.py --input_dir <data-root>/NoisyLR --output_dir <out> --require_weights --verbose",
+  "release_asset_revalidation": {
+    "date": "2026-08-16",
+    "public_http_status": 200,
+    "contract_valid_files": 400,
+    "tracked_checkpoint_reproduction_device": "Apple Silicon Mac CPU",
+    "tracked_checkpoint_reproduction_precision": "fp32",
+    "array_exact_files": 0,
+    "inter_output_psnr_db_mean": 65.72024311679455,
+    "inter_output_psnr_db_min": 54.901899544221024,
+    "mean_absolute_difference": 0.0004051224760214636,
+    "max_absolute_difference": 0.012815475463867188,
+    "note": "The public asset and CPU-fp32 reproduction are numerically equivalent at high PSNR; exact bytes can vary with accelerator and precision. No final-test GT metric is implied."
+  },
   "runtime": {
     "headline": {
       "label": "local Mac CPU external-process benchmark",
@@ -47,12 +60,12 @@
       "timing_scope": "external subprocess timer from process creation through exit"
     },
     "release_output_generation": {
-      "label": "release-output generation on NVIDIA RTX 4060 Laptop CUDA",
+      "label": "historical prior release-output generation on NVIDIA RTX 4060 Laptop CUDA",
       "wall_clock_s": 20.09,
       "images_per_s": 19.9,
       "precision": "bf16",
       "batch_size": 32,
-      "timing_scope": "historical inference.py main-pipeline timer for the published bytes"
+      "timing_scope": "historical inference.py main-pipeline timer; not attributed to the revalidated replacement archive bytes"
     },
     "linux_cuda_fresh_clone": {
       "label": "Linux/CUDA fresh-clone compatibility",
