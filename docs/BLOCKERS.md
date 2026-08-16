@@ -243,9 +243,33 @@ and is **not resolved**.
 - Disabling `cudnn.benchmark` entirely would fix determinism everywhere but costs throughput on
   every convolution in the network, not just the flaky one, and directly regresses V40.
 
-**Not resolved this session** — pending a proper before/after throughput measurement of
-`cudnn.deterministic = True` (or an equivalent narrower fix) before choosing between "accept
-the tradeoff" and "leave flaky, document it." **This blocks Definition of Done #2** (two
-consecutive clean `--strict --fresh-clone` runs) until resolved or explicitly accepted with a
-human decision recorded — a flaky V24 makes "two consecutive clean runs" a coin flip, not a
-verification result. Flagged here rather than silently retried until it happens to pass.
+**Partially resolved, main session, this session.** Measured the throughput cost of the two
+obvious remedies before applying either (per this project's own standing rule against
+unmeasured tradeoffs): `torch.backends.cudnn.deterministic = True` costs 355.0 → 355.2 ms/batch
+(0.06%); additionally disabling TF32 everywhere (`cudnn.allow_tf32` / `matmul.allow_tf32 =
+False`, previously on for the bf16 default path) costs 355.08 → 355.78 ms (0.2%). Both
+noise-level, not a real tradeoff — applied both in `inference.py::tune_backends()`, plus
+`CUBLAS_WORKSPACE_CONFIG=:4096:8` (set before any CUDA context exists, per PyTorch's own
+documented requirement for deterministic cuBLAS) and `torch.use_deterministic_algorithms(True,
+warn_only=True)`.
+
+**Result: substantially improved, not fully eliminated.** Flake rate measured across repeated
+`--only V24` runs: **50%** (unpatched baseline) → **~24%** (F.linear routing alone, D42
+addendum) → **~20%** (full stack: deterministic cudnn + TF32 off + CUBLAS workspace config +
+deterministic algorithms). An isolated manual repro (same settings, same checkpoint, outside
+the verifier's subprocess harness) gave 6/6 identical checksums, so the residual source is
+specific to something in the full `inference.py` CLI path (`ctx.run_inference`'s actual
+subprocess invocation) that a minimal in-process repro does not reproduce — not yet isolated.
+One plausible contributor, not yet confirmed: concurrent GPU use by other processes on this
+dev machine (several were observed via `tasklist`/`Get-CimInstance` during this session) could
+perturb cuDNN's algorithm-selection cache or memory layout even under `deterministic=True`,
+in a way that would not reproduce on a single-tenant clean CI/eval box.
+
+**Still not fully resolved.** All changes made are strict improvements (measured, negligible
+cost, real flake-rate reduction) and are committed. Full elimination needs further isolation
+work this session did not have time to complete. **This still blocks Definition of Done #2**
+(two consecutive clean `--strict --fresh-clone` runs) in the strict sense that V24 could land
+FAIL on either run by chance (~1-in-5). Operational recommendation: if a `--strict` run reports
+V24 FAIL and nothing else is red, re-running the suite is legitimate (V24 is independently
+seeded per invocation, not gamed) rather than treating one flaky-check failure as a full
+iteration failure — but this should be re-investigated properly, not relied upon indefinitely.

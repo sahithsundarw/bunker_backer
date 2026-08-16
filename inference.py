@@ -22,9 +22,11 @@ Design notes that are deliberate and measured, not accidental:
   256 inputs coexist in one invocation even though the released test set is uniform.
 * The input is NEVER clipped (SPEC F5); the output is ALWAYS clipped to [0,1] and nothing
   else -- no renormalisation, which measured -4.66 dB (docs/decisions.md D3).
-* Free levers on by default: inference_mode, channels_last, TF32, cuDNN benchmark, bf16
-  autocast on CUDA, pinned + non_blocking H2D, threaded writes. `--compile` and `--tta` are
-  opt-in because at 400 images neither amortises its fixed cost (V41, V42).
+* Free levers on by default: inference_mode, channels_last, cuDNN benchmark (deterministic
+  algorithm selection), bf16 autocast on CUDA, pinned + non_blocking H2D, threaded writes.
+  TF32 is deliberately OFF (docs/decisions.md D42 addendum, docs/BLOCKERS.md B11 -- a measured
+  contributor to cross-process nondeterminism, at noise-level throughput cost). `--compile`
+  and `--tta` are opt-in because at 400 images neither amortises its fixed cost (V41, V42).
 
 Owner: inference-engineer.
 """
@@ -37,6 +39,11 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+# Must be set before any CUDA context exists (docs/BLOCKERS.md B11): PyTorch's own
+# determinism guarantee for cuBLAS GEMM ops is conditional on this being set beforehand --
+# an env var, not a runtime call, so it cannot be moved into tune_backends().
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import numpy as np
 import torch
@@ -146,17 +153,31 @@ def resolve_device(requested: str | None) -> torch.device:
     return torch.device("cuda" if cuda_usable() else "cpu")
 
 
-def tune_backends(dev: torch.device, precision: str = "bf16") -> None:
+def tune_backends(dev: torch.device) -> None:
     """Free throughput levers. Harmless when CUDA is absent (docs/decisions.md D7 point 2).
 
-    TF32 is on for every path except an explicit ``--precision fp32``, where it is turned off
-    so that fp32 means fp32. TF32 carries a 10-bit mantissa, so leaving it on would make the
-    fp32 arm of the V22 comparison an approximation too -- measured at 6.9e-05 mean on real
-    inputs, i.e. comparing one approximation against another rather than against a reference.
-    The default path is unaffected, so the free lever is kept where it actually pays.
+    TF32 is off for every path, including the bf16 default -- not the throughput lever it once
+    was here. It was previously on except for an explicit ``--precision fp32`` specifically so
+    that arm stayed a true fp32 reference for V22; that same imprecision, applied to the bulk
+    bf16 path's occasional fp32-promoted ops (autocast's LayerNorm promotion, the SCA fix's
+    disabled-autocast region, D42), was a **measured** contributor to V24's cross-process
+    nondeterminism (docs/BLOCKERS.md B11) -- TF32's reduced-mantissa accumulation order is not
+    guaranteed bit-stable run to run the way full fp32 is. Measured cost of turning it off
+    everywhere: 355.08 vs 355.78 ms/batch-32 @ 128px on an RTX 4060 -- noise-level (0.2%), not
+    a real tradeoff, so there was no reason to keep the flakiness for it.
     """
     torch.backends.cudnn.benchmark = True          # fixed shapes per group -> autotune pays
-    tf32 = precision != "fp32"
+    # V24 (cross-process determinism) was measured flaky (~24-50%) under benchmark=True alone:
+    # some conv shapes have near-tied candidate algorithms, so which one wins depends on
+    # process scheduling noise, not the seed (docs/decisions.md D42 addendum, docs/BLOCKERS.md
+    # B11). Forcing deterministic algorithm selection closes most but not all of it (TF32 below
+    # closes the rest); measured cost is noise-level (355.0 vs 355.2 ms/batch-32) -- not a real
+    # throughput tradeoff, so there was no reason to leave this flaky.
+    torch.backends.cudnn.deterministic = True
+    # warn_only: an op with no deterministic implementation should degrade to a warning, not
+    # abort a scored run (CLAUDE.md PD4 -- crash-worthy, but this specific case is not one).
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    tf32 = False
     torch.backends.cudnn.allow_tf32 = tf32
     torch.backends.cuda.matmul.allow_tf32 = tf32
     if dev.type == "cuda":
@@ -405,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dev = resolve_device(args.device)
     use_amp, amp_dtype, prec = resolve_precision(args.precision, dev)
-    tune_backends(dev, prec)
+    tune_backends(dev)
 
     net, weights_ok = load_net(Path(args.weights), dev, verbose)
     if args.require_weights and not weights_ok:

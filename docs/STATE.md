@@ -4,10 +4,32 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** iteration 2, after the adversarial-review response batch. **Last verified
-commit:** `<pending — commit this file>`. **Verifier SHA:** re-pinned four times this batch,
-currently `001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf` — confirm against
-`docs/VERIFIER_SHA256` before trusting this number, it moves often right now.
+**Written at:** iteration 3. **Last verified commit:** `95b73bf`. **Verifier SHA** (confirmed
+against `docs/VERIFIER_SHA256`, unchanged since last pin): `2595f92d3131b67b20f0c4e588c982c7a4b24ece59e475bcf184cf20ec6c3818`.
+
+## Since the last rewrite of this file
+- **Decision A resolved (D40), committed `9a0a4dd`.** `perf-analyst`'s runtime benchmark
+  (PID 30608) finished; **SHIPPED MODEL: NAFSR**, unchanged in `weights/best.pt`. Full
+  reasoning and the honest V28 negative result (1 win/1 loss/1 tie, paired test) is in D40 —
+  do not re-litigate with a different statistic (see Do-NOT-retry).
+- `results/runtime_report.md` is now real and committed (`bdf4547`/`9a0a4dd`). End-to-end
+  scored-shape throughput: NAFSR 24.82 img/s vs UNetSR 26.69 img/s (UNetSR 7.5% faster, not the
+  4.78x isolated-compute gap — do not conflate the two, see D40 Do-NOT-retry).
+- **Phase 2 planning done and committed (`95b73bf`, D41, `docs/PLAN_PHASE2.md`).** HF Jobs
+  verified live under org `Team-Ceciroleo67` ($30 credit, expires 2026-09-01). This is Round 2
+  (semifinal, deadline 2026-09-04) work — separate track from finishing Phase 1 below. Nothing
+  in Phase 2 executes yet; it's blocked on deliberately sequencing after Phase 1 close-out per
+  `PLAN_PHASE2.md` §8, and the tail-coverage fix (§5 item 4) is the only Phase-2-adjacent item
+  that's local/no-GPU-budget and could be done anytime.
+- **V22 fix dispatched to `inference-engineer`** this iteration (in flight — see below).
+
+## Phase 1 close-out — remaining plan, in order (unchanged ordering, decision A now done)
+1. ~~perf-analyst finishes, decide which model ships~~ **DONE (D40, commit 9a0a4dd).**
+2. **V22 — IN FLIGHT.** Dispatched to `inference-engineer` with instruction to root-cause via a
+   rebuilt per-layer diagnostic (prior one lived in scratchpad, doesn't survive a session reset)
+   rather than guessing between "force LayerNorm fp32" (suspected no-op, autocast already
+   promotes it) and "force SCA's spatial mean fp32" (the more plausible culprit, unverified).
+   Awaiting agent report.
 
 ## Checks: 62 defined (was 57 at the top of this iteration)
 
@@ -58,53 +80,26 @@ Paired per-image test, same 400 images, both models:
 SSIM "win" was noise, not signal.
 
 ## ⚙ IN FLIGHT RIGHT NOW
-- **`perf-analyst`'s runtime benchmark**, launched via `scripts/benchmark_runtime.py all
-  --sweep_divergence`, PID **30608** (parent orchestrator; spawns short-lived `inference.py`
-  subprocesses as children — the parent's own near-zero CPU/RSS is expected, it's just
-  `subprocess.wait()`-ing). Log: `<scratchpad>/bench_runtime.log`, stderr
-  `<scratchpad>/bench_runtime.err` (empty — no crash). Stuck on the `e2e` stage (scaling series
-  1/25/50/100/200/400 x 5 repeats, plus 12 variants x ~5 repeats including a slow
-  `cpu_fp32_bs32` pass) for **45+ minutes** as of this writing. Not hung — confirmed via live
-  child `python.exe` processes cycling — just genuinely slow. `results/runtime_report.md` does
-  not exist yet. **This is what decision A (which model ships) is waiting on.**
+- **V22 fix**, dispatched to `inference-engineer` (see "Since the last rewrite" above). Report
+  pending. `perf-analyst`'s runtime benchmark that used to occupy this slot is done — see D40.
 
-## ⚠ V22 — the one real defect, still unfixed
-Unchanged from before this batch:
-
-    V22  FAIL  bf16 vs fp32 diverge: mean 5.99e-04, max 1.27e-02
-
-Mean passes (limit 1e-3); only max fails, at 1.27x the 1e-2 limit. Root-cause investigation
-was done (not yet applied): `LayerNorm2d` is **already** fp32 under autocast policy per
-PyTorch's own promotion rules (its docstring says so), so the previously-suggested "keep
-LayerNorm in fp32" remedy is likely a no-op. `SCA`'s `x.mean(dim=(2,3))` over 16384 elements is
-the more plausible culprit — spatial mean is not in autocast's fp32-promote list the way
-`layer_norm` is. A per-layer diagnostic script is ready but unrun:
-`<scratchpad>/diag_v22.py` — hooks every leaf module, compares bf16-autocast vs fp32 output per
-layer on a real input, ranks by max abs diff. **Run this on the GPU before choosing a fix**,
-rather than guessing between "force SCA to fp32" and "switch default to fp16" — the
-`perf-analyst` sweep already includes an `fp16_bs32` and `fp32_bs32` timing variant, so the
-throughput half of that decision will exist once `e2e` finishes.
-
-## Remaining plan, in order (unchanged from the user's explicit ordering)
-1. `perf-analyst` finishes → **decide which model ships** (paired numbers above; user's stated
-   prior is "prefer the model winning more of the three metrics if close" and "report both,
-   state the reasoning in decisions.md") → write the D-numbered negative-result entry V28's
-   escape hatch actually requires (structured heading, all six measured means quoted,
-   `SHIPPED MODEL: <name>` matching `weights/best.pt`'s embedded config) → V28 resolves either
-   way honestly.
-2. Fix V22 — root-cause via `diag_v22.py`, not guessing.
-3. `adversarial-reviewer`'s findings: H4 still needs a V-check; the 5 mediums + 7 lows in
-   `reviews/adversarial-1.md` need triage.
-4. Full `--strict` run — first one since this whole batch landed. Then `ml-skeptic` re-run
-   (paired stats, U-Net comparison — new territory since its last pass), `cleanroom-tester`.
-5. **Two consecutive clean `--strict --fresh-clone` runs** (Definition of Done #2). Note
-   `check_V46` still doesn't literally execute README's fenced commands (H-4b, open) — a
-   fresh-clone pass proves the hardcoded fixture path, not literally what a reviewer would
-   copy-paste.
+## Phase 1 close-out steps 3-7 (unchanged, decision A and V22-dispatch are steps 1-2 above)
+3. `adversarial-reviewer`'s findings: H4 now has a dedicated regression guard (**V64**, commit
+   `e7e2feb`, D39). The 5 mediums + 7 lows in `reviews/adversarial-1.md` still need triage.
+4. Full `--strict` run — has not happened since this whole batch landed (V57/V58/V60/V61/V62/V64
+   all added since the last suite-wide pass). Then `ml-skeptic` re-run (paired stats, U-Net
+   comparison — new territory since its last pass), `cleanroom-tester`.
+5. **Two consecutive clean `--strict --fresh-clone` runs** (Definition of Done #2), never done
+   even once yet. Note `check_V46` still doesn't literally execute README's fenced commands
+   (H-4b, open) — a fresh-clone pass proves the hardcoded fixture path, not literally what a
+   reviewer would copy-paste.
 6. Tag `v0.1-submittable`.
 7. **Only after that**: the deck (U-5, `docs/SPEC_ADDENDUM.md` section 11's mandatory verbatim
    proxy sentence, 9 slides max, `TeamName_KLA_PS01.pdf`). Deliberately last per explicit
    instruction — no check can catch its absence, so it doesn't gate anything else.
+
+**Phase 2** (Round 2, separate track, deadline 2026-09-04): see `docs/PLAN_PHASE2.md`, not
+summarised again here to avoid the two docs drifting out of sync.
 
 U-9 (proxy-OOD report, `V63`) is the one remaining SPEC gap with no plan yet — needs GPU
 evaluation on an OOD image subset; slot it in whenever the GPU is free and nothing higher up
