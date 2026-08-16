@@ -1,0 +1,46 @@
+# Proxy-OOD membership list. Every name below is a PROCEDURALLY GENERATED
+# synthetic geometric image, NOT natural-photo content and NOT real
+# semiconductor imagery. See docs/dataset_findings.md 'Proxy-OOD set'.
+# 40 images, generated 20260816, prefix 'proxyood_' guarantees
+# zero collision with train/GT, train/NoisyLR or test_NoisyLR filenames,
+# which are all bare 6-digit 'NNNNNN.npy' (docs/SPEC_ADDENDUM.md section 6).
+proxyood_000000.npy
+proxyood_000001.npy
+proxyood_000002.npy
+proxyood_000003.npy
+proxyood_000004.npy
+proxyood_000005.npy
+proxyood_000006.npy
+proxyood_000007.npy
+proxyood_000008.npy
+proxyood_000009.npy
+proxyood_000010.npy
+proxyood_000011.npy
+proxyood_000012.npy
+proxyood_000013.npy
+proxyood_000014.npy
+proxyood_000015.npy
+proxyood_000016.npy
+proxyood_000017.npy
+proxyood_000018.npy
+proxyood_000019.npy
+proxyood_000020.npy
+proxyood_000021.npy
+proxyood_000022.npy
+proxyood_000023.npy
+proxyood_000024.npy
+proxyood_000025.npy
+proxyood_000026.npy
+proxyood_000027.npy
+proxyood_000028.npy
+proxyood_000029.npy
+proxyood_000030.npy
+proxyood_000031.npy
+proxyood_000032.npy
+proxyood_000033.npy
+proxyood_000034.npy
+proxyood_000035.npy
+proxyood_000036.npy
+proxyood_000037.npy
+proxyood_000038.npy
+proxyood_000039.npy

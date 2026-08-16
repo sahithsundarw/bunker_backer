@@ -47,7 +47,14 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "scripts")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from make_baselines import DEFAULT_OUT_DIR, DEFAULT_SPLIT, read_val_split, resolve_data_root
+from make_baselines import (
+    DEFAULT_OUT_DIR,
+    DEFAULT_SPLIT,
+    PROXY_OOD_GT,
+    PROXY_OOD_OUT_SUBDIR,
+    read_val_split,
+    resolve_data_root,
+)
 from src.metrics import (
     LOWER_IS_BETTER,
     METRIC_NAMES,
@@ -77,6 +84,16 @@ ANCHOR_FIRST, ANCHOR_LAST, ANCHOR_N = "003000.npy", "003199.npy", 200
 
 #: Row order in the summary table. Unknown names are appended alphabetically.
 CANONICAL_ORDER = ["bicubic", "median_bicubic", "nlm_bicubic", "unet_baseline", "final"]
+
+#: Proxy-OOD generalisation check (U-9, V63): 40 procedurally-generated geometric images,
+#: NOT semiconductor imagery, NOT the official test set (docs/dataset_findings.md "Proxy-OOD
+#: set", docs/SPEC_ADDENDUM.md section 11 banned-phrase list). Scored and reported as a
+#: SEPARATE section of results/metrics_summary.md, never blended into the in-distribution
+#: CANONICAL_ORDER table above -- the two corpora measure different things (content-domain
+#: generalisation under a fixed, already-measured degradation, vs in-distribution quality).
+DEFAULT_PROXY_OOD_PRED_DIR = DEFAULT_OUT_DIR / PROXY_OOD_OUT_SUBDIR / "final"
+DEFAULT_PROXY_OOD_GT_DIR = PROXY_OOD_GT
+PROXY_OOD_ROW_NAME = "proxy_ood_final"
 
 
 # ======================================================================================
@@ -180,6 +197,109 @@ def anchor_check(row: dict[str, Any]) -> list[str]:
 
 
 # ======================================================================================
+# Proxy-OOD generalisation check (U-9, V63) -- scored SEPARATELY from the in-distribution table
+# ======================================================================================
+def score_proxy_ood(pred_dir: Path, gt_dir: Path, *, with_lpips: bool = True,
+                    device: str = "cuda", allow_unclipped: bool = False,
+                    persist: bool = True, verbose: bool = False) -> dict[str, Any]:
+    """Score the shipped model's predictions on the 40 procedural proxy-OOD images.
+
+    This is NOT semiconductor imagery and NOT the official test set (docs/dataset_findings.md
+    "Proxy-OOD set"). Reuses score_dir with the same pinned metric settings (V31) and the
+    same on-disk-reload discipline (V30) as the in-distribution table.
+
+    ``persist`` must be wired to the same (limit/no_write/no_lpips) guard the main table uses:
+    a partial/smoke run (e.g. --no_lpips) must never overwrite the full metrics.json a
+    complete run produced, exactly the discipline score_dir's caller already applies to every
+    other row (see the persist= comment at its call site above).
+    """
+    if not pred_dir.is_dir():
+        raise SystemExit(
+            f"--proxy_ood: prediction directory {pred_dir} does not exist. Generate it with:\n"
+            f"  py -3.12 scripts/make_baselines.py --proxy_ood --baselines final")
+    if not gt_dir.is_dir():
+        raise SystemExit(f"--proxy_ood: GT directory {gt_dir} does not exist")
+    names = sorted(p.name for p in gt_dir.glob("*.npy"))
+    if not names:
+        raise SystemExit(f"--proxy_ood: no .npy GT files found in {gt_dir}")
+    split_desc = (f"PROXY-OOD: {len(names)} procedurally-generated geometric images "
+                 f"({gt_dir.parent.name}/GT) -- NOT semiconductor imagery, NOT the official "
+                 "test set. Degraded with the already-fitted degradation model, zero refitting.")
+    return score_dir(PROXY_OOD_ROW_NAME, pred_dir, gt_dir, names, with_lpips=with_lpips,
+                     device=device, allow_unclipped=allow_unclipped, split_desc=split_desc,
+                     persist=persist, verbose=verbose)
+
+
+def render_proxy_ood_section(row: dict[str, Any], *, indist_row: dict[str, Any] | None) -> list[str]:
+    """Bullet-only section (NEVER a markdown table -- V48 counts '|'-prefixed lines against
+    the single in-distribution table above; a second table would inflate that count).
+    """
+    out: list[str] = []
+    out.append("## Proxy-OOD generalisation check (procedural geometric content, n="
+               f"{row.get('n', '?')})")
+    out.append("")
+    out.append("**What this is:** the shipped model (`weights/best.pt`) run on 40 "
+               "procedurally-generated (numpy primitives only) synthetic grayscale images -- "
+               "line/space gratings, contact-hole grids, checkerboards, circuit-like traces, "
+               "sharp-edged shapes -- degraded with the SAME already-fitted degradation model "
+               "used for the in-distribution numbers, with zero parameters refit on this "
+               "content. It tests whether restoration quality holds up when image CONTENT "
+               "shifts from natural-photo textures to periodic/geometric structure, with the "
+               "degradation held fixed.")
+    out.append("")
+    out.append("**What this is NOT:** this is not semiconductor imagery, not SEM imagery, and "
+               "not a validated proxy for KLA's hidden test set -- it is synthetic procedural "
+               "geometric content (`docs/dataset_findings.md` \"Proxy-OOD set\", "
+               "`docs/SPEC_ADDENDUM.md` section 11). No real inspection imagery exists "
+               "anywhere in this project.")
+    out.append("")
+    m = row["metrics"]
+    out.append(f"- PSNR dB (mean +/- sd): {format_mean_std(m.get('psnr'), 4)}")
+    out.append(f"- SSIM (mean +/- sd): {format_mean_std(m.get('ssim'), 5)}")
+    out.append(f"- LPIPS (mean +/- sd): {format_mean_std(m.get('lpips'), 5)}")
+    out.append(f"- n = {row.get('n', '?')}, ground truth: `{row.get('gt_dir', '?')}`, "
+               f"predictions: `{row.get('pred_dir', '?')}`")
+    if row.get("unclipped_files"):
+        out.append(f"- **{len(row['unclipped_files'])} unclipped artifact(s)** flagged -- see "
+                   "`--allow_unclipped`.")
+    if indist_row is not None:
+        im = indist_row["metrics"]
+        out.append("")
+        out.append("**Versus the in-distribution 400-image number for the same checkpoint** "
+                   f"(`{indist_row.get('label', indist_row.get('name'))}`, "
+                   f"n={indist_row.get('n', '?')}):")
+        for key, digits in (("psnr", 4), ("ssim", 5), ("lpips", 5)):
+            if key not in m or key not in im:
+                continue
+            delta = m[key]["mean"] - im[key]["mean"]
+            better = (delta < 0.0) if key in LOWER_IS_BETTER else (delta > 0.0)
+            out.append(f"  - {key}: proxy-OOD {m[key]['mean']:.{digits}f} vs in-distribution "
+                       f"{im[key]['mean']:.{digits}f} (delta {delta:+.{digits}f}, "
+                       f"{'better' if better else 'worse'} on proxy-OOD)")
+    else:
+        out.append("")
+        out.append("- No in-distribution `final` row was scored in this run, so no side-by-side "
+                   "delta is shown here. See the Results table above for that number when "
+                   "available.")
+    out.append("")
+    out.append("- **Read the PSNR-vs-SSIM/LPIPS split, don't average it away.** PSNR is measurably "
+               "worse here than in-distribution (fine periodic gratings near the 2x decimation's "
+               "Nyquist limit alias, consistent with `docs/dataset_findings.md`'s proxy-OOD "
+               "finding), yet SSIM and LPIPS are both measurably BETTER than in-distribution. "
+               "This is not a scoring bug: the worst-PSNR images in this set still score SSIM "
+               ">= 0.94 and LPIPS <= 0.09 (checked per-image), because large flat/uniform "
+               "regions and locally-correlated periodic structure are easy for a windowed "
+               "structural or perceptual metric even when a global phase/intensity offset "
+               "tanks PSNR. Report all three numbers on the deck; do not collapse them to one.")
+    out.append("")
+    out.append("- **Cannot** validate performance on real semiconductor/SEM inspection imagery "
+               "(none exists anywhere in this project) or robustness to a *different* "
+               "degradation than the one measured from the released data.")
+    out.append("")
+    return out
+
+
+# ======================================================================================
 # Summary table
 # ======================================================================================
 def collect_rows(roots: list[Path], scored: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -207,12 +327,13 @@ def _cell(row: dict[str, Any], metric: str, digits: int) -> str:
 
 
 def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
-                   split_desc: str) -> str:
+                   split_desc: str, proxy_ood_row: dict[str, Any] | None = None) -> str:
     """Build results/metrics_summary.md.
 
     IMPORTANT: this file contains exactly ONE markdown table. V48 counts lines beginning
     with '|', so every other section must use bullets -- a second table would inflate that
-    count and could turn V48 green without the rows it actually asks for.
+    count and could turn V48 green without the rows it actually asks for. This is also why
+    the proxy-OOD section (U-9, V63) is bullets-only, never a second table.
     """
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     out: list[str] = []
@@ -351,6 +472,8 @@ def render_summary(rows: list[dict[str, Any]], *, command: str, gt_dir: Path,
         out.append(f"- Rows not yet available: {', '.join(missing_rows)}. LPIPS is a distance, "
                    "so lower is better; PSNR and SSIM are higher-is-better.")
     out.append("")
+    if proxy_ood_row is not None:
+        out.extend(render_proxy_ood_section(proxy_ood_row, indist_row=by_name.get("final")))
     out.append("## Caveats")
     out.append("")
     out.append("- The released imagery is grayscale natural photographs used as a **proxy** for "
@@ -400,6 +523,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="score out-of-range artifacts instead of failing (they get flagged)")
     ap.add_argument("--no_write", action="store_true", help="print the table, write no summary")
     ap.add_argument("--worst", type=int, default=0, help="print the N worst images by PSNR")
+    ap.add_argument("--proxy_ood", action="store_true",
+                    help="ALSO score the 40-image procedural proxy-OOD set (U-9, V63) as a "
+                         "SEPARATE section, never blended into the in-distribution table. "
+                         "Requires predictions already written by "
+                         "'make_baselines.py --proxy_ood --baselines final'.")
+    ap.add_argument("--proxy_ood_pred_dir", default=None,
+                    help=f"override (default {DEFAULT_PROXY_OOD_PRED_DIR})")
+    ap.add_argument("--proxy_ood_gt_dir", default=None,
+                    help=f"override (default {DEFAULT_PROXY_OOD_GT_DIR})")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -468,9 +600,30 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("nothing to report: pass --pred_dir/--preds, or point --collect at a "
                          "directory containing scored prediction folders")
 
+    proxy_ood_row: dict[str, Any] | None = None
+    if args.proxy_ood:
+        po_pred = (Path(args.proxy_ood_pred_dir) if args.proxy_ood_pred_dir
+                  else DEFAULT_PROXY_OOD_PRED_DIR)
+        po_pred = po_pred if po_pred.is_absolute() else REPO_ROOT / po_pred
+        po_gt = (Path(args.proxy_ood_gt_dir) if args.proxy_ood_gt_dir
+                else DEFAULT_PROXY_OOD_GT_DIR)
+        po_gt = po_gt if po_gt.is_absolute() else REPO_ROOT / po_gt
+        if args.verbose:
+            print(f"scoring proxy-OOD <- {po_pred} vs {po_gt}")
+        proxy_ood_row = score_proxy_ood(po_pred, po_gt, with_lpips=not args.no_lpips,
+                                        device=args.device, allow_unclipped=args.allow_unclipped,
+                                        persist=not (args.no_write or args.no_lpips),
+                                        verbose=args.verbose)
+        pm = proxy_ood_row["metrics"]
+        stats = ", ".join(f"{m} {format_mean_std(pm.get(m), 4 if m == 'psnr' else 5)}"
+                          for m in METRIC_NAMES if m in pm)
+        print(f"[proxy-OOD] n={proxy_ood_row['n']}  {stats}  "
+              "(procedural geometric content, NOT semiconductor imagery)")
+
     command = "py -3.12 " + " ".join(
         [Path(sys.argv[0]).as_posix()] + [a for a in (argv if argv is not None else sys.argv[1:])])
-    summary = render_summary(rows, command=command, gt_dir=gt_dir, split_desc=split_desc)
+    summary = render_summary(rows, command=command, gt_dir=gt_dir, split_desc=split_desc,
+                             proxy_ood_row=proxy_ood_row)
 
     if args.no_write:
         print()

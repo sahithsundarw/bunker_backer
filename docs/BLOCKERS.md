@@ -180,3 +180,72 @@ size caps that were just added. **Human decision required, two options:**
 
 Option 1 is the recommendation: it requires no further weakening of a check that exists to
 stop dataset blobs entering the repo. Blocked pending the human, and blocking V13.
+
+## B10 — No third split: degradation fitting, checkpoint selection and the headline numbers
+all share `split_val.txt`
+
+Found by the three-agent audit preceding this iteration's requirements pass
+(`docs/REQUIREMENTS_MATRIX.md`, Validation And Reporting #1). Three separate uses of the same
+400-image validation split, each individually reasonable, that compound into an optimistic bias
+nobody has measured:
+
+1. **`scripts/fit_degradation.py:206-212`** draws a random 200-of-3200 sample of *all* train GT
+   filenames, with no split filter, to fit the recovered downsample kernel (D1) and the noise
+   parameters `a=0.011253`, `v=0.015745` (D12). On average ~25 of those 200 are val-split
+   images. Every synthetic training pair is generated from a degradation model that was
+   partly fit on data the model is later validated against.
+2. **Checkpoint selection** (`train.py:548-556`, `configs/final.yaml:51 save_best_on: psnr`)
+   picks the best EMA iterate using **only the first 100 of the 400 val images**
+   (`--val_limit 100`).
+3. **The headline numbers** (`results/metrics_summary.md`, 28.7865 dB / 0.78287 / 0.25324) are
+   then reported on the **full 400-image split** — the same split, 100 of which drove (2).
+
+There is no third split (train / val-for-selection / held-out-for-reporting) anywhere in the
+pipeline. None of the three uses is a bug in isolation — (1) is a small, plausible-sounding
+convenience; (2) is standard checkpoint selection; (3) is the correct thing to report *if*
+selection hadn't touched the same pool. Together, the reported PSNR is optimistically biased
+by an unmeasured amount, and the degradation simulator was calibrated with partial knowledge of
+its own test set.
+
+**Not resolved this iteration.** Too structural to fix inside a 3-day Round 1 window — it would
+mean re-splitting, re-fitting the degradation model, and retraining, none of which can be
+verified in time without risking the submission deadline. Recorded here per Prime Directive 3
+(never fabricate; if something can't be verified clean, say so) rather than silently shipped.
+Stated as an explicit caveat in the README and on the deck's limitations slide. **No V-check
+currently catches this** and none is proposed for this window — a real fix (three-way split)
+is Round 2 work, not a check to bolt onto the existing split structure. Human should decide
+whether this is worth a stated limitation only, or worth delaying submission to fix; the
+recommendation is: state it, ship on time, fix it properly in Round 2 if selected.
+
+## B11 — V24 (cross-process determinism) is genuinely flaky, pre-existing, not from the V22 fix
+
+Found by `inference-engineer` while fixing V22 (`docs/decisions.md` D42), confirmed
+independently by the main session: `py -3.12 scripts/verify_all.py --only V24` fails roughly
+half the time (measured: PASS, FAIL, PASS, FAIL over 4 consecutive runs). **This is present on
+the unpatched, pre-V22-fix model too** — it is not a regression introduced by anything this
+iteration changed.
+
+**Root cause:** `inference.py`'s `tune_backends()` sets `torch.backends.cudnn.benchmark = True`
+unconditionally (a Tier-0 "free optimization," V40). For at least one convolution shape in the
+16-block NAFSR stack, two cuDNN candidate algorithms benchmark close enough to tie, so which one
+wins — and therefore the exact floating-point result — depends on process-to-process scheduling
+noise, not on the seed. `V22`'s fix incidentally exercises this same class of shape (a 1×1 conv
+over a `(B,C,1,1)` tensor) and was itself refined once already (routing through `F.linear`
+instead of `nn.Conv2d`, roughly halving that one op's contribution from ~50% to ~24% flake
+rate) — but the remainder comes from other, real spatial convolutions elsewhere in the network
+and is **not resolved**.
+
+**Why not fixed yet:** the two candidate remedies both trade against a Tier-0 requirement:
+- `torch.backends.cudnn.deterministic = True` forces deterministic algorithm selection but is
+  documented to cost real throughput on some shapes, and interacts with `benchmark = True` in
+  ways that need measuring, not assuming, before shipping — exactly the kind of unmeasured
+  tradeoff this project's own standing rules forbid presenting as free.
+- Disabling `cudnn.benchmark` entirely would fix determinism everywhere but costs throughput on
+  every convolution in the network, not just the flaky one, and directly regresses V40.
+
+**Not resolved this session** — pending a proper before/after throughput measurement of
+`cudnn.deterministic = True` (or an equivalent narrower fix) before choosing between "accept
+the tradeoff" and "leave flaky, document it." **This blocks Definition of Done #2** (two
+consecutive clean `--strict --fresh-clone` runs) until resolved or explicitly accepted with a
+human decision recorded — a flaky V24 makes "two consecutive clean runs" a coin flip, not a
+verification result. Flagged here rather than silently retried until it happens to pass.

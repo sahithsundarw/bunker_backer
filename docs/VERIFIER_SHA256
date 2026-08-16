@@ -14,10 +14,12 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-4f61b6246f62648dcefc2fd5397d68a1dcf9a367fd3b9e36f9d948a346d94a7f  scripts/verify_all.py
-2ee1e32c4c568f42d02b4505c34be53c96d7bfdd35f31da30510de54c51a48d7  docs/VERIFICATION_CONTRACT.md
+16053fb1e64eed88e6d65a9dd491f9b1b18fabdc2c3e9e87613e9c6297d7a150  scripts/verify_all.py
+b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-16  V63 ADDED (proxy-OOD generalisation report, U-9) and V65 ADDED (real 256->512
+#             batch + genuinely-forced OOM-recovery). See docs/decisions.md D44, D46.
 # 2026-08-16  V62 STRENGTHENED: now observes the actual D/S/G call sequence (all 3! = 6
 #             orderings) instead of only "was anything modified before downsample". See
 #             docs/decisions.md D43.

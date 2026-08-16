@@ -1,0 +1,293 @@
+{
+  "name": "proxy_ood_final",
+  "label": "Final model",
+  "kind": "learned",
+  "description": "The submitted model. Canonical end-to-end numbers come from running inference.py on the val inputs and scoring that directory.",
+  "n": 40,
+  "split": "PROXY-OOD: 40 procedurally-generated geometric images (proxy_ood/GT) -- NOT semiconductor imagery, NOT the official test set. Degraded with the already-fitted degradation model, zero refitting.",
+  "gt_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\proxy_ood\\GT",
+  "pred_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\baselines\\proxy_ood\\final",
+  "pred_dtype": [
+    "float32"
+  ],
+  "sec_per_image": 0.029543312505120413,
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "lpips_device": "cuda",
+  "with_lpips": true,
+  "unclipped_files": [],
+  "metrics": {
+    "psnr": {
+      "mean": 27.31772195509823,
+      "std": 3.46962701221598,
+      "min": 19.687590639977305,
+      "max": 34.514388167127585,
+      "n": 40
+    },
+    "ssim": {
+      "mean": 0.9649309186012388,
+      "std": 0.011667950396564116,
+      "min": 0.9291930959826342,
+      "max": 0.9801111764902006,
+      "n": 40
+    },
+    "lpips": {
+      "mean": 0.03797142889816314,
+      "std": 0.017800187584618248,
+      "min": 0.009174185805022717,
+      "max": 0.08607237040996552,
+      "n": 40
+    }
+  },
+  "per_image": [
+    {
+      "file": "proxyood_000000.npy",
+      "psnr": 19.687590639977305,
+      "ssim": 0.9419117579073496,
+      "lpips": 0.0730496197938919
+    },
+    {
+      "file": "proxyood_000001.npy",
+      "psnr": 28.29854963736903,
+      "ssim": 0.9701682280216476,
+      "lpips": 0.02413187548518181
+    },
+    {
+      "file": "proxyood_000002.npy",
+      "psnr": 29.92781248588782,
+      "ssim": 0.9783254269833321,
+      "lpips": 0.009174185805022717
+    },
+    {
+      "file": "proxyood_000003.npy",
+      "psnr": 27.75058652241459,
+      "ssim": 0.9666925164855467,
+      "lpips": 0.01878349296748638
+    },
+    {
+      "file": "proxyood_000004.npy",
+      "psnr": 26.613346558701494,
+      "ssim": 0.9291930959826342,
+      "lpips": 0.0328284315764904
+    },
+    {
+      "file": "proxyood_000005.npy",
+      "psnr": 25.113887006675277,
+      "ssim": 0.9749422132775855,
+      "lpips": 0.021242840215563774
+    },
+    {
+      "file": "proxyood_000006.npy",
+      "psnr": 22.508498130246473,
+      "ssim": 0.9599856225987548,
+      "lpips": 0.03615065664052963
+    },
+    {
+      "file": "proxyood_000007.npy",
+      "psnr": 27.065771873381834,
+      "ssim": 0.9546696501479003,
+      "lpips": 0.02940238267183304
+    },
+    {
+      "file": "proxyood_000008.npy",
+      "psnr": 26.4231262497699,
+      "ssim": 0.9669408352290996,
+      "lpips": 0.01394265703856945
+    },
+    {
+      "file": "proxyood_000009.npy",
+      "psnr": 27.191934598020065,
+      "ssim": 0.9693328054186349,
+      "lpips": 0.02401130273938179
+    },
+    {
+      "file": "proxyood_000010.npy",
+      "psnr": 26.728821267546437,
+      "ssim": 0.9665479513750852,
+      "lpips": 0.025174105539917946
+    },
+    {
+      "file": "proxyood_000011.npy",
+      "psnr": 26.159828372532743,
+      "ssim": 0.9612750011295625,
+      "lpips": 0.03664802014827728
+    },
+    {
+      "file": "proxyood_000012.npy",
+      "psnr": 28.170996903066996,
+      "ssim": 0.9748492562971377,
+      "lpips": 0.018161237239837646
+    },
+    {
+      "file": "proxyood_000013.npy",
+      "psnr": 29.110256504784033,
+      "ssim": 0.9801111764902006,
+      "lpips": 0.015805764123797417
+    },
+    {
+      "file": "proxyood_000014.npy",
+      "psnr": 24.778919601592175,
+      "ssim": 0.9633351798901926,
+      "lpips": 0.03187011927366257
+    },
+    {
+      "file": "proxyood_000015.npy",
+      "psnr": 24.56953380899431,
+      "ssim": 0.952168683238587,
+      "lpips": 0.08607237040996552
+    },
+    {
+      "file": "proxyood_000016.npy",
+      "psnr": 24.431778231003612,
+      "ssim": 0.9427828366001266,
+      "lpips": 0.04997270926833153
+    },
+    {
+      "file": "proxyood_000017.npy",
+      "psnr": 21.51895384340016,
+      "ssim": 0.9502470792246019,
+      "lpips": 0.024181585758924484
+    },
+    {
+      "file": "proxyood_000018.npy",
+      "psnr": 27.190334789991716,
+      "ssim": 0.9656959148263599,
+      "lpips": 0.018161725252866745
+    },
+    {
+      "file": "proxyood_000019.npy",
+      "psnr": 21.579087017598226,
+      "ssim": 0.9508478688954582,
+      "lpips": 0.023432249203324318
+    },
+    {
+      "file": "proxyood_000020.npy",
+      "psnr": 27.21574964245132,
+      "ssim": 0.9669056564906323,
+      "lpips": 0.01743577979505062
+    },
+    {
+      "file": "proxyood_000021.npy",
+      "psnr": 26.841473308917088,
+      "ssim": 0.9556999892450441,
+      "lpips": 0.020675642415881157
+    },
+    {
+      "file": "proxyood_000022.npy",
+      "psnr": 22.57373669558647,
+      "ssim": 0.9479534029389367,
+      "lpips": 0.024075059220194817
+    },
+    {
+      "file": "proxyood_000023.npy",
+      "psnr": 25.81929078976564,
+      "ssim": 0.9500030374979459,
+      "lpips": 0.02362893521785736
+    },
+    {
+      "file": "proxyood_000024.npy",
+      "psnr": 25.93370538991476,
+      "ssim": 0.9692339335754587,
+      "lpips": 0.05275142192840576
+    },
+    {
+      "file": "proxyood_000025.npy",
+      "psnr": 25.998815805000643,
+      "ssim": 0.9693689080054576,
+      "lpips": 0.05166548490524292
+    },
+    {
+      "file": "proxyood_000026.npy",
+      "psnr": 26.616365522777965,
+      "ssim": 0.971026788969291,
+      "lpips": 0.057803161442279816
+    },
+    {
+      "file": "proxyood_000027.npy",
+      "psnr": 27.360106749391306,
+      "ssim": 0.9755066502577087,
+      "lpips": 0.04972294345498085
+    },
+    {
+      "file": "proxyood_000028.npy",
+      "psnr": 26.097219109586625,
+      "ssim": 0.9733007332705658,
+      "lpips": 0.05033549293875694
+    },
+    {
+      "file": "proxyood_000029.npy",
+      "psnr": 27.271350283010058,
+      "ssim": 0.9789939805046802,
+      "lpips": 0.03623618930578232
+    },
+    {
+      "file": "proxyood_000030.npy",
+      "psnr": 25.44639623530998,
+      "ssim": 0.9669231696084996,
+      "lpips": 0.04687252640724182
+    },
+    {
+      "file": "proxyood_000031.npy",
+      "psnr": 27.32301882560013,
+      "ssim": 0.9766197754895666,
+      "lpips": 0.04723210260272026
+    },
+    {
+      "file": "proxyood_000032.npy",
+      "psnr": 32.27092598547843,
+      "ssim": 0.9671205269436629,
+      "lpips": 0.06156136840581894
+    },
+    {
+      "file": "proxyood_000033.npy",
+      "psnr": 31.886549435368657,
+      "ssim": 0.9661752557368075,
+      "lpips": 0.05358332395553589
+    },
+    {
+      "file": "proxyood_000034.npy",
+      "psnr": 33.571377394010035,
+      "ssim": 0.9778461361178222,
+      "lpips": 0.05621238052845001
+    },
+    {
+      "file": "proxyood_000035.npy",
+      "psnr": 32.77302755439634,
+      "ssim": 0.9717685422094356,
+      "lpips": 0.05162358656525612
+    },
+    {
+      "file": "proxyood_000036.npy",
+      "psnr": 32.20408323244714,
+      "ssim": 0.9755628119482659,
+      "lpips": 0.0495360791683197
+    },
+    {
+      "file": "proxyood_000037.npy",
+      "psnr": 34.514388167127585,
+      "ssim": 0.97234299827028,
+      "lpips": 0.058094464242458344
+    },
+    {
+      "file": "proxyood_000038.npy",
+      "psnr": 33.73497063698578,
+      "ssim": 0.9780765548171138,
+      "lpips": 0.04209362342953682
+    },
+    {
+      "file": "proxyood_000039.npy",
+      "psnr": 32.43671339784916,
+      "ssim": 0.9667847921325845,
+      "lpips": 0.05552025884389877
+    }
+  ],
+  "metric_settings": {
+    "psnr": "skimage.metrics.peak_signal_noise_ratio(gt, pred, data_range=1.0)",
+    "ssim": "skimage.metrics.structural_similarity(gt, pred, data_range=1.0, gaussian_weights=True, sigma=1.5, use_sample_covariance=False)",
+    "lpips": "lpips.LPIPS(net='alex').eval(); grayscale -> repeat(1,3,1,1); [0,1] -> [-1,1]; torch.no_grad()",
+    "dispersion": "population standard deviation, np.std(..., ddof=0)",
+    "artifact": "metrics are computed on the reloaded on-disk .npy, not an in-memory tensor",
+    "postprocess": "np.clip(pred, 0.0, 1.0) only -- never per-image renormalisation"
+  },
+  "scored_from_disk": true,
+  "scored_at": "2026-08-16T04:36:47+00:00"
+}

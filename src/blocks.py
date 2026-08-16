@@ -149,8 +149,37 @@ class SCA(nn.Module):
         # mean over (H, W) keeping dims -> (B, C, 1, 1); defined for any H, W >= 1.
         # Forced to fp32 (see class docstring, V22): unlike F.layer_norm, autocast does
         # not force-promote a raw Tensor.mean reduction, so it must be done explicitly.
+        #
+        # V24 regression + fix: the first version of this fix called `self.conv(...)`
+        # (an nn.Conv2d) inside the disabled-autocast region. That is mathematically a
+        # 1x1 conv over a (B, C, 1, 1) tensor -- i.e. a per-image linear layer over
+        # channels with no spatial extent at all -- but it still dispatches through
+        # cuDNN's convolution path, and cudnn.benchmark=True (SPEC 9, a free lever kept
+        # on elsewhere) re-times candidate algorithms on every fresh process. For this
+        # particular fp32 shape/dtype combination two algorithms benchmark close enough
+        # to tie, so which one wins is scheduler-noise-dependent -- confirmed by running
+        # V24 five times: PASS, PASS, FAIL, FAIL, FAIL, and confirmed fixed by forcing
+        # `cudnn.benchmark=False` process-wide (4/4 identical) -- but disabling the
+        # benchmark lever globally to fix one 1x1 conv would cost real throughput on
+        # every other conv in the network, which is not an acceptable trade for a check
+        # that exists to catch exactly this class of bug. Routing this op through
+        # `F.linear` instead keeps it off cuDNN's autotuned conv path entirely (it becomes
+        # a cuBLAS GEMM on a shape-keyed heuristic, not a timed benchmark search).
+        #
+        # IMPORTANT: this halves but does NOT eliminate V24's flake rate. Measured on this
+        # dev box (RTX 4060, cudnn.benchmark=True): the PRE-FIX code (`self.conv(...)`
+        # directly, still present at commit 9ee0c59) fails V24 ~50% of runs (5/10);
+        # routing through `F.linear` here drops that to ~24% (5/21). The remainder is a
+        # PRE-EXISTING, broader cudnn.benchmark algorithm-tie nondeterminism elsewhere in
+        # the model's other (real, spatial) convolutions -- confirmed present even before
+        # this V22 fix existed (the unpatched checkpoint-bearing model also flakes V24
+        # under cudnn.benchmark=True) -- not something this narrow, single-module fix can
+        # close. That is a separate, pre-existing robustness gap and is reported
+        # separately; it is not part of the V22 fix this comment documents.
         with torch.autocast(device_type=x.device.type, enabled=False):
-            w = self.conv(x.float().mean(dim=(2, 3), keepdim=True))
+            pooled = x.float().mean(dim=(2, 3))                      # (B, C)
+            w = F.linear(pooled, self.conv.weight[:, :, 0, 0], self.conv.bias)
+            w = w[:, :, None, None]                                  # (B, C, 1, 1)
         # `w` is left in fp32: `x * w` (bf16 * fp32) promotes to fp32 by ordinary ATen
         # type-promotion rules, the same way autocast leaves F.layer_norm's fp32 output
         # to be re-cast by whatever bf16 op consumes it next. Casting `w` back to bf16

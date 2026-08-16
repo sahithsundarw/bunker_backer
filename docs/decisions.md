@@ -2023,6 +2023,29 @@ root cause is architectural and `inference-engineer` was tasked with root-causin
 it; no `model-core` agent was running concurrently, so there was no write conflict. Noted here
 for the record rather than silently crossing the ownership boundary unremarked.
 
+**Addendum — bf16-vs-fp32 quality gap, measured** (the open question `docs/MORNING_REPORT.md`
+flagged: the 400 published outputs were generated in bf16, the 28.7865 dB record in fp32, and
+nobody had measured the difference). Ran the real `inference.py` default (bf16) on all 400
+val-split inputs, scored with the pinned metrics against GT: PSNR 28.7849 ± 4.5322 (Δ −0.0016
+dB vs the fp32 record), SSIM 0.78278 (Δ −0.00009), LPIPS 0.25233 (Δ −0.00091, marginally
+better). **The gap is negligible — V22 was a genuine worst-case per-pixel tolerance violation,
+not a real aggregate quality regression.** The published outputs do not need regenerating for
+quality reasons.
+
+**Addendum — a second refinement, and a pre-existing bug it surfaced.** The first fix version
+called `self.conv(...)` (an `nn.Conv2d`) inside the disabled-autocast fp32 region — mathematically
+a 1×1 conv over a `(B,C,1,1)` tensor, i.e. a per-image channel-linear op with no spatial extent,
+but it still dispatches through cuDNN's autotuned convolution path. With `cudnn.benchmark=True`
+(a kept-on free lever, V40), two candidate algorithms for this exact fp32 shape benchmark close
+enough to tie, so which one wins is scheduler-noise-dependent — measured directly: V24
+(cross-process determinism) failed ~50% of runs (5/10) even on the **unpatched, pre-V22-fix**
+model, confirming this is a pre-existing robustness gap, not something the V22 fix introduced.
+Routing the op through `F.linear(pooled, self.conv.weight[:,:,0,0], self.conv.bias)` instead
+(a cuBLAS GEMM on a shape-keyed heuristic, not a timed cuDNN autotune) roughly halves the flake
+rate to ~24% (5/21) — better, but the remainder comes from other, real spatial convolutions
+elsewhere in the 16-block stack and is **not resolved by this change**. Logged as an open
+robustness gap (`docs/BLOCKERS.md` B11), not silently absorbed into the V22 fix's scope.
+
 ## D43 — Degradation order permutation + F1 tail-coverage widened; V62 strengthened accordingly
 
 **Closes two requirement-level gaps** identified by this iteration's requirements audit
@@ -2090,3 +2113,128 @@ under the corrected simulator — locally as a cloud-independent fallback, and v
 cloud long run — is separate work; this decision covers the simulator fix only. Re-measured
 in-distribution PSNR/SSIM/LPIPS after retraining will be reported as a number, not assumed, per
 `docs/BLOCKERS.md`'s standing rule against unmeasured claims.
+
+## D44 — Proxy-OOD generalisation report added, closing U-9; V63 ADDED
+
+KLA requires generalising to "unfamiliar image content" and scores restoration quality on
+hidden GT "including in-distribution and out-of-distribution content." Before this, the repo
+had **zero evidence** on this axis — `docs/STATE.md` had flagged U-9 as "the one remaining SPEC
+gap with no plan yet," and no check could turn red for its absence.
+
+**Proxy-OOD set built** (`dataset-forensics`, `results/eda/proxy_ood/`): 40 procedurally
+generated grayscale images (numpy primitives only — line/space gratings, contact-hole grids,
+checkerboards, circuit-like traces, sharp-edged shapes), 8 per category, deterministic seeds.
+Degraded with the **existing fitted** degradation model (`src.degrade.degrade_fitted` — the
+recovered kernel D1 + fitted 3-parameter noise D12), **zero parameters refit** on this content,
+since refitting on OOD content would defeat the point of testing generalisation. Committed
+membership list; disjointness from train/val/test verified computationally
+(`results/eda/proxy_ood/membership_check.json`), not asserted in prose.
+
+**Scored** (`loss-metrics`, `scripts/make_baselines.py --proxy_ood`, `scripts/evaluate.py
+--proxy_ood`) on the shipped checkpoint, same pinned PSNR/SSIM/LPIPS settings (V31), same
+disk-reload discipline (V30). Predictions land at
+`results/baselines/proxy_ood/final/` — one directory level deeper than the normal
+`results/baselines/<name>/` rows specifically so `evaluate.py`'s single-level glob never mixes
+them into the in-distribution table.
+
+**Measured, n=40:** PSNR 27.3177 ± 3.4696 dB (−1.4687 vs in-distribution 28.7865), SSIM 0.96493
+± 0.01167 (+0.18207 vs in-distribution), LPIPS 0.03797 ± 0.01780 (−0.21527 vs in-distribution,
+better). **Reported honestly as a genuine split, not averaged away**: PSNR is worse on
+proxy-OOD (fine periodic gratings alias near the 2x decimation's Nyquist limit, consistent with
+`docs/dataset_findings.md`'s proxy-OOD section), while SSIM and LPIPS are both measurably
+better — checked per-image, even the worst-PSNR proxy-OOD images score SSIM ≥ 0.94 / LPIPS ≤
+0.09, because large flat regions and locally-correlated periodic structure are easy for a
+windowed structural/perceptual metric even when a global phase/intensity offset tanks PSNR.
+
+**What this can and cannot prove, stated plainly** (per `docs/SPEC_ADDENDUM.md` section 11's
+discipline against overclaiming): this measures generalisation to structurally different
+*content* under a *fixed, already-measured* degradation. It is procedural synthetic geometric
+content, not semiconductor or SEM imagery — none exists anywhere in this project — and it says
+nothing about robustness to a different degradation than the one measured from the released
+data.
+
+**V63 ADDED** (Tier 4, main session): `results/metrics_summary.md` must contain a `## Proxy-OOD
+generalisation check` heading with `n=40` and a mean±std for all three metrics; none of
+`SPEC_ADDENDUM.md` section 11's banned positive phrasings ("our semiconductor...", "semiconductor
+dataset/validation set/imagery" as a positive claim — a "not semiconductor imagery" disclaimer is
+correctly exempted via a preceding-"not" check, negative-controlled: bare positive phrasings are
+caught, the required disclaimer text is not); `results/eda/proxy_ood/membership_check.json` must
+assert `n_proxy_ood == 40` and disjointness from train GT/LR/test all `true`; and
+`results/baselines/proxy_ood/final/metrics.json` must show `n == 40`, all three metric means
+finite, `float32` predictions, zero unclipped artifacts. `py -3.12 scripts/verify_all.py --only
+V63`: **PASS**.
+
+## D45 — Dual-resolution (256→512) runtime measurement: fixed cost does NOT collapse
+
+KLA's brief says eval images are expected around 256×256 **or 512×512**. Released data is
+uniformly 128→256 (no 512 GT exists). Every prior throughput number (`results/runtime_report.md`)
+was measured at 128→256 only. The working assumption going in — that a 4× pixel-count increase
+would make the pipeline compute-bound, collapsing the 30.6% fixed-startup share toward the
+~10-15% range — is **refuted by measurement**.
+
+`perf-analyst` re-ran the exact same external-subprocess methodology (`scripts/benchmark_runtime.py`,
+N ∈ {1,25,50,100,200,400}, batch 32, bf16, same RTX 4060 Laptop GPU) against real synthetic
+256×256 inputs, generated from held-out GT via the actual fitted degradation model (not
+`np.random`) since no real 256px GT-to-512px pair exists in the released data:
+
+| | 128→256 (existing) | 256→512 (this measurement) |
+|---|---|---|
+| fixed startup | 14,755 ms | 11,499 ms |
+| marginal | 86.55 ms/image | 58.19 ms/image |
+| total @ N=400 | 48,269.4 ms | 33,533.7 ms |
+| **fixed-cost fraction @ N=400** | **30.6%** | **34.3%** (rose, did not fall) |
+
+Mechanistically: the pure forward-pass sweep shows 256px compute costs ~5.1× more per image
+than 128px (matching the 4× pixel growth plus overhead), but the 128→256 pipeline's own
+end-to-end marginal cost (86.55 ms/image) was already ~8.5× inflated above its forward-only
+number by non-compute overhead (H2D/D2H, batch bookkeeping, disk writes not overlapping a very
+fast forward pass) — at 256px that same near-fixed overhead is dwarfed by real compute (58.19
+ms/image measured is only 1.12× the forward-only number), so the marginal term actually
+**drops** in absolute terms even as compute per image rises, leaving fixed cost a larger, not
+smaller, share of a smaller total.
+
+**Consequence for the sweep-axis decision** (this was the explicit gate before any cloud budget
+committed): fixed-cost fraction stays **above 25%** at both resolutions — nowhere near the
+~15% threshold that would have shifted budget toward training-length/patch-size. **The
+width/depth Pareto sweep proceeds as originally briefed.**
+
+Caveat carried honestly: the 128→256 report's own N=400 figure has a 681.4% spread (a likely
+thermal/driver outlier); the 256→512 comparison inherits some of that noise, though the
+qualitative conclusion (fixed cost 30-35% at both resolutions) is robust to it. With no real
+512 GT, this measures pipeline timing/shape correctness, not restoration quality at 512.
+Written to `results/runtime_report_512.md`, whitelisted in `.gitignore` alongside the existing
+`runtime_report.md` exemption, never merged into that file (the two resolutions stay separate
+rows, never conflated, per the standing "label every number with its device and resolution"
+rule).
+
+## D46 — V65 ADDED: real 256→512 batch correctness + genuinely-forced OOM-recovery
+
+Closes the other half of the dual-resolution gap D45 measured timing for: nothing had ever run
+a real multi-image batch through the actual `inference.py` CLI at 256→512, and the recursive
+OOM-batch-halving mechanism in `infer_chunk` (`inference.py` lines ~340-355, already
+implemented, never a defect) was exercised by zero checks.
+
+**Part A**: 8 real synthetic 256×256 inputs through the unmodified `inference.py` CLI, batch
+size 8, asserting N-out, `float32`, `ndim==2`, exact `(512,512)`, finite, `[0,1]`.
+
+**Part B, the harder half — a genuinely forced OOM, not a faked exception**: isolated in a
+child process (so it can never leak into any other check in the same verifier run — PyTorch
+offers no clean "restore default" for `set_per_process_memory_fraction`), that process calls
+`torch.cuda.set_per_process_memory_fraction(0.03, 0)` before loading the model, then drives a
+real 16-image batch through the actual `load_net()` + `infer_chunk()` path (same import
+pattern V57 established), wrapped in `torch.inference_mode()` to match `inference.py` main()'s
+real usage exactly (an early version of this check omitted that wrapper, which retained the
+full autograd graph and produced a misleadingly huge, unrepresentative memory footprint —
+caught and fixed before trusting the check). A transparent wrapper around the real `_is_oom`
+counts genuine invocations without altering its behaviour.
+
+**Measured**: at fraction 0.03, the real allocator genuinely exhausts at every batch size on
+this 8 GB card, cascading through the full recovery ladder (16→8→4→2→1→CPU-bicubic) with 31
+real `torch.cuda.OutOfMemoryError`s caught and correctly handled; final output `(16, 512, 512)`,
+`float32`, finite, in `[0,1]`. Negative-controlled: at `fraction=1.0` (uncapped) with the
+`inference_mode` fix in place, the same batch completes with **zero** OOM calls, confirming the
+0.03 cap — not device contention or a script bug — is what forces the real exception. On a
+resource-richer host (e.g. a cloud A100 with far more VRAM), the same fraction *proportionally*
+constrains that device too, so the check is not hard-coded to this GPU's absolute capacity.
+
+`py -3.12 scripts/verify_all.py --only V65`: **PASS**.

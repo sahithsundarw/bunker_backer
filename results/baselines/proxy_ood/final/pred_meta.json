@@ -1,0 +1,14 @@
+{
+  "name": "final",
+  "label": "Final model",
+  "description": "The submitted model. Canonical end-to-end numbers come from running inference.py on the val inputs and scoring that directory.",
+  "kind": "learned",
+  "n": 40,
+  "split": "PROXY-OOD: 40 procedurally-generated geometric images (results/eda/proxy_ood) -- NOT semiconductor imagery, NOT the official test set. Degraded with the already-fitted src.degrade.degrade_fitted, zero refitting.",
+  "input_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\proxy_ood\\NoisyLR",
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "device": "cuda",
+  "sec_per_image": 0.029543312505120413,
+  "created": "2026-08-16T04:33:45+00:00",
+  "postprocess": "np.clip(pred, 0.0, 1.0) only -- no renormalisation (D3)"
+}

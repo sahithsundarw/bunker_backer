@@ -26,6 +26,7 @@ import argparse
 import ast
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -82,11 +83,17 @@ TIERS["V61"] = 2
 TIERS["V62"] = 2
 TIERS["V64"] = 1
 
+# V63 U-9: proxy-OOD generalisation report exists and is real (docs/decisions.md D43 area).
+TIERS["V63"] = 4
+# V65: real 256->512 batch correctness + genuinely-forced OOM-recovery (docs/decisions.md D45).
+TIERS["V65"] = 1
+
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
 SKIP_WHITELIST: dict[str, str] = {
     "V40": "No CUDA device available in the dev environment. Must still pass static-scan portions.",
     "V06": "No git remote configured yet — permitted only before first push.",
+    "V65": "No CUDA device available -- cannot force a real CUDA OOM to test the recovery path.",
 }
 
 # inference.py module-level import allowlist (CLAUDE.md §STYLE, tightened 2026-08-15).
@@ -2730,6 +2737,254 @@ def check_V64(ctx: Ctx) -> CheckResult:
                        f"a write failure on 1/{len(valid)} outputs correctly exited non-zero "
                        f"while {len(others_written)} other output(s) still wrote successfully",
                        ev)
+
+
+V63_BANNED_RE = re.compile(
+    r"(?i)our semiconductor|semiconductor (dataset|validation set|imagery)\b")
+V63_NOT_BEFORE_RE = re.compile(r"\bnot\s+$", re.IGNORECASE)
+
+
+def _v63_positive_banned_matches(section: str) -> list[str]:
+    """Matches of V63_BANNED_RE that are NOT preceded by "not "/"NOT " -- a disclaimer like
+    "this is not semiconductor imagery" is required prose (docs/dataset_findings.md), not a
+    banned overclaim; only a bare positive assertion should fail this check."""
+    hits = []
+    for mt in V63_BANNED_RE.finditer(section):
+        preceding = section[max(0, mt.start() - 12):mt.start()]
+        if V63_NOT_BEFORE_RE.search(preceding):
+            continue
+        hits.append(mt.group(0))
+    return hits
+
+
+def check_V63(ctx: Ctx) -> CheckResult:
+    """U-9/F7: a proxy-OOD generalisation report exists and is real, not prose.
+
+    KLA requires generalisation to "unfamiliar image content" and scores restoration quality
+    on hidden GT "including in-distribution and out-of-distribution content" -- a requirement
+    no prior check could turn red for (requirements-auditor U-9). This asserts the report is
+    numeric, the membership is verified disjoint by computation rather than asserted, and the
+    scored predictions actually exist and are well-formed -- not that the number is good.
+    """
+    summary = ctx.p("results", "metrics_summary.md")
+    if not summary.exists():
+        return not_impl("V63", "results/metrics_summary.md")
+    text = summary.read_text(encoding="utf-8")
+
+    m = re.search(r"^## Proxy-OOD generalisation check.*$", text, re.MULTILINE)
+    if not m:
+        return CheckResult("V63", FAIL,
+                           "no '## Proxy-OOD generalisation check' heading in "
+                           "results/metrics_summary.md")
+    nxt = re.search(r"\n## ", text[m.end():])
+    section = text[m.start(): m.end() + (nxt.start() if nxt else len(text) - m.end())]
+
+    problems = []
+    if not re.search(r"\bn\s*=\s*40\b", section):
+        problems.append("section does not state n=40")
+    for label, pat in (
+        ("PSNR", r"PSNR.*?[-+]?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+        ("SSIM", r"SSIM.*?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+        ("LPIPS", r"LPIPS.*?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+    ):
+        if not re.search(pat, section, re.DOTALL):
+            problems.append(f"no mean +/- std reported for {label}")
+    bad = _v63_positive_banned_matches(section)
+    if bad:
+        problems.append(f"banned positive semiconductor-imagery phrasing found: {bad}")
+
+    membership = ctx.p("results", "eda", "proxy_ood", "membership_check.json")
+    if not membership.exists():
+        problems.append("results/eda/proxy_ood/membership_check.json missing")
+    else:
+        try:
+            mc = json.loads(membership.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult("V63", FAIL, f"membership_check.json invalid JSON: {exc}")
+        if mc.get("n_proxy_ood") != 40:
+            problems.append(f"membership_check.json n_proxy_ood={mc.get('n_proxy_ood')!r}, "
+                            f"expected 40")
+        for key in ("disjoint_from_train_gt", "disjoint_from_train_lr", "disjoint_from_test"):
+            if mc.get(key) is not True:
+                problems.append(f"membership_check.json {key}={mc.get(key)!r}, expected true")
+
+    pred_metrics = ctx.p("results", "baselines", "proxy_ood", "final", "metrics.json")
+    if not pred_metrics.exists():
+        problems.append("results/baselines/proxy_ood/final/metrics.json missing")
+    else:
+        try:
+            pm = json.loads(pred_metrics.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult("V63", FAIL, f"proxy_ood/final/metrics.json invalid JSON: {exc}")
+        if pm.get("n") != 40:
+            problems.append(f"proxy_ood/final/metrics.json n={pm.get('n')!r}, expected 40")
+        mm = pm.get("metrics", {})
+        for k in ("psnr", "ssim", "lpips"):
+            v = mm.get(k, {}).get("mean")
+            if v is None or not math.isfinite(v):
+                problems.append(f"proxy_ood/final/metrics.json metrics.{k}.mean missing/non-finite")
+        if pm.get("pred_dtype") not in (["float32"], "float32"):
+            problems.append(f"proxy_ood/final/metrics.json pred_dtype={pm.get('pred_dtype')!r}, "
+                            f"expected float32")
+        if pm.get("unclipped_files"):
+            problems.append(f"{len(pm['unclipped_files'])} unclipped proxy-OOD prediction(s)")
+
+    if problems:
+        return CheckResult("V63", FAIL, "; ".join(problems))
+    return CheckResult("V63", PASS,
+                       "proxy-OOD section present with n=40 and all three metrics reported; "
+                       "membership disjointness and prediction well-formedness verified")
+
+
+#: V65's CUDA-memory-constrained subprocess script. Runs the REAL load_net()+infer_chunk()
+#: path (same pattern V57 uses) with torch.cuda.set_per_process_memory_fraction() capping this
+#: CHILD PROCESS ONLY -- never the parent verifier -- so a batch of real 256x256 inputs
+#: genuinely exhausts CUDA memory and infer_chunk's actual except-OutOfMemoryError branch
+#: fires for real, not via a faked exception. Isolated in a subprocess specifically so the
+#: memory-fraction cap (which torch does not offer a clean "restore default" API for) cannot
+#: leak into any check that runs after V65 in the same verifier process.
+V65_OOM_SCRIPT = '''
+import json, sys
+from pathlib import Path
+import numpy as np
+import torch
+
+FRACTION = float(sys.argv[1])
+CKPT = sys.argv[2]
+INFER_PY = sys.argv[3]
+N = int(sys.argv[4])
+REPO_ROOT = str(Path(INFER_PY).resolve().parent)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+if torch.cuda.is_available():
+    torch.cuda.set_per_process_memory_fraction(FRACTION, 0)
+
+import importlib.util
+spec = importlib.util.spec_from_file_location("_v65_inference", INFER_PY)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+dev = mod.resolve_device(None)
+net, loaded = mod.load_net(Path(CKPT), dev, False)
+if not loaded:
+    print(json.dumps({"error": "load_net fell back to bicubic"}))
+    sys.exit(1)
+net.eval()
+net.to(dev)
+net.to(memory_format=torch.channels_last)
+use_amp, amp_dtype, _ = mod.resolve_precision("auto", dev)
+
+calls = {"is_oom": 0}
+real_is_oom = mod._is_oom
+def _counting_is_oom(exc):
+    result = real_is_oom(exc)
+    if result:
+        calls["is_oom"] += 1
+    return result
+mod._is_oom = _counting_is_oom
+
+rng = np.random.default_rng(20260816)
+arrays = [(rng.random((256, 256)).astype(np.float32) * 1.4 - 0.2) for _ in range(N)]
+try:
+    with torch.inference_mode():  # matches inference.py main()'s real wrapping (line ~468)
+        y = mod.infer_chunk(net, arrays, dev, use_amp, amp_dtype, False)
+    out = {
+        "shape": list(y.shape),
+        "dtype": str(y.dtype),
+        "finite": bool(np.isfinite(y).all()),
+        "in_range": bool(y.min() >= 0.0 and y.max() <= 1.0),
+        "is_oom_calls": calls["is_oom"],
+    }
+    print(json.dumps(out))
+except Exception as exc:  # noqa: BLE001
+    print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+    sys.exit(1)
+'''
+
+
+def check_V65(ctx: Ctx) -> CheckResult:
+    """Real 256->512 batch correctness, AND the OOM-recovery path forced by a genuine CUDA
+    memory cap -- not a faked exception.
+
+    KLA's brief says eval images are expected around 256x256 or 512x512; the released data is
+    128->256 only (docs/SPEC_ADDENDUM.md section 1), so 256->512 is exercised only by V61's
+    single-pixel shape fixture today, never a real batch through the actual inference.py CLI,
+    and the recursive OOM-halving in infer_chunk (inference.py lines ~340-355) is exercised by
+    no check at all. This closes both gaps in one check: part A runs a real N-image 256x256
+    batch through the real CLI end to end; part B constrains a CHILD process's CUDA memory
+    with torch.cuda.set_per_process_memory_fraction() so a real allocation genuinely exhausts,
+    forcing infer_chunk's actual except-OutOfMemoryError branch to fire, and counts how many
+    times it fired via a wrapper around the real _is_oom (never bypassing or faking it).
+    """
+    if _is_stub(ctx.p("inference.py")):
+        return not_impl("V65", "inference.py")
+    ck = ctx.p("weights", "best.pt")
+    if not ck.exists():
+        return not_impl("V65", "weights/best.pt (no trained checkpoint to test the real path)")
+    import numpy as np
+
+    # --- Part A: real N-image 256x256 -> 512x512 batch through the actual CLI -------------
+    in_dir = ctx.tmpdir("v65_in")
+    rng = np.random.default_rng(20260816)
+    n_images = 8
+    for i in range(n_images):
+        arr = (rng.random((256, 256)).astype(np.float32) * 1.4 - 0.2)  # spans outside [0,1]
+        np.save(in_dir / f"proxy_{i:03d}.npy", arr)
+    out_dir = ctx.tmpdir("v65_out")
+    rc, _, se = ctx.run_inference(in_dir, out_dir, extra=["--batch_size", "8"])
+    if rc != 0:
+        return CheckResult("V65", FAIL, f"256->512 batch exited {rc}: {se.strip()[-300:]}")
+    outs = sorted(out_dir.glob("*.npy"))
+    if len(outs) != n_images:
+        return CheckResult("V65", FAIL, f"{n_images} in -> {len(outs)} out")
+    for p in outs:
+        a = np.load(p)
+        if a.dtype != np.float32 or a.ndim != 2 or a.shape != (512, 512):
+            return CheckResult("V65", FAIL,
+                               f"{p.name}: dtype={a.dtype} ndim={a.ndim} shape={a.shape}, "
+                               f"expected float32 (512, 512)")
+        if not np.isfinite(a).all() or a.min() < 0.0 or a.max() > 1.0:
+            return CheckResult("V65", FAIL, f"{p.name}: not finite or outside [0,1] "
+                               f"(min={a.min():.4g}, max={a.max():.4g})")
+
+    # --- Part B: force a REAL CUDA OOM via a genuine memory-fraction cap, isolated in a
+    # child process so the cap cannot leak into any later check in this verifier run --------
+    import torch as _torch_probe
+    if not _torch_probe.cuda.is_available():
+        return CheckResult("V65", SKIP, SKIP_WHITELIST.get(
+            "V65", "No CUDA device available -- cannot force a real CUDA OOM"),
+            {"part_a": "PASS", "part_b": "skipped, no CUDA"})
+
+    script_path = ctx.tmpdir("v65_script") / "oom_probe.py"
+    script_path.write_text(V65_OOM_SCRIPT, encoding="utf-8")
+    rc2, so2, se2 = ctx.run([sys.executable, str(script_path), "0.03", str(ck),
+                            str(ctx.p("inference.py")), "16"], timeout=120)
+    if rc2 != 0:
+        return CheckResult("V65", FAIL,
+                           f"OOM-recovery subprocess exited {rc2}: {se2.strip()[-400:]}",
+                           {"part_a": "PASS"})
+    try:
+        ob = json.loads(so2.strip().splitlines()[-1])
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V65", FAIL, f"could not parse OOM-probe output: {exc}: {so2[-300:]}")
+    if "error" in ob:
+        return CheckResult("V65", FAIL, f"OOM-probe raised: {ob['error']}", {"part_a": "PASS"})
+    if ob.get("is_oom_calls", 0) < 1:
+        return CheckResult("V65", FAIL,
+                           "memory-fraction cap did not force a real CUDA OOM (_is_oom never "
+                           "fired) -- cap may be too loose for this GPU; the recovery path was "
+                           "never actually exercised", {"part_a": "PASS", "part_b": ob})
+    if tuple(ob.get("shape", [])) != (16, 512, 512) or ob.get("dtype") != "float32":
+        return CheckResult("V65", FAIL, f"OOM-recovered output malformed: {ob}")
+    if not ob.get("finite") or not ob.get("in_range"):
+        return CheckResult("V65", FAIL, f"OOM-recovered output not finite/in-range: {ob}")
+
+    return CheckResult("V65", PASS,
+                       f"real 256->512 batch of {n_images}: N-out, float32, (512,512), finite, "
+                       f"[0,1] all confirmed; OOM-recovery genuinely forced "
+                       f"({ob['is_oom_calls']} real OutOfMemoryError(s) caught), recovered "
+                       f"output correct", {"part_a": "PASS", "part_b": ob})
 
 
 #: Sizes V61 forwards through every architecture. Includes odd, non-square, tiny and

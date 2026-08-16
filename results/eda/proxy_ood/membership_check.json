@@ -1,0 +1,12 @@
+{
+  "n_proxy_ood": 40,
+  "n_train_gt": 3200,
+  "n_train_lr": 3200,
+  "n_test": 400,
+  "intersection_with_train_gt": [],
+  "intersection_with_train_lr": [],
+  "intersection_with_test": [],
+  "disjoint_from_train_gt": true,
+  "disjoint_from_train_lr": true,
+  "disjoint_from_test": true
+}
