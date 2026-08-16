@@ -40,8 +40,9 @@ The final test set contains no GT. No final-test PSNR, SSIM, or LPIPS is compute
 
 ## Setup
 
-The target environment is Python 3.12 with CUDA 12.8 PyTorch packages pinned in
-`requirements.txt`.
+Python 3.11 and 3.12 are supported. The target scoring environment is Python 3.12 with CUDA
+12.8 PyTorch packages pinned in `requirements.txt`; macOS installs the standard CPU/MPS PyTorch
+build from the same file.
 
 ```bash
 python -m venv .venv
@@ -50,9 +51,29 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+On the verified Apple Silicon Mac, the system `python3` is newer than the supported range.
+Create the environment explicitly with the installed Homebrew Python 3.11:
+
+```bash
+/opt/homebrew/bin/python3.11 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
 On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`; the remaining commands are
 unchanged. NVIDIA GPU execution is selected automatically when CUDA is available. Use
 `--device cpu` only when explicitly testing the CPU path.
+
+Confirm the environment and tracked checkpoint before inference:
+
+```bash
+python -c "import torch; print(torch.__version__)"
+shasum -a 256 weights/best.pt
+```
+
+The expected checkpoint SHA256 is
+`cc67c22f7cfc9926af7425bfa1af448237162d320970be6848129e0a3309d054`.
 
 ## Inference
 
@@ -80,6 +101,12 @@ Dataset-dependent training, evaluation, diagnostics, and verifier checks require
 
 - `KLA_DATA_ROOT` set to the extracted dataset root; or
 - the measured local root `/Users/shanmukhsai/Downloads`.
+
+For the verified local checkout:
+
+```bash
+export KLA_DATA_ROOT=/Users/shanmukhsai/Downloads
+```
 
 The root must contain:
 
