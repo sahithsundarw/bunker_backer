@@ -14,10 +14,15 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-56697ed68cdeee0e59d7e091d63bf475fc5d3857254813bb3c19e4abedfc4cf6  scripts/verify_all.py
+175d31dcce18fe88b50436fd4502e8325a2c8d3bf7e6b9310b18bef6b8fe054b  scripts/verify_all.py
 89467bf14c6e586049765af27f5ee4da9a11d2344335d4a01f341e15918c1171  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-16  V25 CPU execution allowance raised from 3600s to 7200s after two runs timed
+#             out before emitting any metric. The verifier-owned 40 dB threshold, two-pair
+#             requirement, and 6000-step failure budget are unchanged. Evidence now records
+#             max_iters and post-proof early exit. See docs/decisions.md D44.
+#             prior pin: 56697ed68cdeee0e59d7e091d63bf475fc5d3857254813bb3c19e4abedfc4cf6
 # 2026-08-15  contract pinned after the two human-authorised edits (V39 replaced,
 #             V23 moved Tier 1 -> Tier 0). See docs/decisions.md D6.
 # 2026-08-15  V39 SKIP allowance removed from the whitelist. See docs/decisions.md D10.

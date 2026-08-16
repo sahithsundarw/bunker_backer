@@ -1934,6 +1934,21 @@ number describes a workload KLA does not run.
 
 ---
 
+## D44 — V25 CPU execution capacity without changing acceptance (2026-08-16)
+
+Two live CPU runs reached the verifier's 3,600-second subprocess timeout before `train.py`
+could emit its final JSON report. Neither run produced a quality result, so neither was
+counted as a pass. The verifier allowance is now 7,200 seconds for this one compute-heavy
+check. Its verifier-owned 40 dB threshold, two-real-training-pair requirement, and 6,000-step
+failure budget are unchanged.
+
+`train.py` may finish earlier only after a periodic live raw/EMA score has already exceeded
+40 dB. The report records completed iterations, the maximum budget, and whether this
+post-proof exit occurred. This prevents a known pass from spending the remaining budget while
+retaining the full 6,000 steps for a model that has not cleared the gate.
+
+---
+
 ## D42 — Correct zero-variance paired significance in V28
 
 **Date:** 2026-08-16. **Source:** BUG-013 final QA hardening.
