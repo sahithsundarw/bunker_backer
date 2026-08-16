@@ -4,25 +4,35 @@
 
 # ⚠ RESUME HERE  (rewritten before every step — trust this over anything below)
 
-**Written at:** iteration 2, after the adversarial-review response batch. **Last verified
-commit:** `<pending — commit this file>`. **Verifier SHA:** re-pinned four times this batch,
-currently `001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf` — confirm against
+**Written at:** iteration 2, after decision A resolved and the throughput report finalized
+(commit `9a0a4dde`, 2026-08-16). This entry corrects a real gap: commits 7-9 in the list below
+(`e7e2febc`, `bdf45476`, `9a0a4dde`) landed without a STATE.md/README.md update, so both docs
+briefly described the throughput benchmark as still in flight and the ship decision as still
+pending — both are done. Caught and fixed 2026-08-16 while responding to a user request to
+reconcile README staleness. **Last verified commit:** `9a0a4dde860cdf3e3a4bf10515d8f5d6a4b18228`.
+**Verifier
+SHA:** re-pinned four times this batch, currently
+`001b68705ce79a93f9d3baa874dfabdaec3d51a59af79f1ab3cf4b0bd8efbbbf` — confirm against
 `docs/VERIFIER_SHA256` before trusting this number, it moves often right now.
 
-## Checks: 62 defined (was 57 at the top of this iteration)
+## Checks: 63 implemented (was 57 at the top of this iteration)
 
 Added since the last full tally: **V57** (U-6, real input-clip path), **V58** (U-10, SPEC 2.3
 link freshness), **V60** (adversarial H2/H3, destructive output-dir guard), **V61** (U-1,
-size-agnosticism forwarded), **V62** (U-8, degradation order-randomisation measured). Every one
-negative-controlled at add time — see D34/D35/D37/D38 for the exact mutation and the exact
-green→red→green sequence.
+size-agnosticism forwarded), **V62** (U-8, degradation order-randomisation measured), **V64**
+(regression guard closing the H4 gap D38 left open). Every one negative-controlled at add time —
+see D34/D35/D37/D38/D39 for the exact mutation and the exact green→red→green sequence. **V53**
+(the deck check) and **V63** (the proxy-OOD report, U-9) remain unimplemented — see backlog
+below.
 
 **No full `--strict` run has happened since these landed.** Every PASS/FAIL claim below is from
-a targeted `--only` re-run at the moment it's stated, not from a suite-wide pass. **Do not trust
-any tally in this file as a whole-suite number — run `--strict` fresh before believing one.**
-It has been deliberately deferred because `check_V07`/`V17`/etc. default to CUDA and a
-`perf-analyst` runtime benchmark has held the GPU continuously (still running at time of
-writing — see "IN FLIGHT" below).
+a targeted `--only` re-run or direct content inspection at the moment it's stated, not from a
+suite-wide pass. **Do not trust any tally in this file as a whole-suite number — run `--strict`
+fresh before believing one.** It was deliberately deferred earlier this iteration because
+`check_V07`/`V17`/etc. default to CUDA and a `perf-analyst` runtime benchmark held the GPU
+continuously — that benchmark has since **completed** (see "Decision A — RESOLVED" below); a
+full `--strict` (and `--fresh-clone`) run is still the next concrete step and has not happened
+since.
 
 ## What changed this batch, in commit order (all pushed to `origin/main`)
 
@@ -39,10 +49,22 @@ writing — see "IN FLIGHT" below).
 5. **`--no_ledger` restricted to `--smoke` runs** (D36, M-1 closed).
 6. **Four real bugs fixed in `inference.py`** from `adversarial-reviewer`'s first delivered
    report (D38): H2/H3 destructive output-dir (data loss, now refused), H4 (partial write
-   failure exited 0), H1 (`--require_weights` didn't cover a shape-mismatched-checkpoint
-   fallback), plus a README fix for C1 (the documented "command KLA runs" produced silent
-   bicubic on a fresh clone). 1 critical + 3 of 4 highs fixed; H4 has no dedicated V-check yet
-   (needs a filesystem-blocking fixture); 5 mediums + 7 lows logged in
+   failure exited 0, now exits non-zero), H1 (`--require_weights` didn't cover a
+   shape-mismatched-checkpoint fallback), plus a README fix for C1.
+7. **`e7e2febc`**: V64 added — a regression guard closing the H4 gap D38's fix left open (D39).
+8. **`bdf45476`**: `cmd_report` implemented in `scripts/benchmark_runtime.py` — the stage that
+   renders `results/runtime_report.md` was missing entirely (`KeyError: 'cmd_report'`), so
+   V37/V38/V39/V43 could never go green despite 700+ lines of measurement code already existing.
+   Also fixed a Windows `DataLoader` worker-respawn crash in the `io` stage (missing
+   `if __name__ == "__main__":` guard).
+9. **`9a0a4dde`**: the completed `perf-analyst` benchmark (~85 min, dominated by a 68-minute
+   `e2e` stage) regenerated `results/runtime_report.md` from real data; **D40 recorded**
+   (SHIP NAFSR); **V28 now passes** via the honest-negative-result route. This is "decision A,"
+   previously the single open item blocking the model-selection question — see "Decision A —
+   RESOLVED" above. Commits 7-9 landed without a STATE.md/README.md update; both were
+   reconciled to current facts in the edit that added this line (2026-08-16), which is itself
+   commit 10 of this batch. Item 6's fix set was 1 critical + 3 of 4 highs from that report; H4
+   now has V64 as its regression guard (item 7); 5 mediums + 7 lows remain logged in
    `reviews/adversarial-1.md` (gitignored, local) for a later pass.
 
 ## The measured V28 result — use these numbers, they are the honest ones
@@ -53,20 +75,25 @@ Paired per-image test, same 400 images, both models:
     ssim   mean diff +0.000135    t=+0.29   better on 172/400   -> TIE (not a win)
     lpips  mean diff -0.0120      t=-5.55   better on 235/400   -> WIN
 
-**1 win / 1 loss / 1 tie. V28 is correctly FAIL.** Naive unpaired-mean counting (what
-`evaluate.py` did before D-earlier's fix) would have called this "2 of 3" and been wrong — the
-SSIM "win" was noise, not signal.
+**1 win / 1 loss / 1 tie — not "2 of 3" either way.** Naive unpaired-mean counting (what
+`evaluate.py` did before D31's fix) would have called this "2 of 3" and been wrong — the SSIM
+"win" was noise, not signal. This is a genuine negative result on quality; D40 records it and
+still ships NAFSR, reasoning from throughput (UNetSR only 7.5% faster end-to-end) and
+parameter efficiency (NAFSR 7.65x smaller). **V28 now passes** via the contract's
+honest-negative-result route, not by resolving the tie.
 
-## ⚙ IN FLIGHT RIGHT NOW
-- **`perf-analyst`'s runtime benchmark**, launched via `scripts/benchmark_runtime.py all
-  --sweep_divergence`, PID **30608** (parent orchestrator; spawns short-lived `inference.py`
-  subprocesses as children — the parent's own near-zero CPU/RSS is expected, it's just
-  `subprocess.wait()`-ing). Log: `<scratchpad>/bench_runtime.log`, stderr
-  `<scratchpad>/bench_runtime.err` (empty — no crash). Stuck on the `e2e` stage (scaling series
-  1/25/50/100/200/400 x 5 repeats, plus 12 variants x ~5 repeats including a slow
-  `cpu_fp32_bs32` pass) for **45+ minutes** as of this writing. Not hung — confirmed via live
-  child `python.exe` processes cycling — just genuinely slow. `results/runtime_report.md` does
-  not exist yet. **This is what decision A (which model ships) is waiting on.**
+## ✅ Decision A — RESOLVED (was "IN FLIGHT")
+`perf-analyst`'s runtime benchmark (`scripts/benchmark_runtime.py all --sweep_divergence`)
+completed: ~85 minutes total, dominated by a 68-minute `e2e` stage (scaling series 1-400 x 5
+repeats, plus 12 precision/batch/thread variants including a CPU pass). `cmd_report` — the
+stage that renders `results/runtime_report.md` — did not originally exist (`KeyError:
+'cmd_report'`), so despite the measurement code being complete, V37/V38/V39/V43 could never go
+green; that was implemented and the report regenerated from the completed stage data
+(`bdf45476`). Decision A itself — which model ships — was then made and recorded as **D40**
+(`9a0a4dde`): **SHIP NAFSR**, unchanged. V28 now passes via the contract's honest-negative-result
+route. Full reasoning, the paired quality numbers, and both throughput figures (isolated compute
+vs. end-to-end subprocess — only the latter matters for scoring) are in `docs/decisions.md` D40;
+do not re-derive them here.
 
 ## ⚠ V22 — the one real defect, still unfixed
 Unchanged from before this batch:
@@ -86,17 +113,15 @@ rather than guessing between "force SCA to fp32" and "switch default to fp16" �
 throughput half of that decision will exist once `e2e` finishes.
 
 ## Remaining plan, in order (unchanged from the user's explicit ordering)
-1. `perf-analyst` finishes → **decide which model ships** (paired numbers above; user's stated
-   prior is "prefer the model winning more of the three metrics if close" and "report both,
-   state the reasoning in decisions.md") → write the D-numbered negative-result entry V28's
-   escape hatch actually requires (structured heading, all six measured means quoted,
-   `SHIPPED MODEL: <name>` matching `weights/best.pt`'s embedded config) → V28 resolves either
-   way honestly.
-2. Fix V22 — root-cause via `diag_v22.py`, not guessing.
-3. `adversarial-reviewer`'s findings: H4 still needs a V-check; the 5 mediums + 7 lows in
-   `reviews/adversarial-1.md` need triage.
-4. Full `--strict` run — first one since this whole batch landed. Then `ml-skeptic` re-run
-   (paired stats, U-Net comparison — new territory since its last pass), `cleanroom-tester`.
+1. ~~`perf-analyst` finishes → decide which model ships~~ **DONE — D40, SHIP NAFSR, V28 passes.**
+2. **Fix V22** — root-cause via `diag_v22.py`, not guessing. Next concrete step.
+3. `adversarial-reviewer`'s findings: H4 now has a regression guard (V64, D39); the 5 mediums +
+   7 lows in `reviews/adversarial-1.md` still need triage.
+4. Full `--strict` run — first one since this whole batch landed (still true as of `9a0a4dde`;
+   README.md and this file were reconciled to current facts 2026-08-16 without one — treat that
+   reconciliation as a documentation fix, not a substitute for actually running the suite). Then
+   `ml-skeptic` re-run (paired stats, U-Net comparison, D40's reasoning — new territory since its
+   last pass), `cleanroom-tester`.
 5. **Two consecutive clean `--strict --fresh-clone` runs** (Definition of Done #2). Note
    `check_V46` still doesn't literally execute README's fenced commands (H-4b, open) — a
    fresh-clone pass proves the hardcoded fixture path, not literally what a reviewer would
@@ -146,8 +171,8 @@ or attempt source identification; commit dataset files, weights, or anything ove
 - **Verifying a fetch-based check (V06/V56/V58/V59) costs real time and bandwidth** — a full
   `--strict` run now downloads ~94 MB (checkpoint + outputs archive) and hits 9 external URLs
   for V58. Budget for that; it is not a bug.
-- **Nothing is currently blocked on the human**, except decision A's final write-up (waiting on
-  the benchmark) and U-5/U-9, both explicitly sequenced for later.
+- **Nothing is currently blocked on the human.** Decision A is resolved (D40). U-5 (deck) and
+  U-9 (proxy-OOD report, V63) remain, both explicitly sequenced for later.
 
 ---
 
