@@ -121,6 +121,19 @@ Total: **$30**, hard stop **2026-09-01**.
 
 ## 5. Tier B — quality (cloud-budget items, from §4)
 
+0. **FiLM noise-conditioning + uncertainty head (blocking, local, zero cloud cost) — MUST land
+   and pass local verification before item 1 dispatches anything to HF Jobs.** Per the Round-2
+   differentiation plan (`.claude/plans/as-of-now-whatever-steady-lemur.md`, user-approved
+   2026-08-16): a small `NoiseEstimator` head produces FiLM scale/shift parameters conditioning
+   the NAFBlock stack (targets F7, the OOD/noise-generalisation axis SPEC explicitly tests),
+   plus an optional second output channel predicting per-pixel uncertainty via a heteroscedastic
+   NLL term. Additive to `_DEFAULTS`, default-disabled, so every existing checkpoint (including
+   `weights/best.pt`) still loads unchanged under V35's `strict=True`. Gate before spending any
+   cloud budget: overfit-2-pairs >~40 dB, V07–V12/V24/V61 green against the new `build_model`
+   config, and a short local training run (RTX 4060) showing val PSNR/SSIM/LPIPS is not worse
+   than the current shipped baseline. **The sweep and long run below train this architecture,
+   not the plain NAFSR the six `configs/sweep_*.yaml` files currently specify** — those configs
+   get a FiLM toggle added (or a parallel `sweep_*_film.yaml` set) once 0 is verified.
 1. **Pareto sweep.** 4–6 (width, num_blocks) configs, chosen to bracket the current 48×16 point and the D20-known ceiling (width≥64 + blocks≥28 didn't fit 8 GB locally — now testable on 80 GB). Measure: val PSNR/SSIM/LPIPS at a short, fixed iter budget, plus measured ms/iter on A100. Plot the frontier, pick the operating point, put the plot in the deck.
 2. **One long run** at the chosen config, iters set by measured throughput (§4). Checkpoint every save via `hub_strategy="every_save"`.
 3. **Larger training patches (96 or 128)** for the long run, budget permitting — gated on the MS-SSIM ≥161px constraint already logged in STATE.md's "Do NOT retry" section (single-scale SSIM is already the fallback in use, so this is compatible, not blocked).
@@ -147,9 +160,20 @@ This is **U-9/V63**, already flagged in STATE.md as the one open SPEC gap with n
 - Every timing number labelled with its device. The A100 sweep/long-run numbers, once they exist, get their own row — they do not get merged into or compared directly against the RTX 4060 `runtime_report.md` numbers, which remain the authoritative throughput-scoring proxy.
 - MORNING_REPORT.md updated continuously including spend to date, once execution starts.
 
-## 8. Immediate next step
+## 8. Immediate next step — updated 2026-08-16, post-merge
 
-Blocked on the HF access token (requested from user, §3). On receipt:
-1. Verify Jobs is enabled for `Team-Ceciroleo67` and the $30 balance applies to Jobs compute (not inference-only) — `hf jobs hardware` or a $0.01 CPU-Basic smoke job.
-2. Verify private-repo creation actually sets Private (checked logged-out), before any dataset bytes move.
-3. Do the tail-coverage fix (§5 item 4) locally while waiting — it's a prerequisite for the sweep and costs no cloud budget.
+Steps 1–3 below are **done** (`docs/PLAN_CLOUD.md` has the full execution log): token received,
+Jobs verified live under `Team-Ceciroleo67` (real smoke job completed), private dataset repo
+(`kla-ps01-data`) and checkpoint repo (`kla-ps01-checkpoints`) created and privacy-verified
+logged-out, tail-coverage fix (§5 item 4) landed pre-merge (`dd61ef1`, D43). A teammate's
+independent line of work was also discovered and reconciled this
+session (`docs/MERGE_ANALYSIS.md`, D49) — this session's checkpoint ships, verifier at 61/65
+(4 known/expected FAILs).
+
+**Current blocking step, per the user's explicit instruction: §5 item 0 (FiLM + uncertainty)
+must land and pass local verification before any HF Job is dispatched.** Nothing in §4's budget
+executes until that gate is green. Once it is:
+1. Add the FiLM toggle to `configs/sweep_a_w32n16.yaml` … `sweep_f_w96n32.yaml` (or a parallel
+   `_film` set).
+2. Tag `v0.1-submittable` (§7, still outstanding).
+3. Dispatch the Pareto sweep (§5 item 1).
