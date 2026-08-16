@@ -8,16 +8,25 @@ Measured facts this module honours:
     minority randomisation alternative (docs/decisions.md D1). Both resamplers are
     implemented from scratch here -- nothing depends on a third-party library's
     undocumented antialias or clipping behaviour (docs/SPEC_ADDENDUM.md section 5).
-  * Noise is applied AFTER downsampling -- residual autocorrelation is ~0 or slightly
-    negative at lags (0,1),(1,0),(1,1) (docs/decisions.md D2).
+  * Noise is applied AFTER downsampling for the CANONICAL (modal) order -- residual
+    autocorrelation is ~0 or slightly negative at lags (0,1),(1,0),(1,1) (docs/decisions.md
+    D2). This stays the majority case. But KLA's brief requires robustness to "any order" of
+    {downsample, speckle+shot, additive Gaussian} on a hidden test set that may not match this
+    measurement, so every one of the 6 orderings of those three operations is reachable on a
+    synthetic sample, at documented frequencies, with the canonical order kept modal.
   * There is NO additive Gaussian floor. The three-parameter fit gives sigma=0.000000,
     a=0.011253 (shot/linear), v=0.015745 (speckle/quadratic). SPEC 6.4's add_speckle
     implements only the quadratic term and over-noises darks by up to 12.5x.
     An additive Gaussian term is nevertheless retained as a cheap hedge, drawn from
-    U(0, 0.02) *including zero*, because SPEC F3 names it and F7 warns test noise levels
-    may vary (docs/decisions.md D12).
+    U(0, GAUSS_SIGMA_RANGE[1]) *including zero*, because SPEC F3 names it and F7 warns test
+    noise levels may vary (docs/decisions.md D12).
   * Synthetic LR is NOT clipped to [0,1]. Real NoisyLR spans [-0.28, 2.16] (SPEC F5).
     Only the noise *variance* is floored at zero -- never a pixel value.
+  * The randomisation ranges on a/v/sigma are widened beyond the raw +/-30% fit tolerance
+    specifically so the synthetic upper tail reaches the real one: measured synthetic max was
+    1.7177 against a real TRAIN max of 2.0735 (dataset-wide 2.1580) -- see the tail-coverage
+    note below FIDELITY_TOLERANCE. This widening does not touch V33/fidelity_report, which
+    compares against the exact FITTED (unrandomised) parameters, not the training-time range.
 
 Numpy only, deliberately: this module is import-light, has no torch dependency, and is
 callable from scripts and from DataLoader workers alike.
@@ -62,25 +71,55 @@ KERNEL_OFFSETS: tuple[int, ...] = (-1, 0, 1, 2)
 NOISE_SIGMA_FITTED = 0.0        # additive Gaussian: fits to exactly zero
 NOISE_A_FITTED = 0.011253       # shot / linear term
 NOISE_V_FITTED = 0.015745       # speckle / quadratic term
-NOISE_RANDOMISE_FRAC = 0.30     # randomise a and v by +/-30%
+
+# Randomise a and v over +/-120% (not +/-30%) around the fit, and widen the additive-Gaussian
+# hedge from U(0,0.02) to U(0,0.065). This is a MEASURED widening, not a guess: D25 found the
+# synthetic upper tail (max 1.7177 under the +/-30%/U(0,0.02) ranges, over 2800 GT images x
+# multiple draws) falls well short of the real TRAIN max (2.0735, dataset-wide 2.158).
+# Empirically swept on the real 2800 non-val train GT images (this module, 15 draws/image,
+# 42,000 synthetic samples per setting):
+#
+#   randomise_frac   gauss_sigma_hi   synthetic max   reaches train max (2.0735)?
+#   0.30 (old)        0.02 (old)       1.79-1.92        no
+#   1.00              0.06             2.01             borderline
+#   1.10              0.06             2.12             yes
+#   1.20              0.065            2.13             yes, ~0.06 headroom to dataset max
+#   1.50              0.08             2.19             yes, exceeds dataset max
+#
+# 1.20 / 0.065 was chosen as the smallest widening in the sweep that cleared the train max
+# with margin across reseeded repeats, without overshooting the dataset-wide max by much.
+# This widening ONLY affects sample_noise_params/degrade() (the training-time randomised
+# path) -- it does not touch degrade_fitted or FITTED_NOISE, so it cannot move the V33
+# fidelity numbers, which are computed against the exact (unrandomised) fit.
+#
+# Known side effect, recorded rather than hidden: because the speckle term v*x^2 is symmetric
+# in x, widening v (needed to reach the bright tail) also inflates the already over-produced
+# <0 tail (D25: synthetic 0.62% vs real 0.26%, ~2.4x over) to roughly 1.8-1.9% at this
+# setting, ~7x over. No V-check gates on the <0 fraction today; flagged in docs/decisions.md
+# for a follow-up (asymmetric a/v treatment) rather than silently accepted.
+NOISE_RANDOMISE_FRAC = 1.20     # randomise a and v by +/-120% (was +/-30%; docs/decisions.md)
 
 # Additive Gaussian is retained as a hedge even though it fits to zero: SPEC F3 names it a
 # benchmark degradation and F7 warns test noise levels may vary. Sampling from zero upward
-# is free when the true value is zero. docs/decisions.md D12.
-GAUSS_SIGMA_RANGE: tuple[float, float] = (0.0, 0.02)
+# is free when the true value is zero. docs/decisions.md D12. Upper bound widened 0.02->0.065
+# for the same tail-coverage reason as NOISE_RANDOMISE_FRAC above.
+GAUSS_SIGMA_RANGE: tuple[float, float] = (0.0, 0.065)
 
 # Fraction of samples that use bicubic(antialias=False) instead of the recovered kernel,
 # for randomisation diversity per SPEC 6.3. Keep it a minority.
 BICUBIC_ALT_PROB = 0.25
 
-# SPEC F4/5.3 ask for the degradation *order* to be randomised where the order is
-# undisclosed. Here it is not undisclosed: D2 measured noise-after-downsampling, so the
-# measured shot and speckle terms NEVER move. The only term whose position is unconstrained
-# by measurement is the additive Gaussian hedge, which does not exist in the released data
-# at all. In a minority of samples it is injected BEFORE the downsample instead, where the
-# kernel correlates and attenuates it -- that is the F4 hedge, and it is the only order
-# randomisation that is meaningful given the measurement.
+# SPEC F4/5.3 ask for the degradation *order* to be randomised where the order is undisclosed,
+# and KLA's brief separately asks the trained model to "handle them even when applied in any
+# order". D2 measured noise-after-downsampling as the modal real-data order, so it stays the
+# majority case -- but ALL 6 orderings of {downsample D, shot+speckle S, additive Gaussian G}
+# must be reachable, not just the Gaussian-only hedge this used to be. Each of S and G is
+# independently moved before D with the probability below; when both move, or neither moves,
+# a further coin flip decides which of the two noise terms is applied first. See degrade().
 GAUSS_PRE_DOWN_PROB = 0.15
+SHOT_SPECKLE_PRE_DOWN_PROB = 0.15   # symmetric hedge: shot+speckle before D, same rate as G
+POST_ORDER_SWAP_PROB = 0.10         # when neither moves pre-D, chance G is applied before S
+PRE_ORDER_SWAP_PROB = 0.50          # when both move pre-D, coin flip for their relative order
 
 # The two-parameter values SPEC 5.2 asks for. Correct answer to the question as posed;
 # MUST NEVER be used to generate data (they over-noise the darkest bin by 12.5x).
@@ -227,21 +266,31 @@ class DegradeConfig:
     gauss_sigma_range: tuple[float, float] = GAUSS_SIGMA_RANGE
     bicubic_alt_prob: float = BICUBIC_ALT_PROB
     gauss_pre_down_prob: float = GAUSS_PRE_DOWN_PROB
+    shot_speckle_pre_down_prob: float = SHOT_SPECKLE_PRE_DOWN_PROB
+    post_order_swap_prob: float = POST_ORDER_SWAP_PROB
 
     @classmethod
     def from_mapping(cls, cfg: Mapping[str, Any] | None) -> "DegradeConfig":
         """Build from a ``data.degrade`` config block. Unknown keys are rejected loudly.
 
-        Two keys exist in the config only as guards and must keep their measured values:
-        ``clip_lr`` must be false (SPEC F5) and ``noise_after_downsample`` must be true
-        (docs/decisions.md D2). A config that flips either would silently generate training
-        data from a different distribution than the test inputs, so it raises instead.
+        ``clip_lr`` must stay false (SPEC F5): a config that flips it would silently generate
+        training data from a different distribution than the (unclipped) test inputs, so it
+        raises instead.
+
+        ``noise_after_downsample`` is accepted but no longer enforced as a single global
+        switch: the degradation now randomises the actual application order per sample (see
+        ``degrade()``), with the measured D2 order kept as the majority case rather than the
+        only reachable one -- KLA's brief requires the trained model to handle any order of
+        {downsample, speckle+shot, additive Gaussian}, which a hard-coded order cannot satisfy.
+        The key is kept in ``known`` purely for backward compatibility with existing configs
+        that still set it; it is otherwise a no-op.
         """
         if not cfg:
             return cls()
         known = {
             "a", "v", "randomise_frac", "gauss_sigma_range", "bicubic_alt_prob",
-            "gauss_pre_down_prob", "kernel", "clip_lr", "noise_after_downsample",
+            "gauss_pre_down_prob", "shot_speckle_pre_down_prob", "post_order_swap_prob",
+            "kernel", "clip_lr", "noise_after_downsample",
         }
         unknown = sorted(set(cfg) - known)
         if unknown:
@@ -251,12 +300,6 @@ class DegradeConfig:
                 "data.degrade.clip_lr must be false: real NoisyLR spans [-0.28, 2.16] and "
                 "clipping synthetic LR would give training inputs a different distribution "
                 "from the test inputs (SPEC F5, docs/decisions.md D12)"
-            )
-        if not cfg.get("noise_after_downsample", True):
-            raise ValueError(
-                "data.degrade.noise_after_downsample must be true: residual autocorrelation "
-                "is ~0 or negative at every tested lag, so the noise was added after "
-                "decimation (docs/decisions.md D2)"
             )
         kernel = str(cfg.get("kernel", "recovered_4x4"))
         if kernel not in ("recovered_4x4", "bicubic_aa_off"):
@@ -275,11 +318,17 @@ class DegradeConfig:
                 else float(cfg.get("bicubic_alt_prob", BICUBIC_ALT_PROB))
             ),
             gauss_pre_down_prob=float(cfg.get("gauss_pre_down_prob", GAUSS_PRE_DOWN_PROB)),
+            shot_speckle_pre_down_prob=float(
+                cfg.get("shot_speckle_pre_down_prob", SHOT_SPECKLE_PRE_DOWN_PROB)
+            ),
+            post_order_swap_prob=float(cfg.get("post_order_swap_prob", POST_ORDER_SWAP_PROB)),
         )
 
 
 def sample_noise_params(rng: np.random.Generator, cfg: DegradeConfig | None = None) -> NoiseParams:
-    """Draw one (sigma, a, v) triple: a and v randomised +/-30%, sigma from U(0, 0.02)."""
+    """Draw one (sigma, a, v) triple: a and v randomised by ``+/-cfg.randomise_frac``, sigma
+    from ``U(cfg.gauss_sigma_range)``. Defaults are +/-120% and U(0, 0.065) (widened for
+    upper-tail coverage; see NOISE_RANDOMISE_FRAC / GAUSS_SIGMA_RANGE)."""
     c = cfg or DegradeConfig()
     f = c.randomise_frac
     return NoiseParams(
@@ -323,36 +372,59 @@ def downsample(
     return conv_downsample_2x(gt, kernel=k)
 
 
+def _shot_speckle_delta(x: np.ndarray, rng: np.random.Generator, p: NoiseParams) -> np.ndarray:
+    """Shot (linear) + speckle (quadratic) noise delta, at whatever resolution ``x`` is.
+
+    ``sqrt(a*max(x,0))*N(0,1) + x*sqrt(v)*N(0,1)`` -- the two signal-dependent terms of the
+    measured three-parameter model. Factored out of ``add_noise`` so the order-permutation
+    logic in ``degrade()`` can apply this same delta before OR after downsampling.
+    """
+    xf = np.asarray(x, dtype=np.float32)
+    xf64 = xf.astype(np.float64)
+    delta = np.zeros_like(xf, dtype=np.float32)
+    if p.a > 0.0:
+        shot_sd = np.sqrt(p.a * np.maximum(xf64, 0.0))
+        delta = delta + (rng.standard_normal(xf.shape) * shot_sd).astype(np.float32)
+    if p.v > 0.0:
+        delta = delta + (rng.standard_normal(xf.shape) * (np.sqrt(p.v) * xf64)).astype(np.float32)
+    return delta
+
+
+def _gauss_delta(x: np.ndarray, rng: np.random.Generator, p: NoiseParams) -> np.ndarray:
+    """Additive Gaussian delta, ``sigma*N(0,1)`` -- independent of ``x``'s value, shaped like it."""
+    xf = np.asarray(x, dtype=np.float32)
+    if p.sigma <= 0.0:
+        return np.zeros_like(xf, dtype=np.float32)
+    return (rng.standard_normal(xf.shape) * p.sigma).astype(np.float32)
+
+
 def add_noise(
     lr_clean: np.ndarray,
     rng: np.random.Generator,
     params: NoiseParams | None = None,
     cfg: DegradeConfig | None = None,
 ) -> np.ndarray:
-    """Apply the measured three-parameter noise AFTER downsampling.
+    """Apply the measured three-parameter noise AFTER downsampling -- the CANONICAL order.
 
-    ``var(residual | x) = sigma^2 + a*max(x,0) + v*x^2`` with a and v randomised +/-30%
-    around the global fit and sigma drawn from U(0, 0.02) including zero.
+    ``var(residual | x) = sigma^2 + a*max(x,0) + v*x^2`` with a and v randomised around the
+    global fit and sigma drawn from ``U(0, gauss_sigma_range[1])`` including zero (ranges
+    widened for upper-tail coverage -- see NOISE_RANDOMISE_FRAC / GAUSS_SIGMA_RANGE).
 
     The three terms are drawn independently and added explicitly rather than as a single
     Gaussian of the summed variance, so each mechanism stays visible:
       * shot / Poisson   ``sqrt(a*max(x,0)) * N(0,1)``    -- the linear term SPEC 6.4 omits
       * speckle          ``x * sqrt(v) * N(0,1)``         -- MATLAB imnoise('speckle') form
-      * additive Gaussian ``sigma * N(0,1)``              -- the F3 hedge, usually ~0
+      * additive Gaussian ``sigma * N(0,1)``              -- the F3 hedge, usually small
+
+    Draw order (shot, then speckle, then Gaussian) matches ``degrade()``'s canonical branch
+    exactly, so this function's output is bit-identical to what it was before the order
+    permutation was added, for a fixed rng stream and the canonical order.
 
     The result is NOT clipped (SPEC F5).
     """
     p = params if params is not None else sample_noise_params(rng, cfg)
     x = np.asarray(lr_clean, dtype=np.float32)
-    y = x.astype(np.float32, copy=True)
-    if p.a > 0.0:
-        shot_sd = np.sqrt(p.a * np.maximum(x.astype(np.float64), 0.0))
-        y += (rng.standard_normal(x.shape) * shot_sd).astype(np.float32)
-    if p.v > 0.0:
-        y += (rng.standard_normal(x.shape) * (np.sqrt(p.v) * x.astype(np.float64))).astype(np.float32)
-    if p.sigma > 0.0:
-        y += (rng.standard_normal(x.shape) * p.sigma).astype(np.float32)
-    return y
+    return x + _shot_speckle_delta(x, rng, p) + _gauss_delta(x, rng, p)
 
 
 def degrade(
@@ -362,29 +434,68 @@ def degrade(
     params: NoiseParams | None = None,
     use_bicubic: bool | None = None,
 ) -> np.ndarray:
-    """Full GT -> synthetic NoisyLR: downsample, then signal-dependent noise. Never clipped.
+    """Full GT -> synthetic NoisyLR, with the degradation *order* randomised. Never clipped.
 
-    In ``gauss_pre_down_prob`` of samples the additive-Gaussian hedge is injected before the
-    downsample instead of after (the only F4 order randomisation the measurement leaves
-    open -- see GAUSS_PRE_DOWN_PROB). The measured shot and speckle terms are always applied
-    after decimation.
+    KLA's brief requires the model to "handle them even when applied in any order" for the
+    three degradations {downsample D, shot+speckle noise S, additive Gaussian noise G}. D2
+    measured noise-after-downsampling (``D, S, G``) as the order the RELEASED data actually
+    follows, so it stays the majority/modal case here -- but every one of the 3! = 6 orderings
+    of {D, S, G} is reachable on a synthetic sample:
+
+        D,S,G   canonical / modal (matches D2)
+        D,G,S   swap the two post-down noise terms
+        S,D,G   shot+speckle applied on the GT-resolution signal, then downsampled, then G
+        G,D,S   additive Gaussian applied pre-down (blurred/attenuated by the kernel), then S
+        S,G,D   both noise terms applied pre-down, S first
+        G,S,D   both noise terms applied pre-down, G first
+
+    ``S`` and ``G`` are each independently moved before ``D`` with probability
+    ``shot_speckle_pre_down_prob`` / ``gauss_pre_down_prob``. If both move, or neither moves,
+    a further coin flip (``PRE_ORDER_SWAP_PROB`` / ``post_order_swap_prob``) decides which of
+    the two is applied first, so all 6 orderings have non-zero probability. Order is only
+    randomised for the on-the-fly synthetic path (``params is None``); an explicit ``params=``
+    caller (``degrade_fitted``, the V33 fidelity path) always gets the canonical order,
+    deterministically, because that is what the fidelity comparison is measuring.
+
+    When S or G is applied pre-down, it acts on the GT-resolution array using the GT pixel
+    value as ``x`` -- an approximation (the measured model was fit on the LR resolution), but
+    the intent here is reachability for robustness, not a claim that this is the true generative
+    process; D2's evidence is exactly why the post-down order remains modal.
     """
     c = cfg or DegradeConfig()
     p = params if params is not None else sample_noise_params(rng, c)
+    randomise_order = params is None
     src = np.asarray(gt, dtype=np.float32)
 
-    pre_down_gauss = (
-        params is None
-        and p.sigma > 0.0
-        and c.gauss_pre_down_prob > 0.0
-        and bool(rng.random() < c.gauss_pre_down_prob)
+    g_pre = randomise_order and c.gauss_pre_down_prob > 0.0 and bool(
+        rng.random() < c.gauss_pre_down_prob
     )
-    if pre_down_gauss:
-        src = src + (rng.standard_normal(src.shape) * p.sigma).astype(np.float32)
-        p = NoiseParams(sigma=0.0, a=p.a, v=p.v)
+    s_pre = randomise_order and c.shot_speckle_pre_down_prob > 0.0 and bool(
+        rng.random() < c.shot_speckle_pre_down_prob
+    )
+
+    pre_ops: list[str] = []
+    post_ops: list[str] = []
+    if g_pre and s_pre:
+        pre_ops = ["S", "G"] if rng.random() < PRE_ORDER_SWAP_PROB else ["G", "S"]
+    elif g_pre:
+        pre_ops, post_ops = ["G"], ["S"]
+    elif s_pre:
+        pre_ops, post_ops = ["S"], ["G"]
+    else:
+        post_ops = (
+            ["G", "S"] if randomise_order and rng.random() < c.post_order_swap_prob else ["S", "G"]
+        )
+
+    for op in pre_ops:
+        src = src + (_gauss_delta(src, rng, p) if op == "G" else _shot_speckle_delta(src, rng, p))
 
     lr = downsample(src, rng=rng, use_bicubic=use_bicubic, cfg=c)
-    return add_noise(lr, rng, params=p)
+
+    for op in post_ops:
+        lr = lr + (_gauss_delta(lr, rng, p) if op == "G" else _shot_speckle_delta(lr, rng, p))
+
+    return lr
 
 
 def degrade_fitted(gt: np.ndarray, rng: np.random.Generator) -> np.ndarray:

@@ -32,8 +32,9 @@ data:
     noise_after_downsample: true
     a: 0.011253                 # shot / linear term
     v: 0.015745                 # speckle / quadratic term
-    randomise_frac: 0.30        # +/-30% on a and v
-    gauss_sigma_range: [0.0, 0.02]   # includes zero; hedge for SPEC F3
+    randomise_frac: 1.20        # widened +/-30% -> +/-120% to close F1 tail-coverage gap
+                                 # (measured synthetic max 2.0869 vs real train max 2.0735)
+    gauss_sigma_range: [0.0, 0.065]   # widened 0.02 -> 0.065, same F1 tail-coverage fix
     clip_lr: false              # SPEC F5 -- never clip synthetic LR
 optim:
   optimizer: AdamW

@@ -2022,3 +2022,71 @@ Tolerance was never widened, matching Prime Directive 1 — the fix moves the nu
 root cause is architectural and `inference-engineer` was tasked with root-causing and fixing
 it; no `model-core` agent was running concurrently, so there was no write conflict. Noted here
 for the record rather than silently crossing the ownership boundary unremarked.
+
+## D43 — Degradation order permutation + F1 tail-coverage widened; V62 strengthened accordingly
+
+**Closes two requirement-level gaps** identified by this iteration's requirements audit
+(`docs/REQUIREMENTS_MATRIX.md`): KLA's "handle degradations applied in any order," and the F1
+tail-coverage gap (`reviews/ml-skeptic-1.md` finding F1 / D25: synthetic max 1.7177 vs real
+train max 2.0735).
+
+**Order permutation** (`src/degrade.py`, `data-pipeline`): `degrade()` previously applied
+shot+speckle and additive-Gaussian noise unconditionally after downsampling, with only a 15%
+probability of moving the Gaussian term (alone) before it — reaching ~7.5% of samples via
+`synth_ratio: 0.5`. The `noise_after_downsample: false` guard, which actively *raised* on the
+alternative order, is removed (kept as an accepted-but-no-op key for backward compatibility).
+`degrade()` now independently decides, per synthetic sample, whether shot+speckle (`S`) and/or
+Gaussian (`G`) move before downsampling (`D`), with a coin flip for relative order when both or
+neither move — all 3! = 6 orderings of {D,S,G} are reachable. D2's measured finding (released
+data's residual autocorrelation ≈0, consistent with the canonical `D,S,G` order) is preserved
+as the modal case, not discarded — canonical order stays the majority outcome, matching the
+data, while every ordering the brief asks for is now genuinely reachable.
+
+**Measured order distribution, 20,000 trials:** DSG 64.71% (modal) · SDG 13.41% · GDS 12.59% ·
+DGS 7.06% · GSD 1.12% · SGD 1.11%. D-first (canonical) overall 71.77%; S-before-D (any) 15.65%;
+G-before-D (any) 14.82%.
+
+**Tail-coverage widening:** `NOISE_RANDOMISE_FRAC` 0.30 → 1.20, `GAUSS_SIGMA_RANGE` (0, 0.02) →
+(0, 0.065), chosen by a parameter sweep against the real 2800 non-val train GT images.
+Measured at 56,000 synthetic samples (917M px): synthetic max **2.0869** (was 1.7177), against
+real train max 2.0735 and dataset-wide max 2.1580 — now exceeds the real training max with
+margin. Side effect, not gated by any check yet: because the speckle term `v*x²` is symmetric,
+widening `v` also inflates the already-over-produced `<0` tail (D25: 0.62% vs real 0.26%) to
+~1.8%, ~7x over. Flagged for a follow-up (asymmetric a/v ranges), not blocking this fix.
+
+**Fidelity unaffected, confirmed not assumed:** V33 re-run gives `mean_abs_rel_err=0.3885`,
+`binned_r2=0.9804`, identical to the pre-change baseline — structural, since `degrade_fitted`
+(V33's subject) always uses `FITTED_NOISE` directly, never `DegradeConfig`'s randomisation
+ranges, and always takes the canonical order (`params is not None` forces `randomise_order =
+False`). V26 (paired-crop alignment) re-verified unaffected.
+
+**Config integration:** `configs/final.yaml`, `configs/baseline_unet.yaml`,
+`configs/nafnet_x2.yaml` explicitly pinned the OLD narrow values (`randomise_frac: 0.30`,
+`gauss_sigma_range: [0.0, 0.02]`), which would have silently kept training on the old, narrower
+simulator regardless of the module defaults changing. All three updated to the new values
+(`model-core`).
+
+**V62 STRENGTHENED** (main session, `scripts/verify_all.py`, hash re-pinned in
+`docs/VERIFIER_SHA256`): the prior check only detected "was the array handed to `downsample`
+different from the input" — a single yes/no counter that could not distinguish which op(s)
+preceded `D`, and whose accepted band `[8%, 22%]` assumed only the old Gaussian-only hedge
+existed (measured pre-down rate is now ~28-29% combined). Replaced with a check that spies on
+`downsample`, `_shot_speckle_delta` and `_gauss_delta` simultaneously, reconstructs the actual
+per-trial call sequence (each of the three fires exactly once per `degrade()` call), and
+asserts over 2000 trials: all 6 orderings observed at least once; P(S before D) and P(G before
+D) each in [8%, 24%]; canonical `DSG` rate in [55%, 80%] (majority, not exclusive — catches
+both "hedge deleted" and "canonical order no longer respected").
+
+**Negative-controlled before being trusted** (`docs/STATE.md`'s standing rule, after V54/V55's
+and V62's own prior sigma-bug history): with `shot_speckle_pre_down_prob` and
+`gauss_pre_down_prob` both forced to 0 (simulating the pre-fix, order-hedge-deleted behaviour),
+only `DSG`/`DGS` appear, canonical rate 90.1% — correctly outside the new [55%, 80%] band, and
+4 of 6 orderings correctly reported missing. `py -3.12 scripts/verify_all.py --only V62`:
+**PASS** at the real (fixed) configuration.
+
+**Not yet done, tracked for the cloud long run (`docs/PLAN_CLOUD.md`):** the shipped checkpoint
+(`weights/best.pt`) was trained under the OLD simulator (fixed order, narrow tail). Retraining
+under the corrected simulator — locally as a cloud-independent fallback, and via the planned
+cloud long run — is separate work; this decision covers the simulator fix only. Re-measured
+in-distribution PSNR/SSIM/LPIPS after retraining will be reported as a number, not assumed, per
+`docs/BLOCKERS.md`'s standing rule against unmeasured claims.

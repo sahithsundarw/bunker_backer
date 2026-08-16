@@ -2799,7 +2799,16 @@ def check_V61(ctx: Ctx) -> CheckResult:
 V62_SAMPLES = 2000
 V62_SPAN_FRAC = 0.90          # a and v must span >=90% of their permitted +/-range
 V62_SIGMA_HI = 0.015          # sigma must reach at least this
-V62_PRE_DOWN_LO, V62_PRE_DOWN_HI = 0.08, 0.22
+#: Strengthened per D43: degrade() now permutes the full order of {downsample D, shot+speckle
+#: S, additive-Gaussian G} rather than only hedging G's position, so a single "any pre-down
+#: modification happened" counter can no longer tell S-before-D apart from G-before-D or from
+#: both. Bands below are centred on measured frequencies over 20,000 trials (S-before-D 15.6%,
+#: G-before-D 14.8%, canonical D-first 71.8%), each with generous margin -- not read from
+#: src/degrade.py, hash-pinned here same as V62's original bands (D24's governance fix).
+V62_ORDER_TRIALS = 2000
+V62_S_BEFORE_D_LO, V62_S_BEFORE_D_HI = 0.08, 0.24
+V62_G_BEFORE_D_LO, V62_G_BEFORE_D_HI = 0.08, 0.24
+V62_CANONICAL_LO, V62_CANONICAL_HI = 0.55, 0.80
 
 
 def check_V62(ctx: Ctx) -> CheckResult:
@@ -2862,37 +2871,80 @@ def check_V62(ctx: Ctx) -> CheckResult:
     if max(sig) < V62_SIGMA_HI:
         problems.append(f"sigma never exceeds {V62_SIGMA_HI} (max {max(sig):.6g})")
 
-    # --- count the pre-downsample branch by observing the real call -------------------
-    gt = np.clip(np.random.default_rng(7).random((32, 32)).astype(np.float32), 0, 1)
-    taken = [0]
+    # --- observe the REAL full ordering of {D, S, G} by spying on all three primitive
+    # calls degrade() actually makes, not just "was anything modified before downsample".
+    # Each trial calls downsample, _shot_speckle_delta and _gauss_delta exactly once each
+    # (degrade() always invokes both delta functions, whether pre- or post-down -- see its
+    # docstring), so the call sequence IS the permutation for that trial.
     real_downsample = dg.downsample
+    real_shot_speckle = dg._shot_speckle_delta
+    real_gauss = dg._gauss_delta
+    sequences: list[str] = []
+    seq: list[str] = []
 
-    def _spy(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
-        if x.shape == gt.shape and not np.array_equal(x, gt):
-            taken[0] += 1
+    def _spy_down(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        seq.append("D")
         return real_downsample(x, *a, **k)
 
-    n_trials = 800
+    def _spy_shot(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        seq.append("S")
+        return real_shot_speckle(x, *a, **k)
+
+    def _spy_gauss(x, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        seq.append("G")
+        return real_gauss(x, *a, **k)
+
+    gt = np.clip(np.random.default_rng(7).random((32, 32)).astype(np.float32), 0, 1)
     try:
-        dg.downsample = _spy
+        dg.downsample = _spy_down
+        dg._shot_speckle_delta = _spy_shot
+        dg._gauss_delta = _spy_gauss
         r2 = np.random.default_rng(4242)
-        for _ in range(n_trials):
+        for _ in range(V62_ORDER_TRIALS):
+            seq = []
             dg.degrade(gt, r2, cfg)
+            sequences.append("".join(seq))
     finally:
         dg.downsample = real_downsample
-    rate = taken[0] / n_trials
-    ev["pre_down_rate"] = rate
-    ev["pre_down_trials"] = n_trials
-    ev["GAUSS_PRE_DOWN_PROB"] = float(dg.GAUSS_PRE_DOWN_PROB)
-    if not (V62_PRE_DOWN_LO <= rate <= V62_PRE_DOWN_HI):
-        problems.append(f"pre-downsample gaussian branch taken {rate:.1%} of the time, "
-                        f"outside [{V62_PRE_DOWN_LO:.0%}, {V62_PRE_DOWN_HI:.0%}] -- the F4 "
-                        f"order hedge is missing, disabled or mis-tuned")
+        dg._shot_speckle_delta = real_shot_speckle
+        dg._gauss_delta = real_gauss
+
+    from collections import Counter
+    counts = Counter(sequences)
+    n = len(sequences)
+    s_before_d = sum(1 for s in sequences if s.index("S") < s.index("D")) / n
+    g_before_d = sum(1 for s in sequences if s.index("G") < s.index("D")) / n
+    canonical = counts.get("DSG", 0) / n
+    ev["order_trials"] = n
+    ev["order_counts"] = dict(counts)
+    ev["s_before_d"] = s_before_d
+    ev["g_before_d"] = g_before_d
+    ev["canonical_rate"] = canonical
+
+    all_six = {"DSG", "DGS", "SDG", "GDS", "SGD", "GSD"}
+    missing = all_six - set(counts)
+    if missing:
+        problems.append(f"orderings never observed in {n} trials: {sorted(missing)} -- not "
+                        f"every permutation of {{D,S,G}} is reachable")
+    if not (V62_S_BEFORE_D_LO <= s_before_d <= V62_S_BEFORE_D_HI):
+        problems.append(f"P(S before D)={s_before_d:.1%}, outside "
+                        f"[{V62_S_BEFORE_D_LO:.0%}, {V62_S_BEFORE_D_HI:.0%}]")
+    if not (V62_G_BEFORE_D_LO <= g_before_d <= V62_G_BEFORE_D_HI):
+        problems.append(f"P(G before D)={g_before_d:.1%}, outside "
+                        f"[{V62_G_BEFORE_D_LO:.0%}, {V62_G_BEFORE_D_HI:.0%}]")
+    if not (V62_CANONICAL_LO <= canonical <= V62_CANONICAL_HI):
+        problems.append(f"canonical DSG rate={canonical:.1%}, outside "
+                        f"[{V62_CANONICAL_LO:.0%}, {V62_CANONICAL_HI:.0%}] -- either the order "
+                        f"hedge is missing (too high) or D2's measured modal order is no "
+                        f"longer respected (too low)")
+
     if problems:
         return CheckResult("V62", FAIL, "; ".join(problems), ev)
     return CheckResult("V62", PASS,
                        f"a/v span >={V62_SPAN_FRAC:.0%} of +/-{frac:.0%}, sigma reaches both "
-                       f"0 and >{V62_SIGMA_HI}, pre-downsample branch taken {rate:.1%}", ev)
+                       f"0 and >{V62_SIGMA_HI}, all 6 D/S/G orderings observed, canonical "
+                       f"{canonical:.1%}, S-before-D {s_before_d:.1%}, G-before-D "
+                       f"{g_before_d:.1%}", ev)
 
 
 # ======================================================================================
