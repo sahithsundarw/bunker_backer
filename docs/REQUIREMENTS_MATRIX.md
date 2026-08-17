@@ -77,7 +77,7 @@ no-third-split structural gap) remain marked.
 | 4 | Compare at least one baseline with final method | Y | 4 baselines + paired t-test | V27, V28 |
 | 5 | Full-res examples incl. success and failure | **P** | `results/qualitative/` regenerated 2026-08-17 against the shipped checkpoint (6 val panels + 1 documented failure case + 5 no-GT final-test panels); README now links it under "Failure cases". Still **P** not Y: V49's gate is weak (filename substring only) | V49 (gate is weak: filename substring only) |
 | 6 | Report runtime, batch size, hardware, versions, timing method | **Y** | Complete at both resolutions: 128->256 (`results/runtime_report.md`) and 256->512 (`results/runtime_report_512.md`, D45), each labelled with device and input size | V37, V38, V39, V43 |
-| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | **P** | `results/experiments.csv` has 9 rows but **none references the shipped `configs/long_run_e.yaml` run** -- a real gap (plan Phase C1, not yet landed). Checkpoint self-describes its config (V35, Y) | V44 (row-count only), V45 |
+| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | Y | `results/experiments.csv` now has a row for the shipped `configs/long_run_e.yaml` run (`20260816T211258Z-long_run_e-s42`, appended 2026-08-17, plan Phase C1 done): git_sha honestly `unknown` (cloud tarball snapshot, not a git clone), best_iter 76000, disk-verified 29.2548/0.79211/0.25625. Checkpoint self-describes its config (V35) | V44, V45 |
 
 ## Phase 1 Deliverables
 
@@ -133,8 +133,8 @@ no-third-split structural gap) remain marked.
    PSNR-only selection; no blended-criterion option exists. Mitigation in progress: re-score
    every sweep/long-run checkpoint under PSNR/SSIM/LPIPS-only and blended criteria (plan Phase
    B3) — not yet landed as of this writing.
-3. **`results/experiments.csv` has no row for the shipped long-run checkpoint** (Validation #7,
-   Phase 1 Deliverables). Real gap, not yet closed (plan Phase C1).
+3. **`results/experiments.csv` row for the shipped long-run checkpoint** (Validation #7,
+   Phase 1 Deliverables) — done 2026-08-17 (plan Phase C1).
 4. **`results/qualitative/` regenerated against the shipped checkpoint** (Validation #5) — done
    2026-08-17, tags re-verified accurate under the new checkpoint's per-image ranking, not
    carried over unchecked. README now links this folder under "Failure cases" (it did not

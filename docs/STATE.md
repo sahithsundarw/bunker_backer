@@ -51,11 +51,15 @@ see below). Status:
 - **P1.1/P1.2/P1.3/P1.4 (FiLM calibration, uncertainty calibration, Pareto plot, FP8 probe) —
   DONE.** See D57/D58/D59, `results/eda/{pareto_frontier.png,film_calibration.json,
   uncertainty_calibration.json,fp8_probe.json}`.
-- **Still open, tracked in the plan, not yet done:** `results/qualitative/` regeneration
-  against the shipped checkpoint (Phase C2 — currently stale, rendered against the prior
-  checkpoint); `results/experiments.csv` has no row for the shipped long run (Phase C1);
-  V53 (deck placeholder-literal check) not implemented (Phase C3); deck/team info (Phase E,
-  needs the user); demo video (Phase E1, needs the user).
+- **Phases A, B1, B2, C1, C2, C3 all DONE** (README truth pass; bf16/fp32 pricing, decision
+  keep bf16; controlled old-vs-new throughput re-benchmark, corrects a wrong "faster despite
+  bigger" claim; `results/experiments.csv` row for the shipped long run; `results/qualitative/`
+  regenerated; V53 implemented). B3 (free re-score of every pushed checkpoint under blended
+  criteria + weight soups) in progress. B4 folded into the Hour-0 `ood_paired_probe.py` work
+  already done.
+- **Still open:** deck/team info and demo video recording both need the user (plan Phase E);
+  the fine-tune job (`configs/finetune_ood_wide.yaml`) is still running as of this writing —
+  do not promote past it without a paired win, and not past the T-12h gate regardless.
 
 **Everything below this point (including the next "RESUME HERE" heading) is archived history
 from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by
