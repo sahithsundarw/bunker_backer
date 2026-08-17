@@ -1,58 +1,58 @@
 {
-  "checkpoint_sha256": "8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c",
-  "checkpoint_val_psnr_db": 29.2548,
-  "checkpoint_val_ssim": 0.79211,
-  "checkpoint_val_lpips": 0.25625,
+  "checkpoint_sha256": "6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397",
+  "checkpoint_val_psnr_db": 29.585,
+  "checkpoint_val_ssim": 0.7946,
+  "checkpoint_val_lpips": 0.25416,
   "validation_examples": [
     {
       "file": "001323.npy",
       "tag": "best",
-      "psnr": 40.4146,
-      "ssim": 0.959,
-      "png": "val_001323_best_psnr40.41.png"
+      "psnr": 40.4251,
+      "ssim": 0.9582,
+      "png": "val_001323_best_psnr40.43.png"
     },
     {
       "file": "000960.npy",
       "tag": "strong",
-      "psnr": 41.255,
-      "ssim": 0.9768,
-      "png": "val_000960_strong_psnr41.26.png"
+      "psnr": 41.4524,
+      "ssim": 0.9776,
+      "png": "val_000960_strong_psnr41.45.png"
     },
     {
       "file": "003167.npy",
       "tag": "typical_near_mean",
-      "psnr": 30.6673,
-      "ssim": 0.9081,
-      "png": "val_003167_typical_near_mean_psnr30.67.png"
+      "psnr": 31.2735,
+      "ssim": 0.9109,
+      "png": "val_003167_typical_near_mean_psnr31.27.png"
     },
     {
       "file": "001682.npy",
       "tag": "typical_near_mean",
-      "psnr": 30.7052,
-      "ssim": 0.9478,
-      "png": "val_001682_typical_near_mean_psnr30.71.png"
+      "psnr": 31.8141,
+      "ssim": 0.9526,
+      "png": "val_001682_typical_near_mean_psnr31.81.png"
     },
     {
       "file": "002041.npy",
       "tag": "weak_worst_in_split",
-      "psnr": 17.6253,
-      "ssim": 0.5283,
-      "png": "val_002041_weak_worst_in_split_psnr17.63.png"
+      "psnr": 17.9114,
+      "ssim": 0.5184,
+      "png": "val_002041_weak_worst_in_split_psnr17.91.png"
     },
     {
       "file": "000900.npy",
       "tag": "weak_lowest_ssim_in_worst8",
-      "psnr": 18.8701,
-      "ssim": 0.3635,
-      "png": "val_000900_weak_lowest_ssim_in_worst8_psnr18.87.png"
+      "psnr": 19.1472,
+      "ssim": 0.3362,
+      "png": "val_000900_weak_lowest_ssim_in_worst8_psnr19.15.png"
     }
   ],
   "d5_documented_failure_case": {
     "file": "000984.npy",
     "tag": "D5_documented_aliasing_broadband_texture_case",
-    "psnr": 11.2243,
-    "ssim": 0.3661,
-    "png": "failurecase_D5_000984_D5_documented_aliasing_broadband_texture_case_psnr11.22.png"
+    "psnr": 11.7137,
+    "ssim": 0.3697,
+    "png": "failurecase_D5_000984_D5_documented_aliasing_broadband_texture_case_psnr11.71.png"
   },
   "final_test_examples": [
     {
@@ -76,5 +76,5 @@
       "png": "finaltest_000399_no_gt.png"
     }
   ],
-  "note": "final_test_examples have no ground truth; no metric is computed for them. d5_documented_failure_case is NOT part of the 400-pair scored validation split; its PSNR/SSIM is a single-file illustrative measurement only, not part of the reported 29.2548 dB mean (parsed live from results/metrics_summary.md's 'Final model' row)."
+  "note": "final_test_examples have no ground truth; no metric is computed for them. d5_documented_failure_case is NOT part of the 400-pair scored validation split; its PSNR/SSIM is a single-file illustrative measurement only, not part of the reported 29.5850 dB mean (parsed live from results/metrics_summary.md's 'Final model' row)."
 }

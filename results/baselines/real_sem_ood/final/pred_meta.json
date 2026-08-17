@@ -1,0 +1,13 @@
+{
+  "name": "final",
+  "label": "Final model",
+  "description": "shipped checkpoint",
+  "kind": "learned",
+  "n": 45,
+  "split": "real_sem_ood",
+  "input_dir": "results\\eda\\real_sem_ood\\NoisyLR",
+  "checkpoint": "weights/best.pt",
+  "device": "cuda",
+  "sec_per_image": 0.062287759780883786,
+  "postprocess": "np.clip(pred, 0.0, 1.0) only -- no renormalisation (D3)"
+}

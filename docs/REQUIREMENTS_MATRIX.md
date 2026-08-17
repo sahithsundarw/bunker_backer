@@ -24,7 +24,7 @@ no-third-split structural gap) remain marked.
 | 5 | Handle degradations even when applied in any order | **Y** | `src/degrade.py:degrade()` now permutes {D,S,G}, all 3!=6 orderings reachable (measured 20,000 trials: DSG 64.71% modal, others 1.1-13.4%), canonical order preserved as modal per D2's measurement. Old fixed-order guard removed | V62 (strengthened, D43) |
 | 6 | Restore to expected GT resolution | Y | exact x2 enforced, bicubic-fallback substituted on any shape mismatch | V09, V61, V65 |
 | 7 | Generalize to familiar and unfamiliar content | **P** | Familiar (in-distribution): Y, 400-image val split. Unfamiliar (OOD): proxy-OOD set (40 procedural geometric images, `results/eda/proxy_ood/`) scored: PSNR 27.32dB (-1.47 vs in-dist), SSIM 0.965 (+0.182), LPIPS 0.038 (-0.215) -- real, honestly-mixed evidence, not prose. Still **P** not **Y**: this is procedural geometric content, not real semiconductor/SEM imagery, which does not exist anywhere in this project | V63 (implemented, D44) |
-| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 17.3 img/s end-to-end at N=400, 128->256, RTX 4060, externally timed (current shipped checkpoint; the superseded checkpoint's own 8.3 img/s figure is kept for the record but flagged with a 681% measurement spread) | V37, V38, V39, V43 |
+| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 14.1 img/s end-to-end at N=400, 128->256, RTX 4060, externally timed (current shipped checkpoint; earlier checkpoints' own figures kept for the record, one flagged with a 681% measurement spread) | V37, V38, V39, V43 |
 
 ## Dataset Rules
 
@@ -77,7 +77,7 @@ no-third-split structural gap) remain marked.
 | 4 | Compare at least one baseline with final method | Y | 4 baselines + paired t-test | V27, V28 |
 | 5 | Full-res examples incl. success and failure | **P** | `results/qualitative/` regenerated 2026-08-17 against the shipped checkpoint (6 val panels + 1 documented failure case + 5 no-GT final-test panels); README now links it under "Failure cases". Still **P** not Y: V49's gate is weak (filename substring only) | V49 (gate is weak: filename substring only) |
 | 6 | Report runtime, batch size, hardware, versions, timing method | **Y** | Complete at both resolutions: 128->256 (`results/runtime_report.md`) and 256->512 (`results/runtime_report_512.md`, D45), each labelled with device and input size | V37, V38, V39, V43 |
-| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | Y | `results/experiments.csv` now has a row for the shipped `configs/long_run_e.yaml` run (`20260816T211258Z-long_run_e-s42`, appended 2026-08-17, plan Phase C1 done): git_sha honestly `unknown` (cloud tarball snapshot, not a git clone), best_iter 76000, disk-verified 29.2548/0.79211/0.25625. Checkpoint self-describes its config (V35) | V44, V45 |
+| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | Y | `results/experiments.csv` has rows for both the D61 base long-run (`20260816T211258Z-long_run_e-s42`) and the shipped Phase 3 fine-tune (`20260817T145721Z-finetune_structural_content-s42`, git_sha a real commit this time, best_iter 84000, disk-verified 29.5850/0.79460/0.25416). Checkpoint self-describes its config (V35) | V44, V45 |
 
 ## Phase 1 Deliverables
 
@@ -110,7 +110,7 @@ no-third-split structural gap) remain marked.
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
-| 1 | Restoration quality: fixed PSNR+SSIM+LPIPS blend, hidden GT, in-dist + OOD | **P** | Metrics pinned and reported for in-distribution. TWO OOD measurements exist: procedural proxy-OOD (honestly mixed, no regression on the current checkpoint, actually a paired SSIM win) and real-SEM OOD (a genuine, paired, disclosed regression on the current checkpoint vs the prior one -- `docs/decisions.md` D63). A fine-tune targeting this is in flight, promoted only on a paired win | V27, V28, V31, V63, V67 |
+| 1 | Restoration quality: fixed PSNR+SSIM+LPIPS blend, hidden GT, in-dist + OOD | **P** | Metrics pinned and reported for in-distribution. TWO OOD measurements exist: procedural proxy-OOD (large paired win on all 3 metrics for the shipped checkpoint) and real-SEM OOD (a genuine, paired, disclosed regression under the prior checkpoint, diagnosed as content-driven (D68) and partially closed by a targeted fine-tune promoted after showing a paired LPIPS win with no regression anywhere -- D71/D72). Ceiling on "Y" remains structural: no real semiconductor/SEM imagery exists in the training set, so this can only ever be evaluation-only evidence | V27, V28, V31, V63, V67 |
 | 2 | End-to-end throughput, common H100, incl. I/O and pre/post-proc | **Y** | Real externally-timed numbers exist at both 128->256 and 256->512 on RTX 4060 (never H100 -- none fabricated). No H100 number exists or is claimed anywhere | V37, V38, V39, V43 |
 | 3 | Training & compute hygiene: reproducibility, clean experiments, env spec, code quality, efficient pipeline, ML practice | Y | experiments.csv ledger, seeded, pinned deps, `docs/decisions.md` append-only log, verifier contract | V44, V45, V14, and the whole Tier 4 |
 | 4 | Exact metric weights undisclosed by KLA | -- | N/A, informational | -- |

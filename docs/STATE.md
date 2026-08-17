@@ -2,67 +2,72 @@
 
 ---
 
-# ⚠ RESUME HERE — Phase 1 close-out, main session (Windows/RTX 4060), 2026-08-17
+# ⚠ RESUME HERE — Phase 1 close-out + Round 2 OOD investigation, main session (Windows/RTX 4060), 2026-08-17
 
-**Deadline extended to 2026-08-18 night.** Plan superseded:
-`C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md` now tracks "Phase 1 close-out
-— diagnose, launch, harden, ship" (the earlier "Round 2 differentiation" plan's own remaining
-items — PRIORITY 0.1 origin/main reconciliation, most of PRIORITY 2/3 — are superseded or moot,
-see below). Status:
+**Deadline extended to 2026-08-18 night.** Two plans executed in sequence this session, both
+at `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md`: "Phase 1 close-out"
+(README truth pass, verifier hygiene, B1-B4/C1-C3) then, after the user requested it, "Attack
+the real-SEM OOD gap — diagnose before training" (content-statistics diagnosis, weight
+interpolation, a targeted fine-tune). **Both are DONE. The fine-tune was promoted.**
 
-- **Long run — DONE, checkpoint promoted and PUBLISHED.** HF Jobs A100,
-  `configs/long_run_e.yaml` (w64n32, FiLM+uncertainty), 129,700-iter schedule, best at iter
-  76,000. Won a paired head-to-head vs the prior checkpoint (PSNR/SSIM significant wins, LPIPS
-  tie) and now beats U-Net on all 3 metrics. `weights/best.pt` sha256 `8f54f9a2082...`. Real,
-  disclosed trade-off: real-SEM OOD SSIM/LPIPS got worse (`docs/decisions.md` D61).
-  `results/restored_test_outputs/` is published (`artifacts-v2`, verified fetchable
-  logged-out) — the "IN PROGRESS" status this section carried earlier is stale; confirmed live
-  via `gh release view artifacts-v2` (5 downloads recorded).
+- **CURRENT SHIPPED CHECKPOINT: Phase 3 structural-content fine-tune (`docs/decisions.md`
+  D71/D72), sha256 `6d74ccfd...`, 29.5850 dB / 0.79460 SSIM / 0.25416 LPIPS.** Fine-tuned from
+  the D61 long-run checkpoint (never from scratch) with 27.5% procedural structural content
+  mixed into training. Paired vs the D61 checkpoint: wins/ties every metric on every
+  evaluation set (in-distribution, procedural proxy-OOD, real-SEM OOD) with **zero
+  regressions anywhere**, including the first genuine real-SEM OOD improvement (LPIPS,
+  t=−4.12) of the whole investigation. Promoted with explicit user sign-off. Full cascade
+  done: `results/baselines/{final,proxy_ood/final,real_sem_ood/final}` regenerated,
+  `results/metrics_summary.md` regenerated, `results/runtime_report.md` updated (median
+  28.43s/14.1 img/s), `results/qualitative/` regenerated, `results/restored_test_outputs/`
+  republished as GitHub Release `artifacts-v3` (verified fetchable logged-out), README/
+  weights-README/REQUIREMENTS_MATRIX updated, `results/experiments.csv` row added
+  (`20260817T145721Z-finetune_structural_content-s42`). **A fresh full `--strict` verifier
+  run is in progress as of this writing (check `/tmp/verify_promo.log` or
+  `results/verification_report.json`'s timestamp/commit before trusting any tally quoted
+  elsewhere in this file) — the checkpoint changed, so the last-known 63 PASS / 6 FAIL is
+  stale until reconfirmed.**
+- **How this checkpoint came to be (the OOD investigation, in order):** Hour 0 diagnosis
+  (D63) found the real-SEM regression idiosyncratic, not systematic, plus a small scale gap.
+  A first fine-tune attempt widening degradation randomisation (D67) neither fixed real-SEM
+  OOD nor helped elsewhere and broke proxy-OOD — evaluated, NOT promoted, but diagnostic:
+  proof the gap wasn't degradation-coverage. Content statistics (D68) then showed real-SEM
+  content is a genuine multi-axis statistical outlier vs. natural photos (edge density,
+  local contrast, spectral flatness, all >2σ). Weight-interpolating D67's attempt (D69) never
+  recovered real-SEM OOD at ANY mixing ratio, ruling out "just needed less of it." Mixing
+  procedural structural content into training instead (this session's Phase 3, D71) finally
+  moved real-SEM OOD in the right direction with no regression — promoted (D72).
+- **Real operational finding, twice now:** HF Jobs' `run_job(timeout=...)` kwarg is NOT
+  reliably enforced by the platform. D67's job ran 18+ min past its 3h cap before manual
+  cancellation. The Phase 3 dispatch (`scripts/dispatch_finetune_structural.py`) added an
+  in-process `--watch` poll+cancel specifically to not repeat this — but the Phase 3 job was
+  ITSELF cancelled externally at ~85min, well short of even that watcher's cap, for an
+  unconfirmed reason (leading hypothesis: the org's ~$30 HF credit ceiling — user confirmed
+  they did not cancel it manually; training was healthy throughout per the full job log, not
+  a crash). **Cloud spend is now at or near the org credit limit — do not dispatch another
+  cloud job without checking the actual balance first.**
 - **V51 FIXED** (human-authorised, `docs/decisions.md` D62, `docs/BLOCKERS.md` B12 updated).
-  **V22 stays open**, human chose to accept it as a disclosed trade-off. **Full fresh run,
-  2026-08-17 (post V53 addition, 69 checks implemented): 64 PASS / 5 FAIL (V04, V22, V24,
-  V46, V53).** V04/V46 `--fresh-clone`-only, independently verified passing on Linux; V22 the
-  accepted trade-off; V24 a pre-existing, genuinely intermittent flake (~20%, B11 — rolled a
-  fail this run, has also passed); V53 correctly FAILs because the deck is still a placeholder
-  (real, open gap, not a check bug — `docs/decisions.md` D64).
+  **V22 stays open**, human chose to accept it as a disclosed, now-priced trade-off (D65: keep
+  bf16, the fp32 "win" is noise-level and costs 10.6% throughput). **V21/V24** share a known,
+  pre-existing ~20% intermittent cross-process-determinism flake (B11) — not a new break.
 - **PRIORITY 0.1 (origin/main reconciliation) is MOOT.** `main` was force-pushed to `origin`
   earlier this session (explicit, twice-confirmed human authorisation) — `origin/main` now
-  equals local `main`. There is no divergence left to reconcile.
+  equals local `main`.
 - **`UnrolledSR` overfit bug — investigation COMPLETE, honest negative result.** All 3
-  hypotheses (adjoint identity, step-size stability, weight-tying) tested and cleared; no
-  single fixable bug found. Not shipped, disclosed in README (`docs/decisions.md` D60).
-- **A three-way audit (2026-08-17) found the code sound but `README.md` badly stale** relative
-  to the D61 promotion — wrong sha256, wrong training narrative (still described Apple Silicon
-  MPS closed-form fitting, not the real A100 gradient run), wrong/contradictory throughput
-  numbers, an "unpublished" claim contradicted by the live Release. **README truth pass is
-  IN PROGRESS as of this writing** (plan Phase A) — do not trust README's own claims about
-  itself being current until this line is updated to say DONE.
-- **Hour 0 diagnosis — DONE (`docs/decisions.md` D63).** Two paired probes
-  (`scripts/ood_paired_probe.py`, `scripts/scale_gap_probe.py`) found the real-SEM OOD
-  regression is idiosyncratic (concentrated on real-SEM only; procedural proxy-OOD actually
-  wins) and a small but real train/test scale gap (128px inference vs 64px training patch).
-- **Hour 0.5 — the post-promotion fine-tune ran, was evaluated, and was NOT promoted
-  (`docs/decisions.md` D67). Incumbent `weights/best.pt` is UNCHANGED and remains shipped.**
-  `configs/finetune_ood_wide.yaml` resumed from `weights/best.pt` on HF Jobs A100. Real
-  operational finding: the `timeout="3h"` cap did NOT appear to be enforced by the platform —
-  job was found running at 3h18m, manually cancelled via `cancel_job()`. Evaluated its two
-  most-trained checkpoints (paired, val + both OOD sets): large in-distribution win
-  (+0.445 dB PSNR) but did NOT fix real-SEM OOD (tie/loss) and BROKE proxy-OOD (significant
-  loss, all 3 metrics — a set that was previously fine). Worse trade profile than the
-  incumbent's own already-accepted one. Not promoted. `train.py` gained
-  `optim.finetune_horizon`, `--push_every`, `--val_lpips` for this (all backward-compatible,
-  verified via matching SMOKE_DIGEST before/after) — these stay in the codebase regardless,
-  useful capability for any future fine-tune attempt.
+  hypotheses tested and cleared; no single fixable bug found. Not shipped, disclosed in
+  README (`docs/decisions.md` D60).
+- **README truth pass — DONE.** The three-way audit that found it badly stale relative to
+  the D61 promotion (wrong sha256, wrong training narrative, contradictory throughput
+  numbers) has been fully addressed, and the README has since been updated again for the
+  Phase 3 promotion on top of that.
 - **P1.1/P1.2/P1.3/P1.4 (FiLM calibration, uncertainty calibration, Pareto plot, FP8 probe) —
-  DONE.** See D57/D58/D59, `results/eda/{pareto_frontier.png,film_calibration.json,
-  uncertainty_calibration.json,fp8_probe.json}`.
-- **Phases A, B1, B2, B3, B4, C1, C2, C3 all DONE.** README truth pass; bf16/fp32 pricing
-  (keep bf16); controlled old-vs-new throughput re-benchmark (corrects a wrong "faster despite
-  bigger" claim — new checkpoint is actually ~55% slower, as expected for 3.6x params);
-  free re-score of every long-run checkpoint under blended criteria (no swap warranted, D66);
-  `results/experiments.csv` row for the shipped run; `results/qualitative/` regenerated; V53
-  implemented. B4 folded into the Hour-0 `ood_paired_probe.py` work.
+  DONE.** See D57/D58/D59/D70 (D70 re-ran uncertainty calibration against the actual shipped
+  checkpoint — the D59 number had been measured against a stale sweep checkpoint by mistake).
+- **Phases A, B1, B2, B3, B4, C1, C2, C3 all DONE**, superseded where the Phase 3 promotion
+  required regenerating them again (qualitative, metrics_summary, runtime_report, restored
+  outputs, ledger — all done a second time for the new checkpoint).
 - **Still open:** deck/team info and demo video recording both need the user (plan Phase E).
+  V53 will continue to correctly FAIL until the deck is filled in with real team info.
   Everything else in the plan's Hours 0-4 is closed out. Remaining runway before the T-12h
   gate (2026-08-18 12:00) can go to Phase E and final verification/consolidation.
 

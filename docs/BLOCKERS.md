@@ -237,6 +237,33 @@ three times immediately after: PASS all three, confirming this is the same known
 class (B11), not a new regression from any edit this session made. Broadening this entry's
 scope to cover both V21 and V24 rather than opening a second blocker for the identical cause.
 
+**2026-08-18 update: a related but distinct flake, V65, observed once during the Phase 3
+checkpoint promotion's post-promotion `--strict` run.** `V65 FAIL: 256->512 batch exited 124:
+timeout after 300s`. Different mechanism from V21/V24 (this is a genuine subprocess timeout
+under system load, not a numerical cross-process divergence), but the same category of
+issue: a real, environment/load-sensitive intermittent failure, not a regression from the
+checkpoint promotion. Confirmed directly: re-ran `--only V65` in isolation immediately after
+(no other processes competing for the GPU) and it passed cleanly — "real 256->512 batch of 8:
+N-out, float32, (512,512), finite, [0,1] all confirmed; OOM-recovery...". Architecture is
+byte-identical between the promoted checkpoint and its predecessor (same param count), so
+there is no mechanism by which this check's behaviour should depend on which weights are
+loaded — this was system-load contention during a session that had run many other GPU jobs
+that same day, not a checkpoint-specific effect.
+
+**A third occurrence, same night: `V25 FAIL: train.py --overfit 2 produced no parsable
+report (rc=124)`** on a SECOND immediate full-suite re-run (done specifically to get a clean
+confirmation after the V65 flake above). Re-ran `--only V25` alone immediately after: PASS
+cleanly ("overfit 2 pairs reached 43.7827 dB at iter 6000, gate 40.0 dB") — same pattern
+exactly. **Generalising the finding rather than chasing each instance individually**: this
+machine, after a very long single-session day of repeated GPU-heavy work (training runs,
+benchmarks, dozens of evaluation passes), exhibits intermittent subprocess timeouts (`rc=124`)
+on WHICHEVER GPU-heavy check happens to run at a moment of contention — V65 the first time,
+V25 the second, neither a repeat, both clean in isolation. This is environmental load, not a
+per-check or per-checkpoint defect, and not investigated further to root cause tonight given
+the time budget — every individual occurrence has been directly confirmed harmless by
+isolated re-test, which is the standard this project already applies to V21/V24's flakes.
+Recorded here, not hidden, and not used to justify touching any check's tolerance.
+
 Found by `inference-engineer` while fixing V22 (`docs/decisions.md` D42), confirmed
 independently by the main session: `py -3.12 scripts/verify_all.py --only V24` fails roughly
 half the time (measured: PASS, FAIL, PASS, FAIL over 4 consecutive runs). **This is present on

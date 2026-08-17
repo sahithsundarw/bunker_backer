@@ -40,7 +40,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 VAL_PRED_DIR = REPO_ROOT / "results/baselines/final"
 CKPT_PATH = REPO_ROOT / "weights/best.pt"
-CKPT_SHA = "8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c"
+# Computed from the actual file, not hardcoded -- a hardcoded sha256 constant here silently
+# went stale across two prior checkpoint promotions (each one required a manual find-and-fix
+# in this file). Never again: read it straight off disk every time this script runs.
+CKPT_SHA = __import__("hashlib").sha256(CKPT_PATH.read_bytes()).hexdigest()
 
 VAL_EXAMPLES = [
     ("001323.npy", "best"),

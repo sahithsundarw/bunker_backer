@@ -8,8 +8,8 @@ SPEC F12 makes this folder a mandatory repository item and V13 asserts it is non
 
 **This folder contains a manifest and per-file sha256 hashes. It does not contain the restored
 `.npy` files themselves.** The output archive is published as a **GitHub Release asset**
-(`artifacts-v1`), verified fetchable from a logged-out session before this document was
-written.
+(currently `artifacts-v3`), verified fetchable from a logged-out session before this document
+was last updated.
 
 **Why not committed directly.** 400 outputs at 256×256 float32 is ≈91 MB archived. Committing
 them — even compressed into a single `.npz` — would require loosening V51's per-file and
@@ -24,14 +24,16 @@ mechanism V06 already permits for the model checkpoint. Full reasoning: `docs/de
 
 ---
 
-## Status — 2026-08-17, Round 2 long-run checkpoint (`docs/decisions.md` D61)
+## Status — 2026-08-17, Round 2 Phase 3 structural-content checkpoint (`docs/decisions.md` D71/D72)
 
-**The outputs exist, are published, and have been regenerated from the promoted 29.2548 dB
-Round 2 long-run checkpoint**, which superseded the prior D49 checkpoint (28.7865 dB) after
-a paired head-to-head re-score (`docs/decisions.md` D61), using the real
-`inference.py --require_weights` production entrypoint, not a re-implemented forward pass.
-Published as a **new** GitHub Release (`artifacts-v2`) rather than overwriting `artifacts-v1`,
-which remains available unchanged as the historical D49-checkpoint record.
+**The outputs exist, are published, and have been regenerated from the promoted 29.5850 dB
+Phase 3 checkpoint**, which superseded the prior long-run checkpoint (29.2548 dB) after a
+paired comparison showing wins/ties on every metric on every evaluation set, including the
+first genuine real-SEM-OOD improvement of the whole investigation (`docs/decisions.md`
+D71/D72), using the real `inference.py --require_weights` production entrypoint, not a
+re-implemented forward pass. Published as a **new** GitHub Release (`artifacts-v3`) rather
+than overwriting `artifacts-v2`, which remains available unchanged as the historical prior
+checkpoint's record (as does `artifacts-v1` before it).
 
 Normal `inference.py` submission runs fail if the checkpoint is missing or cannot be loaded.
 The parameter-free bicubic baseline is available only through the explicit demo flag
@@ -48,11 +50,11 @@ failed loudly.
 | Outputs | 400 files, `.npy`, `float32`, `(256, 256)` — exactly 2× — clipped to `[0, 1]` |
 | Filenames | **byte-identical** to the inputs; no suffix, no extension change (verified: `matching_input_exists = true` for all 400 rows) |
 | Ground truth | **none exists.** The released test set ships inputs only, so no score can be computed against it locally. Every metric below is measured on the held-out validation split of `train/` |
-| Checkpoint used | `weights/best.pt`, sha256 `8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c` |
-| Checkpoint validation metrics (disk-verified, full 400-pair val split — **not** a final-test score) | PSNR 29.2548 dB / SSIM 0.79211 / LPIPS 0.25625 |
+| Checkpoint used | `weights/best.pt`, sha256 `6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397` |
+| Checkpoint validation metrics (disk-verified, full 400-pair val split — **not** a final-test score) | PSNR 29.5850 dB / SSIM 0.79460 / LPIPS 0.25416 |
 | Command used | `python inference.py --input_dir C:\kla-data\test_NoisyLR --output_dir <out> --require_weights --verbose` |
 | Runtime headline | See `results/runtime_report.md` — **NVIDIA GeForce RTX 4060 Laptop GPU**, not Mac CPU, not H100. |
-| Git SHA of the producing run | `2e530586c55f9baf5ad92154d319534226adaf73` (checkpoint's own `git` key records `unknown` — trained via an HF Jobs tarball snapshot, not a git clone; see `weights/README.md`) |
+| Git SHA of the producing run | `eb0849e7ff54cf54cb9bdf4465a9f1133fa4b4ea` (this checkpoint's own `git` key genuinely records the training commit, `c8f3a51b...` — the HF Jobs container cloned via git this time, not a tarball snapshot; see `weights/README.md`) |
 
 **No PSNR/SSIM/LPIPS is computed on these 400 outputs.** The final test set has no ground
 truth, so no such score is possible; the figures above describe the checkpoint's
@@ -63,24 +65,38 @@ different images. Never key a cache, manifest or results structure on a bare fil
 it by split or use the full path. Both sets share shape and dtype, so a collision produces
 silently wrong results rather than an exception.
 
-## Download and verify (current, `artifacts-v2`)
+## Download and verify (current, `artifacts-v3`)
 
 | field | value |
 |---|---|
 | Archive name | `restored_test_outputs.zip` |
-| Archive sha256 | `6355b2bf802d0d7817d6c42d10893dff96e99285f2b03b4888c2a6310a8e7364` |
-| Archive size (bytes) | 90,963,266 |
+| Archive sha256 | `7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef` |
+| Archive size (bytes) | 90,929,851 |
 | File count inside | 400 |
-| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v2/restored_test_outputs.zip` |
+| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip` |
 
 Verified fetchable from a **logged-out** session with the sha256 above reproduced exactly
-(via `curl`; `urllib.request` 404'd on the redirect chain for unrelated reasons and was not
-used for verification) before this README was updated.
+(via `curl`) before this README was updated.
 
 ```bash
-curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v2/restored_test_outputs.zip
-sha256sum restored_test_outputs.zip   # must equal 6355b2bf802d0d7817d6c42d10893dff96e99285f2b03b4888c2a6310a8e7364
+curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip
+sha256sum restored_test_outputs.zip   # must equal 7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef
 ```
+
+---
+
+## Superseded — 2026-08-17, Round 2 long-run checkpoint (`docs/decisions.md` D61)
+
+The tables below this line describe the D61 long-run checkpoint's (29.2548 dB) outputs, still
+published at `artifacts-v2` for anyone wanting to reproduce that exact comparison. They are
+NOT what `weights/best.pt` currently produces.
+
+| field | value |
+|---|---|
+| Checkpoint used | `weights/best.pt`, sha256 `8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c` |
+| Checkpoint validation metrics | PSNR 29.2548 dB / SSIM 0.79211 / LPIPS 0.25625 |
+| Archive | `artifacts-v2/restored_test_outputs.zip`, sha256 `6355b2bf802d0d7817d6c42d10893dff96e99285f2b03b4888c2a6310a8e7364`, 90,963,266 bytes |
+| Git SHA | `2e530586c55f9baf5ad92154d319534226adaf73` (checkpoint's own `git` key recorded `unknown` — tarball snapshot, not a git clone) |
 
 ---
 

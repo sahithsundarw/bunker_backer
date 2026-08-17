@@ -8,7 +8,7 @@
   "input_dir": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\proxy_ood\\NoisyLR",
   "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
   "device": "cuda",
-  "sec_per_image": 0.034974684999178864,
-  "created": "2026-08-17T04:03:17+00:00",
+  "sec_per_image": 0.057468592499935765,
+  "created": "2026-08-17T17:07:49+00:00",
   "postprocess": "np.clip(pred, 0.0, 1.0) only -- no renormalisation (D3)"
 }

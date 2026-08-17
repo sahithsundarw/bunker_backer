@@ -3650,3 +3650,64 @@ promotion triggers the full regeneration cascade (qualitative panels, metrics_su
 runtime_report, restored-outputs republish, README, ledger) and is exactly the kind of
 consequential, hard-to-cheaply-reverse action this project's own precedent (D49, D61) treats
 as a deliberate, disclosed step, not a silent one.
+
+---
+
+## D72 — Phase 3 checkpoint promoted (human sign-off obtained); full regeneration cascade
+
+User explicitly authorised promotion via `AskUserQuestion` after seeing the D71 comparison
+table (wins/ties everywhere, first genuine real-SEM OOD improvement, no regressions). New
+checkpoint: sha256 `6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397`,
+11,557,166 bytes, `iter=84000`, `git="c8f3a51b2415b2b4af0c4300422d325dd1fe9f5c"` (a real
+commit SHA this time — the cloud container cloned via `git clone`, not a tarball snapshot,
+closing a gap D61's checkpoint had). Downloaded from
+`Team-Ceciroleo67/kla-ps01-checkpoints/20260817T145721Z-finetune_structural_content-s42/step_00084000/best.pt`,
+replaced `weights/best.pt`.
+
+**Full regeneration cascade, same discipline as D61's promotion:**
+
+1. Regenerated `results/baselines/final/`, `results/baselines/proxy_ood/final/`,
+   `results/baselines/real_sem_ood/final/` predictions against the new checkpoint (via
+   `scripts/make_baselines.py` for the first two, a direct forward-pass script matching
+   `run_learned`'s pattern for real-SEM since `make_baselines.py` has no real-SEM mode).
+2. Regenerated `results/metrics_summary.md` (`scripts/evaluate.py --collect results/baselines
+   --preds final=results/baselines/final --proxy_ood --real_sem_ood`): in-distribution
+   29.5850±4.6301 dB / 0.79460±0.14204 / 0.25416±0.13263 (n=400); proxy-OOD 41.4414±7.1618 /
+   0.99691±0.00307 / 0.00169±0.00172 (n=40); real-SEM OOD 17.7824±0.7588 / 0.25892±0.11163 /
+   0.67988±0.14781 (n=45); V28 vs U-Net: PSNR +0.7042 dB (t=+27.18, 398/400), SSIM +0.01187
+   (t=+16.35, 376/400), LPIPS −0.01108 (t=−3.86, 220/400) — all three wins, a wider margin
+   than the checkpoint it replaced.
+3. Regenerated `results/runtime_report.md`'s current-checkpoint section: median 28.43s
+   (14.1 img/s), n=5, same architecture size as before so expected to be roughly the same
+   modulo this laptop GPU's documented session-to-session variance (B2's own finding).
+4. Regenerated `results/qualitative/` (`scripts/make_qualitative_examples.py`): re-verified
+   the 6 hardcoded example tags still hold under the new checkpoint's ranking (they do —
+   002041.npy still rank 0/400, etc.) before reuse; deleted the 7 orphaned old-PSNR panels.
+   **Fixed a second occurrence of the same recurring bug** (D64 already fixed this once):
+   `CKPT_SHA` was a hardcoded literal that went stale again. Fixed properly this time by
+   computing it from `weights/best.pt`'s actual bytes at script run time instead of a second
+   hardcoded value — this class of bug cannot recur a third time.
+5. Regenerated the 400 final-test outputs (`inference.py --require_weights`), built a fresh
+   `manifest.csv` (per-file sha256/shape/dtype/min/max/finite/matching-input, all 400 clean),
+   zipped (90,929,851 bytes, sha256 `7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef`),
+   published as GitHub Release **`artifacts-v3`** (metadata-only `gh release create` followed
+   by a separate `gh release upload` after the combined create+asset call hit a transient
+   GitHub 503 — asset upload alone succeeded on first retry), verified fetchable from a
+   logged-out `curl` session with the digest reproduced exactly. `artifacts-v1`/`v2` untouched,
+   remain the historical record for their respective checkpoints.
+6. Updated `README.md` (status block, Result summary table, V28 detail table, Method summary,
+   Training section, Repository map, Runtime measurement, Failure cases, External resources
+   framing), `weights/README.md` (new Status section, demoted D61's to Superseded),
+   `results/restored_test_outputs/README.md` (new Status section, demoted D61's to Superseded),
+   `results/qualitative/README.md` (full rewrite with new numbers), `docs/REQUIREMENTS_MATRIX.md`
+   (throughput row, ledger row, OOD row), `docs/STATE.md` (RESUME HERE rewritten).
+7. Added the `results/experiments.csv` row for this run
+   (`20260817T145721Z-finetune_structural_content-s42`), matching C1's precedent for cloud
+   runs (main session appends after pulling results, since the ephemeral job container's own
+   ledger write is lost with the container).
+8. Full fresh `scripts/verify_all.py --strict` dispatched — **result not yet known as this
+   entry is written; check `results/verification_report.json`'s commit/timestamp before
+   trusting any tally quoted elsewhere in this document once this run lands.**
+
+No number in any of the above was hand-typed without a script producing it first — the same
+standing rule this whole project has followed since D1.
