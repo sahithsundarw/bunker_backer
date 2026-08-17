@@ -1,0 +1,216 @@
+{
+  "step_104000_snap": {
+    "val": {
+      "psnr": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": 0.44520292353876056,
+        "sem": 0.01858156820020254,
+        "t": 23.959383769014064,
+        "images_better": 395,
+        "significant": true,
+        "win": true,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": 0.004293899774356304,
+        "sem": 0.0003558621491839756,
+        "t": 12.066188506427583,
+        "images_better": 349,
+        "significant": true,
+        "win": true,
+        "loss": false
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": -0.004652177854441106,
+        "sem": 0.002195035305312738,
+        "t": -2.1194091243914124,
+        "images_better": 190,
+        "significant": true,
+        "win": true,
+        "loss": false
+      }
+    },
+    "proxy_ood": {
+      "psnr": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": -1.1817606658009845,
+        "sem": 0.17975268420093993,
+        "t": -6.574370063258311,
+        "images_better": 6,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": -0.01614776001253835,
+        "sem": 0.005576840815881524,
+        "t": -2.895503125452917,
+        "images_better": 9,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": 0.010773411369882524,
+        "sem": 0.004680661732120337,
+        "t": 2.3016855279140573,
+        "images_better": 7,
+        "significant": true,
+        "win": false,
+        "loss": true
+      }
+    },
+    "real_sem_ood": {
+      "psnr": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.007774588131315991,
+        "sem": 0.008155800346277884,
+        "t": -0.953258760786626,
+        "images_better": 17,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.006502933720689786,
+        "sem": 0.002998890384652524,
+        "t": -2.168446620780129,
+        "images_better": 19,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.004359302918116251,
+        "sem": 0.015964439066378608,
+        "t": -0.27306333157029117,
+        "images_better": 23,
+        "significant": false,
+        "win": false,
+        "loss": false
+      }
+    }
+  },
+  "step_102000_best": {
+    "val": {
+      "psnr": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": 0.4467428562378613,
+        "sem": 0.018536624481099915,
+        "t": 24.100550598808525,
+        "images_better": 395,
+        "significant": true,
+        "win": true,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": 0.004357680610422695,
+        "sem": 0.0003562160546893789,
+        "t": 12.233251570377986,
+        "images_better": 352,
+        "significant": true,
+        "win": true,
+        "loss": false
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 400,
+        "mean_diff": -0.005168921146541834,
+        "sem": 0.002241612355010095,
+        "t": -2.305894297463647,
+        "images_better": 189,
+        "significant": true,
+        "win": true,
+        "loss": false
+      }
+    },
+    "proxy_ood": {
+      "psnr": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": -1.145798919642986,
+        "sem": 0.1703031792579426,
+        "t": -6.72799488908865,
+        "images_better": 6,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": -0.014694660803632395,
+        "sem": 0.00441269035401627,
+        "t": -3.3300910838345708,
+        "images_better": 8,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 40,
+        "mean_diff": 0.008093973377253861,
+        "sem": 0.003396822237721979,
+        "t": 2.382807462624817,
+        "images_better": 9,
+        "significant": true,
+        "win": false,
+        "loss": true
+      }
+    },
+    "real_sem_ood": {
+      "psnr": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.007806779972191751,
+        "sem": 0.008054429181173205,
+        "t": -0.9692530403569355,
+        "images_better": 17,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.006578984523708461,
+        "sem": 0.0029032868734140513,
+        "t": -2.2660470048459453,
+        "images_better": 19,
+        "significant": true,
+        "win": false,
+        "loss": true
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.004455831315782335,
+        "sem": 0.01579850264775836,
+        "t": -0.2820413690543369,
+        "images_better": 22,
+        "significant": false,
+        "win": false,
+        "loss": false
+      }
+    }
+  }
+}

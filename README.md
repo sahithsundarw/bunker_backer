@@ -62,13 +62,15 @@ resolution and a single PixelShuffle ×2 head.
 >   checkpoint, archived, uploaded as GitHub Release `artifacts-v2`, and verified fetchable
 >   from a logged-out session (`curl`, sha256-matched). See that folder's own README for the
 >   full provenance table.
-> - **2026-08-17, post-promotion:** a paired diagnostic (`docs/decisions.md` D63) found the
->   real-SEM OOD regression above is concentrated on that one set, not systematic (the
->   procedural proxy-OOD set shows no regression — it wins on SSIM), plus a small but real
->   train/test scale gap (128px inference vs the 64px training patch size). A fine-tune
->   targeting both (`configs/finetune_ood_wide.yaml`, resumed from this checkpoint, HF Jobs
->   A100, 3h cap) is in flight; it is promoted only on a paired win, same bar as this
->   checkpoint's own promotion — see D63 and the plan for the promotion gate.
+> - **2026-08-17, post-promotion fine-tune — tried, NOT promoted, incumbent unchanged.** A
+>   paired diagnostic (`docs/decisions.md` D63) found the real-SEM OOD regression above is
+>   concentrated on that one set, not systematic, plus a small train/test scale gap. A
+>   fine-tune targeting both (`configs/finetune_ood_wide.yaml`) ran on HF Jobs A100. Result
+>   (`docs/decisions.md` D67): a large in-distribution win (+0.445 dB PSNR, paired,
+>   significant) but it did **not** fix real-SEM OOD (tie/loss) and **broke** proxy-OOD
+>   (significant loss on all 3 metrics, a set that was previously fine). Not promoted — this
+>   is a worse trade profile than the one already accepted below, not a comparable one.
+>   Incumbent checkpoint above is unchanged and remains shipped.
 >
 > Live check status: `results/verification_report.json`. Ledger: `docs/STATE.md`.
 

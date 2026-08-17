@@ -41,25 +41,30 @@ see below). Status:
   (`scripts/ood_paired_probe.py`, `scripts/scale_gap_probe.py`) found the real-SEM OOD
   regression is idiosyncratic (concentrated on real-SEM only; procedural proxy-OOD actually
   wins) and a small but real train/test scale gap (128px inference vs 64px training patch).
-- **Hour 0.5 — a post-promotion fine-tune is DISPATCHED and running.**
-  `configs/finetune_ood_wide.yaml`, resumed from `weights/best.pt`, HF Jobs A100, **3h timeout
-  cap**. Targets both Hour-0 findings. `train.py` gained `optim.finetune_horizon`,
-  `--push_every`, `--val_lpips` for this (all backward-compatible, verified via matching
-  SMOKE_DIGEST before/after). Job dispatched via `scripts/dispatch_finetune_job.py` — check its
-  status before assuming it landed; **promotion, if any, requires a paired win and must land
-  before the plan's T-12h promotion gate (2026-08-18 12:00)** or it does not ship.
+- **Hour 0.5 — the post-promotion fine-tune ran, was evaluated, and was NOT promoted
+  (`docs/decisions.md` D67). Incumbent `weights/best.pt` is UNCHANGED and remains shipped.**
+  `configs/finetune_ood_wide.yaml` resumed from `weights/best.pt` on HF Jobs A100. Real
+  operational finding: the `timeout="3h"` cap did NOT appear to be enforced by the platform —
+  job was found running at 3h18m, manually cancelled via `cancel_job()`. Evaluated its two
+  most-trained checkpoints (paired, val + both OOD sets): large in-distribution win
+  (+0.445 dB PSNR) but did NOT fix real-SEM OOD (tie/loss) and BROKE proxy-OOD (significant
+  loss, all 3 metrics — a set that was previously fine). Worse trade profile than the
+  incumbent's own already-accepted one. Not promoted. `train.py` gained
+  `optim.finetune_horizon`, `--push_every`, `--val_lpips` for this (all backward-compatible,
+  verified via matching SMOKE_DIGEST before/after) — these stay in the codebase regardless,
+  useful capability for any future fine-tune attempt.
 - **P1.1/P1.2/P1.3/P1.4 (FiLM calibration, uncertainty calibration, Pareto plot, FP8 probe) —
   DONE.** See D57/D58/D59, `results/eda/{pareto_frontier.png,film_calibration.json,
   uncertainty_calibration.json,fp8_probe.json}`.
-- **Phases A, B1, B2, C1, C2, C3 all DONE** (README truth pass; bf16/fp32 pricing, decision
-  keep bf16; controlled old-vs-new throughput re-benchmark, corrects a wrong "faster despite
-  bigger" claim; `results/experiments.csv` row for the shipped long run; `results/qualitative/`
-  regenerated; V53 implemented). B3 (free re-score of every pushed checkpoint under blended
-  criteria + weight soups) in progress. B4 folded into the Hour-0 `ood_paired_probe.py` work
-  already done.
-- **Still open:** deck/team info and demo video recording both need the user (plan Phase E);
-  the fine-tune job (`configs/finetune_ood_wide.yaml`) is still running as of this writing —
-  do not promote past it without a paired win, and not past the T-12h gate regardless.
+- **Phases A, B1, B2, B3, B4, C1, C2, C3 all DONE.** README truth pass; bf16/fp32 pricing
+  (keep bf16); controlled old-vs-new throughput re-benchmark (corrects a wrong "faster despite
+  bigger" claim — new checkpoint is actually ~55% slower, as expected for 3.6x params);
+  free re-score of every long-run checkpoint under blended criteria (no swap warranted, D66);
+  `results/experiments.csv` row for the shipped run; `results/qualitative/` regenerated; V53
+  implemented. B4 folded into the Hour-0 `ood_paired_probe.py` work.
+- **Still open:** deck/team info and demo video recording both need the user (plan Phase E).
+  Everything else in the plan's Hours 0-4 is closed out. Remaining runway before the T-12h
+  gate (2026-08-18 12:00) can go to Phase E and final verification/consolidation.
 
 **Everything below this point (including the next "RESUME HERE" heading) is archived history
 from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by

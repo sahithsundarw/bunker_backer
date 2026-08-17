@@ -3335,3 +3335,63 @@ outside the remaining time budget. Not silently dropped: recorded here as a deli
 not an oversight.
 
 `results/eda/step54000_vs_shipped_paired.json` holds the full paired comparison.
+
+---
+
+## D67 — Post-promotion fine-tune result: NOT promoted, mixed trade-off, incumbent ships
+
+**Operational finding first, since it affects cost control:** the HF Jobs `run_job(...,
+timeout="3h")` parameter (D63) did **not** appear to be enforced by the platform. The job
+(`6a82df61e55292eada79b3b6`) was found still `RUNNING` at 3h18m24s elapsed — 18+ minutes past
+its intended cap — when checked. `inspect_job`'s returned `JobInfo` object exposes no
+`timeout` field at all (checked directly via `vars()`), so there is no client-side way to
+confirm what the platform actually recorded. Manually cancelled via `cancel_job()` on
+discovery. Actual cost: ~3.31h x $2.50/hr = ~$8.27 (vs the $7.50 the cap was meant to enforce)
+— a modest overrun, not a budget emergency, but a real gap in this session's cost-control
+mechanism worth flagging for any future HF Jobs dispatch: **do not trust the `timeout` kwarg
+alone; poll and cancel manually if a hard cap actually matters.**
+
+**Evaluation, paired against the incumbent (`weights/best.pt`), on val + both OOD sets**, for
+the two most-fine-tuned checkpoints the (cancelled) run produced (step 102000 and 104000,
+i.e. 26000-28000 fine-tune iters past the resumed 76000 — results near-identical between the
+two, so only the later one is discussed):
+
+| Set | PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| val (n=400, in-dist) | **win** +0.445 dB (t=+23.96) | **win** +0.0043 (t=+12.07) | **win** −0.0047 (t=−2.12) |
+| proxy-OOD (n=40) | **loss** −1.18 dB (t=−6.57) | **loss** −0.0161 (t=−2.90) | **loss** +0.0108 (t=+2.30) |
+| real-SEM OOD (n=45) | tie (t=−0.95) | **loss** −0.0065 (t=−2.17) | tie (t=−0.27) |
+
+**Decision: do NOT promote. Ship the incumbent as-is.** Reasoning:
+
+1. The fine-tune's actual purpose (per D63) was to fix the real-SEM OOD regression. It did
+   **not** — real-SEM OOD is a tie on PSNR/LPIPS and a significant LOSS on SSIM. The stated
+   goal was not achieved.
+2. It broke proxy-OOD, which was NOT previously a problem (D63's own Hour-0 finding: the
+   incumbent already wins proxy-OOD). A large, significant loss on all three metrics there is
+   a NEW regression this fine-tune introduced, not one it fixed.
+3. The large in-distribution win (+0.445 dB) is real and would be tempting on its own, but
+   promoting on that alone would repeat exactly the mistake D31/D66 exist to prevent: a strong
+   result on one axis does not license ignoring losses on the others, especially when KLA's
+   evaluation explicitly includes OOD content (SPEC F7, Evaluation #1) and the axis that
+   regressed (proxy-OOD) was previously a clean win.
+
+This is a materially different trade profile from D61's own accepted trade-off (which
+improved in-distribution AND proxy-OOD while regressing only real-SEM OOD). This fine-tune
+compounds a new regression without fixing the one it targeted — a worse trade, not a
+comparable one, and not promotable under this project's own paired-win discipline.
+
+**Widening the degradation randomisation (`randomise_frac` 1.20→1.50, `gauss_sigma_range`
+upper bound 0.065→0.09) most likely explains the proxy-OOD loss directly**: proxy-OOD is
+procedural/geometric content that was never touched by this change, but training under a
+wider noise distribution can shift what the model treats as "typical," costing it on content
+whose degradation now sits further from the (wider) training distribution's centre than
+before. This is a plausible, disclosed hypothesis, not confirmed further — not worth
+additional cloud spend to isolate given the remaining time budget.
+
+**Consistent with the plan's own stated fallback** ("if nothing wins, ship the incumbent,
+record it as a real result") — this is exactly that case, reported honestly rather than
+forced. `results/eda/finetune_candidates_vs_shipped_paired.json` holds the full comparison.
+The fine-tune's checkpoints remain on the Hub (`Team-Ceciroleo67/kla-ps01-checkpoints`,
+`20260817T101639Z-finetune_ood_wide-s42/`) if a future session wants to investigate the
+proxy-OOD regression further; nothing here is deleted.
