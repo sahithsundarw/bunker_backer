@@ -40,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 VAL_PRED_DIR = REPO_ROOT / "results/baselines/final"
 CKPT_PATH = REPO_ROOT / "weights/best.pt"
-CKPT_SHA = "37e8571047218a0344c43bcd2246dc559184a75fe301995fea24463dfd341fa7"
+CKPT_SHA = "8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c"
 
 VAL_EXAMPLES = [
     ("001323.npy", "best"),
@@ -184,18 +184,33 @@ def main() -> int:
         )
 
     import json
+    # Full-split headline numbers are read from results/metrics_summary.md's "Final model"
+    # row rather than hardcoded here, so this manifest can never silently go stale again the
+    # way the previous 28.0394/0.74804/0.29571 constants did after a checkpoint promotion.
+    metrics_md = (REPO_ROOT / "results" / "metrics_summary.md").read_text(encoding="utf-8")
+    import re
+    m = re.search(
+        r"\|\s*Final model\s*\|\s*([\d.]+)\s*\+/-\s*[\d.]+\s*\|\s*([\d.]+)\s*\+/-\s*[\d.]+\s*\|"
+        r"\s*([\d.]+)\s*\+/-\s*[\d.]+\s*\|", metrics_md,
+    )
+    if not m:
+        raise SystemExit("could not parse the 'Final model' row out of "
+                          "results/metrics_summary.md -- refusing to write a manifest with a "
+                          "guessed or stale headline number")
+    headline_psnr, headline_ssim, headline_lpips = (float(g) for g in m.groups())
     manifest = {
         "checkpoint_sha256": CKPT_SHA,
-        "checkpoint_val_psnr_db": 28.0394,
-        "checkpoint_val_ssim": 0.74804,
-        "checkpoint_val_lpips": 0.29571,
+        "checkpoint_val_psnr_db": headline_psnr,
+        "checkpoint_val_ssim": headline_ssim,
+        "checkpoint_val_lpips": headline_lpips,
         "validation_examples": val_records,
         "d5_documented_failure_case": d5_record,
         "final_test_examples": test_records,
         "note": ("final_test_examples have no ground truth; no metric is computed for them. "
                  "d5_documented_failure_case is NOT part of the 400-pair scored validation "
                  "split; its PSNR/SSIM is a single-file illustrative measurement only, not "
-                 "part of the reported 28.0394 dB mean."),
+                 f"part of the reported {headline_psnr:.4f} dB mean (parsed live from "
+                 "results/metrics_summary.md's 'Final model' row)."),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     for r in val_records:
