@@ -53,6 +53,7 @@ def _build_command(git_ref: str) -> list[str]:
     script = f"""
 set -euo pipefail
 echo "[dispatch] installing extra deps not in the base image..."
+apt-get update -qq && apt-get install -y -qq git > /dev/null
 pip install -q --no-input numpy scikit-image lpips pyyaml huggingface_hub pytorch-msssim tqdm
 
 echo "[dispatch] cloning {GITHUB_REPO} at {git_ref}..."
