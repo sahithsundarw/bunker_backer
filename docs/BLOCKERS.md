@@ -150,6 +150,16 @@ that environment. Full evidence and commands logged in `docs/STATE.md` under "V0
 fresh-clone dry run". The silent-CPU-downgrade failure mode B8 exists to catch has not
 reappeared since the index pin was added.
 
+**Re-confirmed 2026-08-18, post-Phase-3-checkpoint, on this actual dev machine's own GPU**
+(a stronger check than the 2026-08-15 one above, which used a GPU-less container): Docker
+Desktop on this Windows box, `docker run --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04`,
+`nvidia-smi` inside the container confirmed the real RTX 4060 Laptop GPU passed through,
+Python 3.12.13 (matching `requirements.txt`'s pin), fresh clone of commit `923e261` + fresh
+venv + bare `pip install -r requirements.txt` again installed exactly `torch==2.11.0+cu128` /
+`torchvision==0.26.0+cu128`, and `verify_all.py --strict --fresh-clone --only V04,V46` both
+PASS. Full evidence in `docs/STATE.md` "V04/V46 fresh-clone dry run — RE-CONFIRMED
+post-Phase-3-checkpoint, on-machine GPU". Still no CPU-downgrade reappearance.
+
 ## B9 — RESOLVED 2026-08-15 by standing authorisation: GitHub Release + sha256
 
 **Resolution.** The human's standing authorisation pre-approves GitHub Releases. The 400

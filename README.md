@@ -272,10 +272,16 @@ On the reference machine this prints `2.11.0+cu128 12.8 True`. On a machine with
 GPU the same wheels install and the last field is `False`; `inference.py` then runs on CPU
 without any change.
 
-Fresh-clone compatibility was also demonstrated in a Linux `python:3.12-slim` container with
-the pinned CUDA 12.8 PyTorch packages: the clean-install and fresh-clone verifier checks V04
-and V46 passed. That is a target-platform compatibility check, **not** a Linux/CUDA or H100
-runtime measurement.
+Fresh-clone compatibility was re-confirmed 2026-08-18, against the current checkpoint
+(commit `923e261`), in a real Linux/CUDA container (`nvidia/cuda:12.4.1-base-ubuntu22.04`,
+Python 3.12.13 matching this repo's pinned build environment, Docker `--gpus all` passthrough
+of this dev machine's own RTX 4060 Laptop GPU, `nvidia-smi` confirmed the GPU visible inside
+the container): a fresh `git clone`, fresh venv, `pip install -r requirements.txt` (installing
+the real `torch==2.11.0+cu128` / `torchvision==0.26.0+cu128` CUDA wheels, no CPU fallback), and
+`inference.py` ran end-to-end against the fixture corpus — verifier checks V04 and V46 both
+PASS (`results/verification_report.json`). This supersedes an earlier, pre-Phase-3-checkpoint
+confirmation that used a plain `python:3.12-slim` container without GPU passthrough. This is
+still a target-platform compatibility check, **not** an H100 runtime measurement.
 
 > **Why `requirements.txt` starts with `--extra-index-url`.** `torch==2.11.0+cu128` is
 > published only on `download.pytorch.org`, never on PyPI. Installing `lpips` without that
@@ -658,9 +664,10 @@ while the project is incomplete, and no command in this README exits non-zero.
 
 **The suite is not green, and this README does not claim it is.** Full fresh run after the
 Phase 3 checkpoint promotion, 2026-08-18: **64 PASS / 5 FAIL** (V04, V22, V25, V46, V53).
-V04 and V46 require `--fresh-clone` and were independently verified passing on a real
-Linux/CUDA container (`docs/STATE.md`) but are not run in that mode by default on this dev
-machine. **V22 is a disclosed, live fail, not a bug being chased** — see the status block at
+V04 and V46 require `--fresh-clone` (not passed on this default `--strict` invocation, hence
+the FAIL here) but were independently re-verified **passing**, post-checkpoint, in a real
+Linux/CUDA container with this dev machine's own GPU passed through via Docker (`docs/STATE.md`
+"V04/V46 fresh-clone dry run"). **V22 is a disclosed, live fail, not a bug being chased** — see the status block at
 the top of this file and `docs/BLOCKERS.md` B12 for the bf16/fp32 divergence investigation and
 why the human accepted it as a trade-off rather than authorising a fix (the exact divergence
 magnitude shifted slightly with this checkpoint's weights — still fails the same cap either

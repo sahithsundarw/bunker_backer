@@ -292,11 +292,44 @@ calls `build_fixtures()` at the top level, not just inside the nested clone's ve
   dependency or pin defect — recorded here rather than silently dismissed.
 
 **Not committed as a code or verifier change** — the local, gitignored
-`results/verification_report.json` still honestly reports V04/V46 FAIL because that is what
-actually ran on this machine. This section is the durable record that the underlying
-requirement (clean-environment dry run, on the Linux/CUDA platform KLA's H100 environment
-actually matches) has been independently exercised and passes, even though this dev machine
-cannot demonstrate that itself. `docs/BLOCKERS.md` B8 updated to match.
+`results/verification_report.json` still honestly reports V04/V46 FAIL on a plain `--strict`
+run (no `--fresh-clone` flag) because that is what actually ran on this machine by default.
+This section is the durable record that the underlying requirement (clean-environment dry run,
+on the Linux/CUDA platform KLA's H100 environment actually matches) has been independently
+exercised and passes. `docs/BLOCKERS.md` B8 updated to match.
+
+## V04/V46 fresh-clone dry run — RE-CONFIRMED post-Phase-3-checkpoint, on-machine GPU (2026-08-18)
+
+The 2026-08-15 confirmation above pre-dates the Phase 3 checkpoint promotion (D71/D72,
+`weights/best.pt` swapped, commit `923e261`) and used a plain `python:3.12-slim` container with
+no GPU passthrough — a weaker check than what's actually claimed (this dev machine has an
+NVIDIA GPU; a CPU-only container can't catch the exact B8 CPU-fallback failure mode). Re-ran,
+stronger this time:
+
+- Container: `nvidia/cuda:12.4.1-base-ubuntu22.04`, launched via `docker run --gpus all`,
+  Docker Desktop (WSL2 backend) on this same Windows dev machine.
+- `nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv` inside the container
+  confirmed the real GPU passed through: `NVIDIA GeForce RTX 4060 Laptop GPU, 610.47, 8188 MiB`
+  — the same hardware `README.md`'s runtime numbers are measured on, not a substitute.
+- Installed Python 3.12.13 (via deadsnakes PPA — Ubuntu 22.04 ships 3.10 by default, and
+  `requirements.txt`'s exact pins are built against 3.12; a 3.10 outer interpreter fails
+  resolving `contourpy==1.3.3` and others, a real reproducibility gap in the underlying image,
+  not this repo).
+- `python3.12 scripts/verify_all.py --strict --fresh-clone --only V04,V46` against commit
+  `923e261` (current shipped checkpoint) → **V04 PASS, V46 PASS**, "fresh clone + fresh venv
+  end-to-end" both. Nested nested-venv installed real `torch==2.11.0+cu128` /
+  `torchvision==0.26.0+cu128`, then `inference.py` ran end-to-end against
+  `tests/fixtures/single` inside that fresh venv, on real CUDA hardware.
+- Notable non-findings encountered getting here, recorded so they aren't re-debugged blind next
+  time: (1) mounting the repo `:ro` fails — `build_fixtures()` writes `tests/fixtures/` into
+  the repo tree itself, needs read-write; (2) `apt-get install ... tzdata` (a `python3.12-dev`
+  dependency) hangs forever on an interactive debconf prompt unless
+  `DEBIAN_FRONTEND=noninteractive` is set — a real hang, confirmed via `docker top` showing
+  `debconf/frontend` blocked on stdin, not a slow install; (3) the base CUDA image ships
+  without `curl`, needed to fetch `get-pip.py` for the 3.12 interpreter.
+
+Local `results/verification_report.json` still honestly shows V04/V46 FAIL on the default
+(no `--fresh-clone`) invocation — same disclosure discipline as the 2026-08-15 entry above.
 
 ---
 
