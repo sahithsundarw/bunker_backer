@@ -134,6 +134,16 @@ def build_argparser() -> argparse.ArgumentParser:
                          "huggingface_hub installed and an HF_TOKEN in the environment (never "
                          "read from a file). Absent by default: zero Hub dependency, zero "
                          "behaviour change, when this flag is not passed.")
+    ap.add_argument("--val_lpips", action="store_true",
+                    help="also compute LPIPS during in-run validation, not just at the final "
+                         "full-split report. Off by default: LPIPS is the slowest of the three "
+                         "pinned metrics and most configs don't need it every val_every.")
+    ap.add_argument("--push_every", type=int, default=0,
+                    help="also push the CURRENT (not just PSNR-best) model+ema to --hub_repo "
+                         "every N iters, unconditionally. Job storage is ephemeral: a run that "
+                         "is killed (e.g. a wall-clock timeout) between PSNR improvements would "
+                         "otherwise return nothing. 0 (default): unchanged legacy behaviour, "
+                         "pushes only on a new best. No-op without --hub_repo.")
     ap.add_argument("--iters", type=int, default=None, help="override optim.total_iters")
     ap.add_argument("--val_every", type=int, default=None, help="override train.val_every")
     ap.add_argument("--val_limit", type=int, default=100,
@@ -556,6 +566,26 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
         start_iter = int(ck.get("iter", 0))
         _log(f"resumed {args.resume} at iter {start_iter}")
 
+    # Fine-tuning support: ``cosine_warmup_lr`` is written in terms of the ABSOLUTE iter
+    # counter, which is exactly right for a from-scratch run (start_iter=0) but wrong for a
+    # resumed one -- reusing ``total_iters`` from the ORIGINAL config would put a resumed run
+    # already ~60% of the way down someone else's cosine curve, at whatever LR that curve
+    # happens to be at, not a deliberately chosen fine-tune schedule. ``optim.finetune_horizon``
+    # (only consulted when --resume is set) instead defines a NEW cosine curve of that many
+    # iters, starting fresh from ``base_lr`` at ``start_iter`` and decaying to ``min_lr`` by
+    # ``start_iter + finetune_horizon``. Absent or 0: unchanged legacy behaviour (this is what
+    # every existing shipped config still gets).
+    finetune_horizon = int(ocfg.get("finetune_horizon", 0))
+    # --iters is an explicit CLI override of total_iters (see its help text) and takes
+    # precedence over the config's finetune_horizon if both are somehow given.
+    use_finetune_schedule = bool(args.resume and finetune_horizon > 0 and not smoke
+                                 and args.iters is None)
+    if use_finetune_schedule:
+        total_iters = start_iter + finetune_horizon
+        _log(f"finetune_horizon={finetune_horizon}: LR schedule now spans "
+             f"[{start_iter}, {total_iters}) as its OWN cosine curve, not the resumed "
+             f"checkpoint's original absolute schedule")
+
     crit = build_loss(_section(cfg, "loss"))
     opt = torch.optim.AdamW(model.parameters(), lr=base_lr,
                             betas=tuple(ocfg.get("betas", (0.9, 0.9))),
@@ -598,7 +628,11 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                 lr_b = lr_b.contiguous(memory_format=torch.channels_last)
                 gt_b = gt_b.contiguous(memory_format=torch.channels_last)
 
-            cur_lr = cosine_warmup_lr(it, base_lr, min_lr, warmup, total_iters)
+            if use_finetune_schedule:
+                cur_lr = cosine_warmup_lr(it - start_iter, base_lr, min_lr, warmup,
+                                          finetune_horizon)
+            else:
+                cur_lr = cosine_warmup_lr(it, base_lr, min_lr, warmup, total_iters)
             for g in opt.param_groups:
                 g["lr"] = cur_lr
 
@@ -642,22 +676,58 @@ def run_training(cfg: dict[str, Any], args: argparse.Namespace, seed: int) -> in
                      f"lr {cur_lr:.3e} {ips:.2f} it/s elapsed {format_hms(el)} "
                      f"eta {format_hms(eta)}")
 
-            if val_every and (it % val_every == 0 or it == total_iters):
+            due_for_val = bool(val_every and (it % val_every == 0 or it == total_iters))
+            due_for_snapshot = bool(args.push_every and args.hub_repo
+                                    and it % args.push_every == 0)
+            v: dict[str, Any] | None = None
+            if due_for_val or due_for_snapshot:
+                # ONE validation pass serves both purposes when they land on the same iter
+                # (the common case: this run's own dispatch sets val_every == push_every) --
+                # LPIPS is the slowest of the three pinned metrics, so paying for it twice at
+                # the same iter would be pure waste, not extra safety.
                 ema.copy_to(shadow)
                 v = validate(shadow, val_ds, device, amp=amp, channels_last=channels_last,
-                             limit=args.val_limit)
-                _log(f"  [val ema] it {it} psnr {v['psnr']:.4f} ssim {v['ssim']:.5f} "
-                     f"(n={v['n']}, held-out)")
+                             limit=args.val_limit, with_lpips=bool(args.val_lpips))
+
+            if due_for_val:
+                assert v is not None
+                lpips_str = f" lpips {v['lpips']:.5f}" if "lpips" in v else ""
+                _log(f"  [val ema] it {it} psnr {v['psnr']:.4f} ssim {v['ssim']:.5f}"
+                     f"{lpips_str} (n={v['n']}, held-out)")
                 if v["psnr"] > best["psnr"]:
                     best = {"psnr": v["psnr"], "ssim": v["ssim"], "iter": it}
+                    ckpt_metrics = {"val_psnr": v["psnr"], "val_ssim": v["ssim"],
+                                    "val_n": v["n"], "selection": "ema/psnr",
+                                    "split": "configs/split_val.txt",
+                                    "structural_kind": structural_kind}
+                    if "lpips" in v:
+                        ckpt_metrics["val_lpips"] = v["lpips"]
                     save_checkpoint(out_path, model=model, ema=ema, config=cfg, iteration=it,
-                                    metrics={"val_psnr": v["psnr"], "val_ssim": v["ssim"],
-                                             "val_n": v["n"], "selection": "ema/psnr",
-                                             "split": "configs/split_val.txt",
-                                             "structural_kind": structural_kind},
-                                    git=sha)
+                                    metrics=ckpt_metrics, git=sha)
                     _log(f"  [ckpt] new best {v['psnr']:.4f} dB -> {out_path}")
                     _maybe_push_checkpoint_to_hub(args, out_path, run_id, it)
+
+            if due_for_snapshot:
+                # Unconditional periodic snapshot, independent of PSNR-best tracking above.
+                # Job storage is ephemeral (docs/PLAN_CLOUD.md): without this, a run killed by
+                # a wall-clock timeout between PSNR improvements returns NOTHING. Writes to a
+                # SEPARATE path so it never clobbers ``out_path``'s best-tracking semantics,
+                # and is scored later like any other candidate (never auto-promoted).
+                assert v is not None
+                snap_path = out_path.with_name(
+                    f"{out_path.stem}_snap_it{it}{out_path.suffix}")
+                snap_metrics = {"val_psnr": v["psnr"], "val_ssim": v["ssim"],
+                                "val_n": v["n"], "selection": "periodic_snapshot",
+                                "split": "configs/split_val.txt",
+                                "structural_kind": structural_kind}
+                if "lpips" in v:
+                    snap_metrics["val_lpips"] = v["lpips"]
+                save_checkpoint(snap_path, model=model, ema=ema, config=cfg, iteration=it,
+                                metrics=snap_metrics, git=sha)
+                _maybe_push_checkpoint_to_hub(args, snap_path, run_id, it)
+                _log(f"  [snapshot] it {it} psnr {v['psnr']:.4f} ssim {v['ssim']:.5f} "
+                     f"-> {snap_path} (pushed, not promoted)")
+                snap_path.unlink(missing_ok=True)  # local disk clean; Hub copy is authoritative
         epoch += 1
 
     wall = time.perf_counter() - t0

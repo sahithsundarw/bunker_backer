@@ -1,0 +1,192 @@
+{
+  "generated_at": "2026-08-17T09:43:08Z",
+  "device": "cuda",
+  "old_checkpoint": {
+    "source": "git show 19e4e76:weights/best.pt",
+    "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\_scratch_old_best.pt",
+    "meta": {
+      "sha256_len": 3288805,
+      "val_metrics": {
+        "val_psnr": 28.785068914429882,
+        "val_psnr_std": 4.53241375648352,
+        "val_ssim": 0.7827850579636485,
+        "val_ssim_std": 0.14168765176910125,
+        "val_lpips": 0.2523282776819542,
+        "val_lpips_std": 0.13150578916016104,
+        "val_n": 400,
+        "selection": "ema/psnr",
+        "selection_n": 100,
+        "split": "configs/split_val.txt",
+        "structural_kind": "ssim",
+        "best_iter": 20000,
+        "total_iters_run": 20000,
+        "wall_clock_s": 4303.46
+      },
+      "config": {
+        "name": "NAFSR",
+        "width": 48,
+        "num_blocks": 16,
+        "scale": 2,
+        "in_ch": 1,
+        "out_ch": 1,
+        "dw_expand": 2,
+        "ffn_expand": 2,
+        "layerscale_init": 1.0
+      }
+    }
+  },
+  "new_checkpoint": {
+    "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+    "meta": {
+      "sha256_len": 11565729,
+      "val_metrics": {
+        "val_psnr": 29.252896980109437,
+        "val_psnr_std": 4.618646914705462,
+        "val_ssim": 0.7919793723622707,
+        "val_ssim_std": 0.14323743210848774,
+        "val_lpips": 0.25470134522765875,
+        "val_lpips_std": 0.1451192564521922,
+        "val_n": 400,
+        "selection": "ema/psnr",
+        "selection_n": 100,
+        "split": "configs/split_val.txt",
+        "structural_kind": "ssim",
+        "best_iter": 76000,
+        "total_iters_run": 129700,
+        "wall_clock_s": 22895.55
+      },
+      "config": {
+        "name": "NAFSR",
+        "width": 64,
+        "num_blocks": 32,
+        "scale": 2,
+        "in_ch": 1,
+        "out_ch": 1,
+        "dw_expand": 2,
+        "ffn_expand": 2,
+        "layerscale_init": 1.0,
+        "film_dim": 16,
+        "uncertainty": true
+      }
+    }
+  },
+  "sets": {
+    "val_in_distribution": {
+      "n": 400,
+      "paired": {
+        "psnr": {
+          "test": "paired",
+          "n": 400,
+          "mean_diff": 0.46830106111589287,
+          "sem": 0.01811750677872936,
+          "t": 25.84798597485257,
+          "images_better": 391,
+          "significant": true,
+          "win": true,
+          "loss": false
+        },
+        "ssim": {
+          "test": "paired",
+          "n": 400,
+          "mean_diff": 0.009247902635992875,
+          "sem": 0.0006132549985863652,
+          "t": 15.080028140513372,
+          "images_better": 378,
+          "significant": true,
+          "win": true,
+          "loss": false
+        },
+        "lpips": {
+          "test": "paired",
+          "n": 400,
+          "mean_diff": 0.0030037190625444056,
+          "sem": 0.0026257024005257737,
+          "t": 1.143967824359279,
+          "images_better": 230,
+          "significant": false,
+          "win": false,
+          "loss": false
+        }
+      }
+    },
+    "proxy_ood": {
+      "n": 40,
+      "paired": {
+        "psnr": {
+          "test": "paired",
+          "n": 40,
+          "mean_diff": -0.06634205965786463,
+          "sem": 0.13216898833151192,
+          "t": -0.5019487588984387,
+          "images_better": 17,
+          "significant": false,
+          "win": false,
+          "loss": false
+        },
+        "ssim": {
+          "test": "paired",
+          "n": 40,
+          "mean_diff": 0.004773424068997448,
+          "sem": 0.001030049357145787,
+          "t": 4.634170232603568,
+          "images_better": 32,
+          "significant": true,
+          "win": true,
+          "loss": false
+        },
+        "lpips": {
+          "test": "paired",
+          "n": 40,
+          "mean_diff": -0.0024843997787684204,
+          "sem": 0.0026464514827729234,
+          "t": -0.9387664179527271,
+          "images_better": 23,
+          "significant": false,
+          "win": false,
+          "loss": false
+        }
+      }
+    },
+    "real_sem_ood": {
+      "n": 45,
+      "paired": {
+        "psnr": {
+          "test": "paired",
+          "n": 45,
+          "mean_diff": -0.10000474973285924,
+          "sem": 0.01610189209826642,
+          "t": -6.210745241773547,
+          "images_better": 8,
+          "significant": true,
+          "win": false,
+          "loss": true
+        },
+        "ssim": {
+          "test": "paired",
+          "n": 45,
+          "mean_diff": -0.06832253902925772,
+          "sem": 0.006689023360452216,
+          "t": -10.214127735478371,
+          "images_better": 0,
+          "significant": true,
+          "win": false,
+          "loss": true
+        },
+        "lpips": {
+          "test": "paired",
+          "n": 45,
+          "mean_diff": 0.14267508453792996,
+          "sem": 0.024359936242319358,
+          "t": 5.8569564024583665,
+          "images_better": 7,
+          "significant": true,
+          "win": false,
+          "loss": true
+        }
+      }
+    }
+  },
+  "verdict": "idiosyncratic",
+  "verdict_rule": "systematic = paired SSIM-or-LPIPS loss (new vs old, |t|>=1.96) on BOTH OOD sets; idiosyncratic = on exactly one; no_regression = on neither",
+  "wall_clock_s": 99.97
+}

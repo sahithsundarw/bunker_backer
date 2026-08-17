@@ -1,0 +1,105 @@
+# ROUND 2, POST-PROMOTION FINE-TUNE. Fine-tunes the shipped checkpoint (weights/best.pt,
+# 29.2548 dB, docs/decisions.md D61) rather than training from scratch -- see
+# docs/decisions.md D63 (Hour 0 diagnosis) for why this run exists and what it targets.
+#
+# Hour 0 diagnosis, paired tests, both run before this config was written
+# (results/eda/ood_paired_probe.json, results/eda/scale_gap_probe.json):
+#   - real-SEM OOD regression vs the SUPERSEDED checkpoint: SSIM -0.0683 (t=-10.21, n=45,
+#     significant loss), LPIPS +0.1427 (t=+5.86, significant loss). Procedural proxy-OOD (40
+#     img) shows NO regression (SSIM actually +0.0048, t=+4.63, a WIN) -- so this is NOT a
+#     systematic OOD collapse, it is concentrated on the one set that is real semiconductor/
+#     material-adjacent imagery, plausibly the closest thing in this repo to KLA's hidden test
+#     distribution.
+#   - train/test scale gap (full 128px inference vs a 64px training-patch-size crop, same GT
+#     pixels): SSIM -0.0019 (t=-3.57, significant but tiny), LPIPS +0.0081 (t=+2.91,
+#     significant but tiny), PSNR flat. Real, but ~30x smaller in magnitude than the OOD
+#     effect above -- a minor lever, not the main one.
+#
+# This run therefore targets BOTH (plan's "both" branch: the objectives are compatible),
+# weighted toward the OOD axis since that's where the actual signal is:
+#   (a) lr_patch 64 -> 128 (train at the ACTUAL inference resolution, closing the measured
+#       scale gap essentially for free)
+#   (b) wider degradation-parameter randomisation (below), on the theory that the real-SEM
+#       regression is partly a noise-level/kernel generalisation gap rather than a pure
+#       content-domain gap
+#
+# Honest caveat, stated before the run rather than after: (b) is a plausible, cheap thing to
+# try given the remaining budget, NOT a guaranteed fix. If the real-SEM regression is actually
+# content-domain-driven (real material/defect textures vs this project's natural-photograph
+# training set, docs/SPEC_ADDENDUM.md headline finding), wider NOISE augmentation will not
+# touch it, because the gap is in image content statistics, not degradation parameters. This
+# run's actual effect is MEASURED after the fact by re-running scripts/ood_paired_probe.py
+# against every checkpoint it produces (Hour ~4 in the plan) -- promotion happens only on a
+# paired win, never on the strength of this theory alone.
+#
+# What this run deliberately does NOT do: it does NOT add real_sem_ood or proxy_ood imagery
+# to training. Both are committed, standing OOD EVALUATION sets (docs/decisions.md D53: "NOT
+# trained or fitted on"). Training on either would invalidate every future OOD comparison in
+# this project, not just this run's own. The only lever pulled here is wider randomisation of
+# the EXISTING degradation simulator's parameters, per F15/SPEC 6 (synthetic pairs from GT are
+# explicitly permitted) -- content stays exactly the released train/GT set.
+model:
+  name: NAFSR
+  width: 64
+  num_blocks: 32
+  scale: 2                # F2: exactly x2
+  in_ch: 1
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+  film_dim: 16             # MUST match weights/best.pt exactly -- --resume load_state_dict is strict=True
+  uncertainty: true        # MUST match weights/best.pt exactly
+data:
+  lr_patch: 128             # was 64 -- (a) above, trains at the real inference resolution
+  batch_size: 16            # halved from 32: 128px patches are 4x the pixel count of 64px
+                            # at the same batch, so this keeps per-step compute in a similar
+                            # ballpark rather than quadrupling it outright; A100-large has
+                            # headroom (80 GB) so this is a throughput/stability choice, not a
+                            # memory-forced one
+  synth_ratio: 0.5
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 1.50        # widened from 1.20 (D43) -- (b) above. NOT re-derived from a
+                                 # fresh dataset fit; a deliberate, bounded, DISCLOSED
+                                 # extrapolation, whose effect is measured, not assumed
+    gauss_sigma_range: [0.0, 0.09]   # widened from [0.0, 0.065], same rationale
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 2.0e-4               # ~1/5 of the original 1.0e-3 peak -- standard fine-tune practice:
+                           # a full from-scratch peak LR risks damaging a checkpoint that is
+                           # already at 29.2548 dB before the wider augmentation has a chance
+                           # to help
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 300        # short warmup -- resuming from a trained checkpoint, not from init
+  finetune_horizon: 40000  # consumed by train.py's --resume fine-tune path (this session's
+                           # addition): defines a FRESH cosine curve of this many iters
+                           # starting at the resumed checkpoint's iter (76000), decaying to
+                           # min_lr by iter 116000. Deliberately set larger than what a 3h
+                           # A100 wall-clock cap can reach at this patch size (est. ~2-3
+                           # it/s x 10800s =~ 22000-32000 iters), so the run is stopped by the
+                           # JOB'S OWN --timeout (the actual hard cap, docs/PLAN_CLOUD.md
+                           # precedent), not by exhausting a schedule -- "finishing beats
+                           # optimality" per the plan. total_iters is therefore NOT set here;
+                           # it is derived at runtime as start_iter + finetune_horizon.
+loss:
+  weights:
+    uncertainty: 0.01
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 2000          # paired with --push_every 2000 on the dispatch command line
+  save_best_on: psnr       # unchanged, hardcoded selection metric in train.py -- see the
+                           # model-selection disclosure this run's checkpoints feed into
+                           # (Hour 1-8 Phase A item 7 / B3's blended-criterion re-score)

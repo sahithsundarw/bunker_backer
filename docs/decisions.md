@@ -3085,3 +3085,94 @@ fix exists).
 
 **Full suite after this fix:** 65 PASS / 3 FAIL (V04, V22, V46) — V04/V46 pre-existing and
 expected (`--fresh-clone`-only checks), V22 the accepted, disclosed trade-off above.
+
+---
+
+## D63 — Hour 0 diagnosis + post-promotion fine-tune launched (deadline extended to Aug 18 night)
+
+Phase 1 deadline extended to 2026-08-18 night (~33h from this entry). A fresh three-way audit
+of the whole repo against the official KLA requirements found the CODE genuinely sound (65
+PASS / 3 FAIL, matching D62) but `README.md` badly stale relative to the D61 promotion —
+wrong sha256, wrong training narrative (still described Apple Silicon MPS closed-form fitting,
+not the actual A100 gradient run), wrong throughput numbers, unpublished-outputs claim
+contradicted by a live, verified `artifacts-v2` release. Full remediation plan recorded at
+`C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md`; README truth-pass tracked
+there as Phase A, not repeated here.
+
+**Reframe that drove this decision:** HF Jobs training is asynchronous and billed, not
+wall-clock-blocking. Launching a fine-tune early costs money, not the local session's time, so
+it was dispatched before any of the README/documentation work below, rather than after.
+
+**Hour 0 — two paired diagnostic probes, before choosing the fine-tune's objective** (never
+assume; measure). Both scripts committed alongside this entry, both pure evaluation, F17
+untouched:
+
+1. `scripts/ood_paired_probe.py` — recovers the SUPERSEDED checkpoint byte-identical from git
+   history (commit `19e4e76`, never retrained) and runs a paired comparison (new vs old,
+   `src.metrics.paired_compare`, same D49/D61 harness) on the 400-pair in-distribution val
+   split (control), the 40-image procedural proxy-OOD set, and the 45-image real-SEM OOD set.
+   Result (`results/eda/ood_paired_probe.json`): the val-split control exactly reproduces D61's
+   win (PSNR +0.4683 dB, t=+25.85). Proxy-OOD shows NO regression — SSIM actually **wins**
+   (+0.00477, t=+4.63). Real-SEM OOD shows a large, significant **loss** on both structural
+   metrics (SSIM −0.0683, t=−10.21; LPIPS +0.1427, t=+5.86). Verdict: **idiosyncratic, not
+   systematic** — the D61 regression is concentrated entirely on the one set that is real
+   semiconductor/material-adjacent imagery, plausibly the closest thing in this project to
+   KLA's actual hidden test distribution, not a general OOD collapse.
+2. `scripts/scale_gap_probe.py` — for each val image, scores the SAME centre GT pixels two
+   ways: (a) full 128px-image inference, cropped after, vs (b) a 64px LR crop (the exact
+   training patch size) inferred directly. Result (`results/eda/scale_gap_probe.json`): a
+   real, statistically significant but small gap — SSIM −0.0019 (t=−3.57), LPIPS +0.0081
+   (t=+2.91), PSNR flat — roughly 30x smaller in magnitude than the OOD effect above.
+
+**Decision, reported to the human before dispatch and not contradicted:** target both, per the
+plan's "both" branch, weighted toward the OOD axis since that is where the real signal is.
+`configs/finetune_ood_wide.yaml` fine-tunes `weights/best.pt` (never from scratch) with (a)
+`lr_patch: 64 -> 128` (train at the actual inference resolution, closing the scale gap for
+free) and (b) widened degradation-parameter randomisation (`randomise_frac` 1.20 -> 1.50,
+`gauss_sigma_range` upper bound 0.065 -> 0.09) — a deliberate, bounded, DISCLOSED
+extrapolation, not re-derived from a fresh fit, whose actual effect will be MEASURED by
+re-running `ood_paired_probe.py` against every checkpoint the run produces, not assumed.
+**Explicitly does not** add `real_sem_ood`/`proxy_ood` imagery to training — both are standing
+OOD evaluation sets (D53: "NOT trained or fitted on"); doing so would invalidate every future
+OOD comparison in this project, not just this run's.
+
+**`train.py` changes required to run this safely, all backward-compatible (verified: two
+independent `--smoke --smoke_iters 6 --seed 42` runs before and after every edit reproduce the
+identical `SMOKE_DIGEST fd5e52061802c1d2c4d8034d1e224ef3a40586cc40ba48ffb75e3af396bc8da9`)**:
+
+- `optim.finetune_horizon` (config key, only consulted when `--resume` is set and `--iters` is
+  not passed): `cosine_warmup_lr` is written in absolute-iter terms, which is correct for a
+  from-scratch run but wrong for a resumed one — reusing the original config's `total_iters`
+  would resume already ~60% down someone else's cosine curve at whatever LR that curve happens
+  to be at. `finetune_horizon` instead defines a fresh cosine curve of that many iters, starting
+  near `base_lr` at the resumed iter. Verified empirically, not just by inspection: a 20-iter
+  local dry-run using the OLD path (`--iters` override, legacy absolute schedule) ran at
+  `lr=1.000e-06` throughout (correctly near the original schedule's tail); the same 20 iters
+  using the NEW `finetune_horizon` path ran at a materially higher LR and produced a real,
+  visible loss/PSNR change in that short window — the schedule genuinely switched, not just a
+  config no-op.
+- `--push_every` + `--val_lpips`: an unconditional periodic checkpoint push (job storage is
+  ephemeral — a run killed by the wall-clock timeout between PSNR improvements would otherwise
+  return nothing) and in-loop LPIPS logging (only the final full-split report computed it
+  before). The two validation calls are deliberately merged into one when `val_every` and
+  `push_every` land on the same iter (this run sets them equal, 2000) — paying for LPIPS twice
+  at the same iter would be pure waste.
+- Selection criterion is UNCHANGED (`save_best_on: psnr` stays hardcoded in `train.py`, as it
+  already was) — this run's checkpoints, plus every earlier sweep/long-run checkpoint on
+  `Team-Ceciroleo67/kla-ps01-checkpoints`, feed the blended-criterion re-score in the plan's B3,
+  not decided here.
+
+**Dispatch, committed as `scripts/dispatch_finetune_job.py`** (the exact command is now on
+record — no earlier job's dispatch command ever was, a real gap this closes): HF Jobs
+`a100-large`, image `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`, **`timeout="3h"`** as the
+real, authoritative cap ("finishing beats optimality" — `finetune_horizon: 40000` in the config
+is deliberately larger than what 3h can reach, so the job is stopped by the timeout, not by
+exhausting a schedule), namespace `Team-Ceciroleo67`, dataset pulled at job start from the
+private `Team-Ceciroleo67/kla-ps01-data` repo (never bundled into the git clone), `HF_TOKEN`
+passed as a Job secret (never written to a file). Job id and dispatch timestamp recorded in
+`docs/PLAN_CLOUD.md`'s spend ledger, not here.
+
+Budget: ~$7.50 at A100-large $2.50/hr for a 3h cap (of the ~$12 remaining, expires 2026-09-01).
+Promotion, if any, happens only on a paired win against the incumbent (D49/D61 precedent) —
+see the plan for the T-12h hard promotion gate and the costed regeneration cascade it exists
+to protect.

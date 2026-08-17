@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-08-17T09:45:17Z",
+  "device": "cuda",
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "train_lr_patch": 64,
+  "n_scored": 400,
+  "n_skipped_too_small": 0,
+  "means": {
+    "full_image_inference": {
+      "psnr": 30.64577761587139,
+      "ssim": 0.8058841708250823,
+      "lpips": 0.24013028676854448
+    },
+    "patch_crop_inference": {
+      "psnr": 30.66213873856756,
+      "ssim": 0.8077836650375667,
+      "lpips": 0.23202616962138564
+    }
+  },
+  "paired_full_vs_crop": {
+    "psnr": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": -0.016361122696167768,
+      "sem": 0.02026108652320924,
+      "t": -0.8075145761519733,
+      "images_better": 181,
+      "significant": false,
+      "win": false,
+      "loss": false
+    },
+    "ssim": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": -0.0018994942124843648,
+      "sem": 0.0005317592935228562,
+      "t": -3.572094057633466,
+      "images_better": 159,
+      "significant": true,
+      "win": false,
+      "loss": true
+    },
+    "lpips": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": 0.008104117147158831,
+      "sem": 0.00278647645349249,
+      "t": 2.9083745304940085,
+      "images_better": 175,
+      "significant": true,
+      "win": false,
+      "loss": true
+    }
+  },
+  "verdict": "scale_gap_present",
+  "verdict_rule": "scale_gap_present = full-image inference paired-loses to patch-size-crop inference on >=2/3 metrics; scale_gap_weak = on exactly 1; no_scale_gap = on 0",
+  "wall_clock_s": 53.3
+}
