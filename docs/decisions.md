@@ -3176,3 +3176,62 @@ Budget: ~$7.50 at A100-large $2.50/hr for a 3h cap (of the ~$12 remaining, expir
 Promotion, if any, happens only on a paired win against the incumbent (D49/D61 precedent) —
 see the plan for the T-12h hard promotion gate and the costed regeneration cascade it exists
 to protect.
+
+---
+
+## D64 — README truth pass; `results/qualitative/` regenerated; V53 implemented (Phase 1 close-out)
+
+A three-way audit (Explore agents + direct verification) found the code sound (65 PASS / 3
+FAIL matching D62) but `README.md` badly stale relative to the D61 checkpoint promotion —
+wrong sha256 (`37e857...` instead of `8f54f9a2...`), a `## Training` section that still
+described a 24.9s CPU closed-form fit as the reproduction path (the shipped checkpoint needs
+`configs/long_run_e.yaml`, a 6h21m A100 gradient run — a portal-mandatory-item bug, not
+cosmetic), an Environment paragraph claiming Apple Silicon MPS training, three mutually
+contradictory throughput figures (17.3 / 8.3 / 5.6 img/s, one attributed to a nonexistent
+"Mac CPU" run of this checkpoint), a "publication remains open" claim contradicted by the
+live, verified `artifacts-v2` Release, Gaussian range `U(0,0.02)` vs the code's actual
+`U(0,0.065)` (D43), and "63 checks" vs the actual 68. All fixed in `README.md`: Training,
+Environment, Repository map, Runtime measurement, Verification and Assumptions sections
+rewritten against the checkpoint that actually ships; added a "What metric selects the
+'best' checkpoint" disclosure (PSNR-only, hardcoded, undisclosed until now) and a "Failure
+cases" section linking `results/qualitative/`. Also fixed two smaller staleness bugs found
+while rewriting: the "Two numbers, do not confuse them" section still quoted the superseded
+checkpoint's in-run/full-split figures, and the `UnrolledSR` method-summary item still said
+"under active root-cause debugging" when D60 already closed that investigation as a complete,
+reported negative result.
+
+**`results/qualitative/` regenerated against the shipped checkpoint.** Was rendered 2026-08-16
+against the superseded (28.7865 dB) checkpoint; every PSNR in every filename was therefore
+wrong for the model that actually ships. Re-ran `scripts/make_qualitative_examples.py` end to
+end: (1) checked, not assumed, that the six hardcoded val-example tags (best/strong/typical
+x2/worst/lowest-SSIM-of-worst-8) still describe the correct images under the NEW checkpoint's
+per-image ranking — they do (`002041.npy` is still literally rank 0/400 by PSNR, `000900.npy`
+still rank 3/400, etc.); (2) fixed a real bug in the script itself: `CKPT_SHA` and the
+manifest's `checkpoint_val_psnr_db/ssim/lpips` fields were HARDCODED to the superseded
+checkpoint's values, so simply re-running it would have written a new set of panels with the
+OLD checkpoint's numbers baked into the JSON. Fixed by parsing the "Final model" row live out
+of `results/metrics_summary.md` at generation time instead of hardcoding it, specifically so
+this cannot silently go stale again after a future promotion. Regenerated all 12 panels
+(6 val + 1 D5 failure case + 5 no-GT final-test) and rewrote `results/qualitative/README.md`
+with the new numbers and provenance. `results/qualitative/manifest.json` now correctly reads
+`checkpoint_val_psnr_db: 29.2548` (self-verified by the script's own new parsing step, not
+hand-typed).
+
+**V53 implemented** — `docs/STATE.md` U-5's original spec (written, never coded): exactly one
+`*_KLA_PS01.pdf` at repo root, <=9 pages, states the proxy relationship, carries the repo URL,
+none of `SPEC_ADDENDUM.md` section 11's banned phrases. **Strengthened** beyond that original
+spec (Prime Directive 1 permits strengthening, forbids only weakening): also fails on any
+unfilled placeholder literal (`PLACEHOLDER`, `[[ FILL IN`, `[MEMBER`, `[COLLEGE`, `[EMAIL`) —
+the literals `scripts/build_deck.py` writes verbatim when real team info was never supplied,
+which is exactly this project's current state. Negative-controlled with three cases, not one:
+(1) the real current deck (`PLACEHOLDER_TEAM_KLA_PS01.pdf`) correctly FAILs on the
+placeholder-literal clause — a true negative, not a fabricated one; (2) a synthetic 3-page PDF
+built with `reportlab` containing real content in every required field correctly PASSes; (3)
+both files present simultaneously correctly FAILs with "2 files match... expected exactly 1".
+State restored and reconfirmed FAIL(1) afterward; the restored file's sha256
+(`591d33ee2e26d591dc9f877a3bc9f760b2ba958f8f6092ccc67e4377ce0635c0`) verified byte-identical
+to the original tracked deck — the negative-control swap touched nothing permanently.
+`docs/VERIFIER_SHA256` re-pinned (`55bffaa4...` → `373a3759...`) with the full changelog entry
+above it. Also required installing `pypdf` and `reportlab` for this dev environment's `py
+-3.12` interpreter — both were already pinned in `requirements.txt` but missing from this
+particular install, a latent gap in this machine's setup rather than a new dependency.

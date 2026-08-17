@@ -1,5 +1,14 @@
 # SPEC → V-check Requirement Map
 
+> ⚠ **Stale, 2026-08-17.** This map covers V01–V52 only. `scripts/verify_all.py` now
+> implements 69 checks (V00–V52, V53–V68). The 17 checks added since this map was written
+> (V53–V68 from earlier Round-2/deliverable-coverage work, plus V53 itself from this session,
+> `docs/decisions.md` D64) have no entry here yet — full extension deferred (plan Phase D,
+> not yet landed as of this writing; lower priority than the measurement/documentation work
+> ahead of the T-12h promotion gate). Each of those checks' own docstring states its rationale
+> and SPEC anchor inline in `scripts/verify_all.py`, so the requirement traceability exists,
+> just not consolidated into this table yet.
+
 Extraction of every requirement in `docs/SPEC.md` (738 lines, parsed in full) that bears on a
 check in `docs/VERIFICATION_CONTRACT.md` (V01–V52).
 

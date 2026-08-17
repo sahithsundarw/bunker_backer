@@ -2,44 +2,58 @@
 
 ---
 
-# ⚠ RESUME HERE — Round 2 differentiation, main session (Windows/RTX 4060), 2026-08-17
+# ⚠ RESUME HERE — Phase 1 close-out, main session (Windows/RTX 4060), 2026-08-17
 
-Plan: `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md`. Status by priority:
+**Deadline extended to 2026-08-18 night.** Plan superseded:
+`C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md` now tracks "Phase 1 close-out
+— diagnose, launch, harden, ship" (the earlier "Round 2 differentiation" plan's own remaining
+items — PRIORITY 0.1 origin/main reconciliation, most of PRIORITY 2/3 — are superseded or moot,
+see below). Status:
 
-- **Long run — DONE.** HF Jobs A100, job `6a822762c97db76cbdf33506`, `configs/long_run_e.yaml`
-  (w64n32, FiLM+uncertainty on), completed the full 129,700-iteration schedule (22,895.55s /
-  6h21m, well under the 8h cap), best checkpoint at iter 76,000.
-- **Checkpoint promoted.** Re-scored head-to-head against the prior checkpoint under one
-  harness (paired test): wins PSNR/SSIM significantly, LPIPS a tie; also now beats U-Net on
-  all 3 metrics (V28 FAIL -> PASS). Promoted to `weights/best.pt`
-  (sha256 `8f54f9a20822...`). All downstream artifacts regenerated (baselines, metrics_summary,
-  README, weights/README). Real, disclosed trade-off: real-SEM OOD SSIM/LPIPS got worse. Full
-  writeup: `docs/decisions.md` D61.
-- **Two NEW blockers from the promotion, need human decision — see `docs/BLOCKERS.md` B12:**
-  V22 (bf16/fp32 divergence, root-caused to depth-compounding across 32 blocks, no single-line
-  fix exists — FiLM ruled out as cause, fp32-accumulator fix tested and does NOT help, traced
-  to smooth compounding not a discrete bug) and V51 (checkpoint now 11.03 MiB, exceeds the
-  5 MiB per-file cap; `CHECKPOINT_BLOB_EXEMPTION` exists but was never wired into the size-cap
-  loop, only the extension-ban loop — looks like a gap, not a deliberate limit, but this is a
-  verifier-contract judgment call reserved for a human per Prime Directive 1). **Neither the
-  tolerance nor the check was touched.** Full verifier run: 64 PASS / 4 FAIL (V04, V46 — both
-  require `--fresh-clone`, pre-existing/expected; V22, V51 — new, need a decision).
-- **`results/restored_test_outputs/` regeneration — IN PROGRESS.** Fresh 400/400 outputs
-  produced against the new checkpoint (contract-verified: float32, (256,256), finite, [0,1]).
-  User approved re-uploading as a new GitHub Release asset; not yet completed as of this
-  writing — check this section's own next update or the folder's README status line.
-- **PRIORITY 0.5 (`UnrolledSR` overfit bug) — investigation COMPLETE, root cause not fully
-  isolated, reported honestly as a negative result.** All 3 planned hypotheses tested and
-  cleared (adjoint identity ~0.4% error, step-size stable ~0.48x margin, weight-tying makes NO
-  measurable difference — share=True/False plateau at the same ~23.5dB by iter 240 on the real
-  2-pair fixture, constant LR, also ruling out the LR-schedule-decay hypothesis). No single
-  fixable bug found; `UnrolledSR` converges much slower than NAFSR/UNetSR for an unidentified
-  reason. NOT shipped, disclosed honestly in README. Full writeup: `docs/decisions.md` D60.
-- **PRIORITY 0.1 (origin/main reconciliation)** — still deferred; the long run is now done, so
-  this is the next priority-0 item once the current promotion cleanup finishes.
+- **Long run — DONE, checkpoint promoted and PUBLISHED.** HF Jobs A100,
+  `configs/long_run_e.yaml` (w64n32, FiLM+uncertainty), 129,700-iter schedule, best at iter
+  76,000. Won a paired head-to-head vs the prior checkpoint (PSNR/SSIM significant wins, LPIPS
+  tie) and now beats U-Net on all 3 metrics. `weights/best.pt` sha256 `8f54f9a2082...`. Real,
+  disclosed trade-off: real-SEM OOD SSIM/LPIPS got worse (`docs/decisions.md` D61).
+  `results/restored_test_outputs/` is published (`artifacts-v2`, verified fetchable
+  logged-out) — the "IN PROGRESS" status this section carried earlier is stale; confirmed live
+  via `gh release view artifacts-v2` (5 downloads recorded).
+- **V51 FIXED** (human-authorised, `docs/decisions.md` D62, `docs/BLOCKERS.md` B12 updated).
+  **V22 stays open**, human chose to accept it as a disclosed trade-off. Full suite as of this
+  writing: **65 PASS / 3 FAIL (V04, V22, V46)** — V04/V46 are `--fresh-clone`-only and
+  independently verified passing on Linux; V22 is the accepted trade-off. (The prior "64/4"
+  figure this section carried is stale.)
+- **PRIORITY 0.1 (origin/main reconciliation) is MOOT.** `main` was force-pushed to `origin`
+  earlier this session (explicit, twice-confirmed human authorisation) — `origin/main` now
+  equals local `main`. There is no divergence left to reconcile.
+- **`UnrolledSR` overfit bug — investigation COMPLETE, honest negative result.** All 3
+  hypotheses (adjoint identity, step-size stability, weight-tying) tested and cleared; no
+  single fixable bug found. Not shipped, disclosed in README (`docs/decisions.md` D60).
+- **A three-way audit (2026-08-17) found the code sound but `README.md` badly stale** relative
+  to the D61 promotion — wrong sha256, wrong training narrative (still described Apple Silicon
+  MPS closed-form fitting, not the real A100 gradient run), wrong/contradictory throughput
+  numbers, an "unpublished" claim contradicted by the live Release. **README truth pass is
+  IN PROGRESS as of this writing** (plan Phase A) — do not trust README's own claims about
+  itself being current until this line is updated to say DONE.
+- **Hour 0 diagnosis — DONE (`docs/decisions.md` D63).** Two paired probes
+  (`scripts/ood_paired_probe.py`, `scripts/scale_gap_probe.py`) found the real-SEM OOD
+  regression is idiosyncratic (concentrated on real-SEM only; procedural proxy-OOD actually
+  wins) and a small but real train/test scale gap (128px inference vs 64px training patch).
+- **Hour 0.5 — a post-promotion fine-tune is DISPATCHED and running.**
+  `configs/finetune_ood_wide.yaml`, resumed from `weights/best.pt`, HF Jobs A100, **3h timeout
+  cap**. Targets both Hour-0 findings. `train.py` gained `optim.finetune_horizon`,
+  `--push_every`, `--val_lpips` for this (all backward-compatible, verified via matching
+  SMOKE_DIGEST before/after). Job dispatched via `scripts/dispatch_finetune_job.py` — check its
+  status before assuming it landed; **promotion, if any, requires a paired win and must land
+  before the plan's T-12h promotion gate (2026-08-18 12:00)** or it does not ship.
 - **P1.1/P1.2/P1.3/P1.4 (FiLM calibration, uncertainty calibration, Pareto plot, FP8 probe) —
   DONE.** See D57/D58/D59, `results/eda/{pareto_frontier.png,film_calibration.json,
   uncertainty_calibration.json,fp8_probe.json}`.
+- **Still open, tracked in the plan, not yet done:** `results/qualitative/` regeneration
+  against the shipped checkpoint (Phase C2 — currently stale, rendered against the prior
+  checkpoint); `results/experiments.csv` has no row for the shipped long run (Phase C1);
+  V53 (deck placeholder-literal check) not implemented (Phase C3); deck/team info (Phase E,
+  needs the user); demo video (Phase E1, needs the user).
 
 **Everything below this point (including the next "RESUME HERE" heading) is archived history
 from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by

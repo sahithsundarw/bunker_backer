@@ -348,14 +348,20 @@ two places it needed to be), not a deliberately-designed 5 MiB ceiling on the ch
 specifically — but per Prime Directive 1, that judgment is not this session's to act on
 unilaterally. **Not fixed. `scripts/verify_all.py` NOT edited.**
 
-### Decision needed (human)
+### Decision needed (human) — RESOLVED for V51, still open for V22
 
-For V22: accept the larger checkpoint's measured bf16 divergence as a disclosed trade-off
-(document, do not force a fix), OR invest in a real (and costly) fp32-heavier stabilization
-pass, OR reconsider whether this checkpoint should ship at its current size given this
-regression. For V51: extend `CHECKPOINT_BLOB_EXEMPTION`'s use to the size-cap loop too
-(consistent with its existing purpose and with V43's separate, more appropriate 100 MB cap
-already governing this exact file), OR decline to promote a checkpoint whose file size
-exceeds the existing 5 MiB cap. Both are real, live FAILs in `results/verification_report.json`
-as of this checkpoint promotion (docs/decisions.md D61) and are not silently on this session's
-"acceptable known-FAIL" list until a human resolves them.
+**V51: RESOLVED 2026-08-17, human-authorised (`docs/decisions.md` D62).** Chosen resolution:
+extend `CHECKPOINT_BLOB_EXEMPTION`'s use to the size-cap loop (both the per-file and
+total-tree caps), consistent with its existing purpose and with V43's separate, more
+appropriate 100 MB cap already governing this exact file. Applied, negative-controlled (a
+genuine 6 MiB tracked `.txt` file still correctly fails after the fix), and re-pinned in
+`docs/VERIFIER_SHA256`. **V51 now PASSES** in `results/verification_report.json`. This
+paragraph is left here, not deleted, as the investigation record the fix was built on — the
+narrative above (the gap itself, why it happened) still stands; only the "not fixed" status
+line is stale and is superseded by this note.
+
+**V22: still open, per the human's own choice.** Presented alongside V51 above; the human
+chose "accept as a disclosed trade-off, leave the check red" rather than force a fix or
+reconsider the checkpoint. `scripts/verify_all.py`'s V22 check and tolerance remain untouched.
+This is not an oversight — it is the recorded decision. See the top of `README.md` and
+`docs/decisions.md` D61/D62 for where this is disclosed to a reviewer.

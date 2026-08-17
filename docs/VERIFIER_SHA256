@@ -14,10 +14,25 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-55bffaa44459fe342268af1e8f107311c66d86c9e137710d08acc11b10e17208  scripts/verify_all.py
+373a3759dbcdb94c84c96b9923e088aec8efb48b5bb4f4467db8eff85a4176ab  scripts/verify_all.py
 b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-17  V53 IMPLEMENTED (docs/STATE.md U-5's original spec, never previously coded):
+#             the solution-deck contract -- exactly one *_KLA_PS01.pdf at repo root, <=9
+#             pages, states the proxy relationship ("natural photograph"/"proxy"), carries
+#             the repo URL, contains none of SPEC_ADDENDUM.md section 11's banned phrases.
+#             STRENGTHENED beyond that original spec: also fails if any unfilled placeholder
+#             literal survives (PLACEHOLDER, [[ FILL IN, [MEMBER, [COLLEGE, [EMAIL) -- the
+#             exact literals scripts/build_deck.py writes when real team info was never
+#             supplied. Negative-controlled: (1) the real current deck
+#             (PLACEHOLDER_TEAM_KLA_PS01.pdf) correctly FAILs on the placeholder-literal
+#             clause; (2) a synthetic 3-page PDF with real content in all required fields
+#             correctly PASSes; (3) two matching *_KLA_PS01.pdf files present simultaneously
+#             correctly FAILs on "expected exactly 1"; state restored and reconfirmed FAIL
+#             (1) afterward, byte-identical to the original tracked deck (sha256
+#             591d33ee2e26d591dc9f877a3bc9f760b2ba958f8f6092ccc67e4377ce0635c0, verified).
+#             See docs/decisions.md D64.
 # 2026-08-17  V51 STRENGTHENED-CONSISTENTLY: CHECKPOINT_BLOB_EXEMPTION (weights/best.pt) was
 #             already wired into the extension-ban check (D41) but never into the per-file
 #             5 MB / total-tree 25 MB size-cap loop that follows it -- an implementation gap,

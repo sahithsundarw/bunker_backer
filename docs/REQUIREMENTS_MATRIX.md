@@ -24,7 +24,7 @@ no-third-split structural gap) remain marked.
 | 5 | Handle degradations even when applied in any order | **Y** | `src/degrade.py:degrade()` now permutes {D,S,G}, all 3!=6 orderings reachable (measured 20,000 trials: DSG 64.71% modal, others 1.1-13.4%), canonical order preserved as modal per D2's measurement. Old fixed-order guard removed | V62 (strengthened, D43) |
 | 6 | Restore to expected GT resolution | Y | exact x2 enforced, bicubic-fallback substituted on any shape mismatch | V09, V61, V65 |
 | 7 | Generalize to familiar and unfamiliar content | **P** | Familiar (in-distribution): Y, 400-image val split. Unfamiliar (OOD): proxy-OOD set (40 procedural geometric images, `results/eda/proxy_ood/`) scored: PSNR 27.32dB (-1.47 vs in-dist), SSIM 0.965 (+0.182), LPIPS 0.038 (-0.215) -- real, honestly-mixed evidence, not prose. Still **P** not **Y**: this is procedural geometric content, not real semiconductor/SEM imagery, which does not exist anywhere in this project | V63 (implemented, D44) |
-| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 8.3 img/s end-to-end at N=400, 128->256, RTX 4060, externally timed | V37, V38, V39, V43 |
+| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 17.3 img/s end-to-end at N=400, 128->256, RTX 4060, externally timed (current shipped checkpoint; the superseded checkpoint's own 8.3 img/s figure is kept for the record but flagged with a 681% measurement spread) | V37, V38, V39, V43 |
 
 ## Dataset Rules
 
@@ -50,7 +50,7 @@ no-third-split structural gap) remain marked.
 | 4 | Synthetic degraded pairs from GT allowed | Y | `src/dataset.py` synth_ratio 0.5, on-the-fly via `src/degrade.py` | -- |
 | 5 | Justify preprocessing, augmentation, architecture, losses | Y | README Method summary, `docs/decisions.md` D1/D2/D9/D12/D13/D21 | -- |
 | 6 | Frequency-domain methods allowed, not mandatory | Y | FFT loss term used (justified, not mandatory) | -- |
-| 7 | No fixed param limit; large models may lose throughput marks | Y (policy, not a check) | NAFSR 388,225 params, deliberately below SPEC 7.1's 1-3M band, reasoned in `configs/nafnet_x2.yaml` header (training wall-clock cost on 4060, D20) | -- |
+| 7 | No fixed param limit; large models may lose throughput marks | Y (policy, not a check) | Shipped NAFSR is now 1,393,938 params (up from the original 388,225, chosen via a measured params-vs-quality Pareto sweep on cloud A100 hardware rather than the dev-GPU wall-clock constraint that bounded the original choice, `docs/decisions.md` D55) -- still within SPEC 7.1's 1-3M band, and throughput was re-measured at this size (17.3 img/s), not assumed unchanged | -- |
 
 ## Inference Requirements
 
@@ -73,21 +73,21 @@ no-third-split structural gap) remain marked.
 |---|---|---|---|---|
 | 1 | Clean validation split, no leakage | **P** | Block-of-4 alignment guarded (`src/dataset.py:144-241`), empty train/val intersection asserted every construction. Residual leaks: `scripts/fit_degradation.py:206-212` fit on an unfiltered 200-of-3200 sample including ~25 val images; checkpoint selection + headline numbers both on the same 400-split, no third split | V29 (split-integrity, not fit-independence) |
 | 2 | Report PSNR, SSIM, LPIPS | Y | `results/metrics_summary.md`, pinned settings (V31) | V27, V28, V31 |
-| 3 | Report extra metric used for model selection | **N** [[ IN FLIGHT ]] | `configs/final.yaml:51 save_best_on: psnr` -- PSNR alone, undisclosed as such in README/deck. `trainer`+`docs-scribe` work dispatched (blended criterion + disclosure) | UNCOVERED -> pending V66 |
+| 3 | Report extra metric used for model selection | **P** | Disclosed, not fixed: README's new "What metric selects the 'best' checkpoint" section states plainly that `train.py` hardcodes `val_psnr > best_psnr` (no blended-criterion option exists in code) while KLA scores a blend. Mitigation in progress, not yet landed: re-score every sweep/long-run checkpoint under PSNR/SSIM/LPIPS-only and blended criteria (plan Phase B3) | UNCOVERED (disclosure only, not a V-check) |
 | 4 | Compare at least one baseline with final method | Y | 4 baselines + paired t-test | V27, V28 |
-| 5 | Full-res examples incl. success and failure | Y | `results/qualitative/`, 5 successes (percentile-selected) + 2 deterministically-selected failures with band-limited oracle ceilings | V49 (gate is weak: filename substring only) |
+| 5 | Full-res examples incl. success and failure | **P** | `results/qualitative/` regenerated 2026-08-17 against the shipped checkpoint (6 val panels + 1 documented failure case + 5 no-GT final-test panels); README now links it under "Failure cases". Still **P** not Y: V49's gate is weak (filename substring only) | V49 (gate is weak: filename substring only) |
 | 6 | Report runtime, batch size, hardware, versions, timing method | **Y** | Complete at both resolutions: 128->256 (`results/runtime_report.md`) and 256->512 (`results/runtime_report_512.md`, D45), each labelled with device and input size | V37, V38, V39, V43 |
-| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | Y | `results/experiments.csv`, checkpoint self-describes config (V35) | V44, V45 |
+| 7 | Track experiments, seeds, hyperparams, checkpoints, final config | **P** | `results/experiments.csv` has 9 rows but **none references the shipped `configs/long_run_e.yaml` run** -- a real gap (plan Phase C1, not yet landed). Checkpoint self-describes its config (V35, Y) | V44 (row-count only), V45 |
 
 ## Phase 1 Deliverables
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
-| 1 | Solution PPT/PDF | **P** | Deck built via `scripts/build_deck.py`, data-driven (reads real committed numbers, no hand-typed figures), 9 pages, self-checked (proxy sentence verbatim, no banned phrases). All numeric slides now populated with real data (metrics table, both-resolution runtime, proxy-OOD). Still needs: real team name/members/college (placeholder, user to fill), V53 not yet implemented | pending V53 |
-| 2 | Accessible GitHub repo link | Y | public, confirmed `private: false` via API today | V13, V55 |
+| 1 | Solution PPT/PDF | **P** | Deck built via `scripts/build_deck.py`, data-driven, 9 pages, self-checked. Still needs: regeneration against the current checkpoint's numbers, real team name/members/college (placeholder, user to fill), V53 (deck placeholder-literal check) not yet implemented | pending V53 |
+| 2 | Accessible GitHub repo link | Y | public, confirmed `private: false` via API | V13, V55 |
 | 3 | Standalone inference script | Y | `inference.py` | V01 |
-| 4 | Training code reproducing submitted checkpoint | Y | `train.py --config configs/final.yaml --seed 42 --iters 20000`, documented in README | -- |
-| 5 | Final model weights/config + download instructions | Y | `weights/README.md`, Release `artifacts-v1`, sha256 published and fetch-verified (V06/V56/V59) | V06, V35, V59 |
+| 4 | Training code reproducing submitted checkpoint | Y | `train.py --config configs/long_run_e.yaml --seed 42 --hub_repo <repo>`, documented in README's rewritten Training section (2026-08-17; the previously-documented `configs/final.yaml --closed_form_linear` command reproduced a DIFFERENT, non-shipped checkpoint -- a real gap, now fixed) | -- |
+| 5 | Final model weights/config + download instructions | Y | `weights/README.md`, checkpoint tracked directly (V51/V59), test outputs published as Release `artifacts-v2`, sha256 published and fetch-verified from a logged-out session | V06, V35, V51, V59 |
 | 6 | README with exact setup, commands, I/O contract, assumptions | Y | verified present; 3 stale claims fixed this session (throughput-exists claims, committed-artifact claims) | V46 (partial -- doesn't literally exec fenced commands) |
 | 7 | requirements.txt pinned | Y | complete `pip freeze`, `+cu128` index directive, D18 rationale documented | V14 |
 | 8 | Results/output samples: metric summary, images, failure analysis | Y | `results/metrics_summary.md`, `results/qualitative/` | V27, V28, V48, V49 |
@@ -110,7 +110,7 @@ no-third-split structural gap) remain marked.
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
-| 1 | Restoration quality: fixed PSNR+SSIM+LPIPS blend, hidden GT, in-dist + OOD | **P** | Metrics pinned and reported for in-distribution; OOD now has a real, honestly-mixed proxy measurement (procedural content, not real semiconductor imagery) | V27, V28, V31, V63 |
+| 1 | Restoration quality: fixed PSNR+SSIM+LPIPS blend, hidden GT, in-dist + OOD | **P** | Metrics pinned and reported for in-distribution. TWO OOD measurements exist: procedural proxy-OOD (honestly mixed, no regression on the current checkpoint, actually a paired SSIM win) and real-SEM OOD (a genuine, paired, disclosed regression on the current checkpoint vs the prior one -- `docs/decisions.md` D63). A fine-tune targeting this is in flight, promoted only on a paired win | V27, V28, V31, V63, V67 |
 | 2 | End-to-end throughput, common H100, incl. I/O and pre/post-proc | **Y** | Real externally-timed numbers exist at both 128->256 and 256->512 on RTX 4060 (never H100 -- none fabricated). No H100 number exists or is claimed anywhere | V37, V38, V39, V43 |
 | 3 | Training & compute hygiene: reproducibility, clean experiments, env spec, code quality, efficient pipeline, ML practice | Y | experiments.csv ledger, seeded, pinned deps, `docs/decisions.md` append-only log, verifier contract | V44, V45, V14, and the whole Tier 4 |
 | 4 | Exact metric weights undisclosed by KLA | -- | N/A, informational | -- |
@@ -118,31 +118,50 @@ no-third-split structural gap) remain marked.
 
 ---
 
-## Summary of remaining P/N rows requiring action
+## Summary of remaining P/N rows requiring action (updated 2026-08-17, D63)
 
-1. **OOD generalization reporting is genuine but partial** (Main Task #7, Dataset Rules #6,
-   Evaluation #1) -- V63 implemented and PASS. Ceiling on "Y" is structural, not a to-do: no
-   real semiconductor/SEM imagery exists anywhere in this project, so this can only ever be a
-   procedural proxy, honestly labelled as such.
-2. **Selection-metric disclosure** (Validation #3) -- still open. `configs/final.yaml` selects
-   on PSNR alone while KLA scores a PSNR+SSIM+LPIPS blend; the shipped model loses PSNR to its
-   own U-Net baseline. Blended criterion + README/deck disclosure + V66 not yet started.
-3. **Deck** (Phase 1 Deliverables #1) -- built and data-driven, all real numbers populated;
-   needs team info (user-provided placeholder pending) and V53 not yet implemented.
-4. **Validation-split independence** (Validation #1) -- structural, deferred; recorded in
-   `docs/BLOCKERS.md` B10 and the deck's limitations line rather than silently fixed.
-5. **`results/baselines/wavelet_bicubic/`** -- empty stub, deleted.
-6. **B11 (new): V24 cross-process determinism is genuinely flaky (~24-50%)** under
-   `cudnn.benchmark=True`, pre-existing (confirmed present before this iteration's changes too).
-   Blocks Definition of Done #2 (two consecutive clean `--strict` runs) until resolved or
-   explicitly accepted. Not a requirements-matrix row (V24 is a hygiene/robustness check, not a
-   KLA-stated requirement) but recorded here since it gates the verification end-state.
+1. **OOD generalization reporting is genuine but now shows a real, disclosed regression** (Main
+   Task #7, Dataset Rules #6, Evaluation #1). Procedural proxy-OOD: no regression, a paired
+   SSIM win. Real-SEM OOD: a large, significant, paired regression on the current checkpoint
+   vs the prior one (`docs/decisions.md` D63). A fine-tune targeting this is in flight
+   (`configs/finetune_ood_wide.yaml`); promotion, if any, requires a paired win before the
+   plan's T-12h gate. Ceiling on "Y" for the procedural half remains structural (no real
+   semiconductor/SEM imagery exists in the *training* set) but real-SEM OOD *evaluation* now
+   exists and is the more relevant of the two measurements.
+2. **Selection-metric disclosure** (Validation #3) -- now disclosed in README (new "What
+   metric selects the 'best' checkpoint" section), not fixed in code. `train.py` hardcodes
+   PSNR-only selection; no blended-criterion option exists. Mitigation in progress: re-score
+   every sweep/long-run checkpoint under PSNR/SSIM/LPIPS-only and blended criteria (plan Phase
+   B3) — not yet landed as of this writing.
+3. **`results/experiments.csv` has no row for the shipped long-run checkpoint** (Validation #7,
+   Phase 1 Deliverables). Real gap, not yet closed (plan Phase C1).
+4. **`results/qualitative/` regenerated against the shipped checkpoint** (Validation #5) — done
+   2026-08-17, tags re-verified accurate under the new checkpoint's per-image ranking, not
+   carried over unchecked. README now links this folder under "Failure cases" (it did not
+   before). Still **P** not Y purely because V49's gate is weak (filename substring only).
+5. **Deck** (Phase 1 Deliverables #1) — built and data-driven; needs regeneration against the
+   current checkpoint's numbers, team info (user-provided, still pending), and V53 (deck
+   placeholder-literal check) not yet implemented.
+6. **Validation-split independence** (Validation #1) -- structural, deferred; recorded in
+   `docs/BLOCKERS.md` B10 rather than silently fixed.
+7. **README truth pass** — the top-level `README.md` was found (2026-08-17 three-way audit) to
+   contain multiple statements false against this repo's own files after the D61 promotion
+   (wrong sha256, wrong training narrative describing a different, non-shipped checkpoint's
+   Apple-Silicon-MPS closed-form fit, contradictory throughput numbers, an "unpublished"
+   claim contradicted by the live `artifacts-v2` Release). Fixed this session — see the
+   Training, Repository map, Runtime measurement, Verification and Assumptions sections.
+8. **B11: V24 cross-process determinism is genuinely flaky (~20%)** under
+   `cudnn.benchmark=True`, pre-existing. Blocks Definition of Done #2 (two consecutive clean
+   `--strict` runs) until resolved or explicitly accepted. Not a requirements-matrix row (V24
+   is a hygiene/robustness check, not a KLA-stated requirement) but recorded here since it
+   gates the verification end-state.
 
-Resolved this iteration (were P/N, now Y): order permutation (#5 Main Task), 256/512 dual-res
-timing + batch/OOM exercise (Dataset Rules #5, Inference #6, Validation #6, Evaluation #2),
-tail coverage (Dataset Rules #7).
+Resolved since the prior pass (were P/N, now Y or fixed): V51 size-cap gap (D62, human-
+authorised), restored-test-outputs publication (`artifacts-v2` live and verified), order
+permutation, 256/512 dual-res timing, tail coverage.
 
 ## Reconciliation note
 
-Not yet diffed against `docs/SPEC_VCHECK_MAP.md`. Remaining open items above (selection-metric
-disclosure, deck team info, V53/V66) are still moving; the diff will be done once those land.
+Not yet diffed against `docs/SPEC_VCHECK_MAP.md`, and that map itself is stale (covers V01-V52
+only; the verifier now implements 68 checks, V53-V68 unmapped). Both are tracked as open items,
+not yet actioned as of this writing.

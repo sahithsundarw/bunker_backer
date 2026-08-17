@@ -98,6 +98,12 @@ TIERS["V66"] = 2
 TIERS["V67"] = 4
 TIERS["V68"] = 2
 
+# V53 (docs/STATE.md U-5): the solution deck contract -- exactly one *_KLA_PS01.pdf, <=9
+# pages, proxy relationship stated, repo URL present, no banned phrasing, no unfilled
+# placeholder literal (the last clause a strengthening beyond the original spec). Deliverable
+# band, same tier as V13/V55/V56/V59 (repo-presence/deliverable-shape checks).
+TIERS["V53"] = 0
+
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
 SKIP_WHITELIST: dict[str, str] = {
@@ -3520,6 +3526,80 @@ def check_V68(ctx: Ctx) -> CheckResult:
                        f"UnrolledSR yields exactly (1,1,2H,2W), finite, for {ran} sizes; "
                        f"eval-mode determinism holds",
                        {"sizes": [list(s) for s in V68_SIZES]})
+
+
+#: Literal fragments that must never survive into a submitted deck (Phase 1 close-out plan,
+#: strengthening beyond docs/STATE.md U-5's original spec, which only checked the addendum's
+#: banned phrases). Each one is a placeholder scaffold.build_deck.py itself writes when
+#: --team / real member info was never supplied -- an unfinished deck contains at least one of
+#: these verbatim, a finished one contains none.
+V53_PLACEHOLDER_LITERALS = ("PLACEHOLDER", "[[ FILL IN", "[MEMBER", "[COLLEGE", "[EMAIL")
+
+#: Repo URL the deck must carry (SPEC "GitHub & Video Link" slide) -- the same one README.md
+#: states at its own top, checked directly rather than duplicated as a second literal.
+V53_REPO_URL = "https://github.com/sahithsundarw/semicon-kla-image-restoration"
+
+
+def check_V53(ctx: Ctx) -> CheckResult:
+    """Phase 1 Deliverable #1 / F13: the solution deck exists, is a real PDF (not a stub),
+    stays within the portal's slide cap, states the proxy relationship honestly, carries the
+    repo link, and -- strengthening beyond docs/STATE.md U-5's original spec -- contains no
+    unfilled placeholder literal. docs/decisions.md records this strengthening; it does not
+    weaken anything the original spec asked for (Prime Directive 1).
+
+    The portal's own naming convention (`TeamName_KLA_PS01.pdf`) means this check cannot know
+    the exact filename in advance -- it globs for exactly one match instead of a literal path.
+    """
+    candidates = sorted(ctx.root.glob("*_KLA_PS01.pdf"))
+    if not candidates:
+        return not_impl("V53", "*_KLA_PS01.pdf at the repo root")
+    if len(candidates) > 1:
+        return CheckResult("V53", FAIL,
+                           f"{len(candidates)} files match *_KLA_PS01.pdf, expected exactly 1",
+                           {"matches": [p.name for p in candidates]})
+    pdf_path = candidates[0]
+
+    try:
+        import pypdf
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V53", FAIL, f"pypdf unavailable: {type(exc).__name__}: {exc}")
+
+    try:
+        reader = pypdf.PdfReader(str(pdf_path))
+        n_pages = len(reader.pages)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V53", FAIL,
+                           f"{pdf_path.name} could not be parsed as a PDF: "
+                           f"{type(exc).__name__}: {exc}")
+
+    problems: list[str] = []
+    if n_pages > 9:
+        problems.append(f"{n_pages} pages, exceeds the portal's 8-9 slide cap")
+    if n_pages == 0:
+        problems.append("0 pages -- empty or corrupt PDF")
+    if "natural photograph" not in text.lower():
+        problems.append("does not say 'natural photograph(s)' anywhere -- the mandatory "
+                        "proxy-relationship disclosure (docs/SPEC_ADDENDUM.md section 11) "
+                        "is missing")
+    if "proxy" not in text.lower():
+        problems.append("does not say 'proxy' anywhere -- same disclosure requirement")
+    if V53_REPO_URL not in text:
+        problems.append(f"does not contain the repo URL {V53_REPO_URL!r}")
+    bad_phrases = _v63_positive_banned_matches(text)
+    if bad_phrases:
+        problems.append(f"banned positive semiconductor-imagery phrasing found: {bad_phrases}")
+    found_placeholders = [lit for lit in V53_PLACEHOLDER_LITERALS if lit in text]
+    if found_placeholders:
+        problems.append(f"unfilled placeholder literal(s) still present: {found_placeholders}")
+
+    if problems:
+        return CheckResult("V53", FAIL, "; ".join(problems),
+                           {"file": pdf_path.name, "pages": n_pages})
+    return CheckResult("V53", PASS,
+                       f"{pdf_path.name}: {n_pages} pages, proxy relationship stated, repo "
+                       f"URL present, no banned phrasing, no placeholder literals",
+                       {"file": pdf_path.name, "pages": n_pages})
 
 
 # ======================================================================================
