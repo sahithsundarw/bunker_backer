@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=TIMEOUT,
         namespace=NAMESPACE,
         secrets={"HF_TOKEN": token},
-        labels={"run": "finetune_ood_wide", "config": CONFIG},
+        labels={"run": "finetune_ood_wide", "config": Path(CONFIG).stem},
     )
     print(f"[dispatch] launched job id={job.id}")
     print(f"[dispatch] inspect with: python -c \"from huggingface_hub import inspect_job; "
