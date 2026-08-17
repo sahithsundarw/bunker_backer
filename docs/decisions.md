@@ -3545,3 +3545,59 @@ content-statistics finding: the domain shift (edge density, local contrast, spec
 flatness) explains why the model handles this content worse than natural photos on AVERAGE,
 while this Nyquist measurement explains why its ABSOLUTE worst cases are especially hard
 regardless of training domain.
+
+---
+
+## D71 — Phase 3: procedural structural content mixed into training, dispatched
+
+User authorised Phase 3 after seeing D68 (content-driven gap) and D69 (weight interpolation
+doesn't recover it). Attacks the content prior directly, which D67's degradation-widening
+fine-tune never did.
+
+**New capability, additive, off by default:** `src/structural_content.py` reproduces the
+proxy-OOD set's own documented recipe (`docs/dataset_findings.md` "Generation method" — 5
+categories: line/space gratings, contact-hole grids, checkerboard, circuit traces, sharp-edge
+shapes; same param ranges, same 3x3 box blur, same per-image [0,1] min-max normalisation,
+U1). `DataConfig.structural_content_ratio` (new, default 0.0) in `src/dataset.py`: with that
+probability, a TRAIN sample is a freshly-generated procedural image degraded through the same
+`degrade()` path as any other synthetic sample (matching `_synth_lr_patch`'s exact margin
+handling), rather than a real photo. **Never applied to `split="val"`** — validation must
+stay real-content, real-degradation, unchanged, otherwise the reported metric stops meaning
+what it says. F15-permitted (synthetic pairs from GT), no licence surface, no leakage: this is
+a fixed procedural generator, not a foreign dataset.
+
+Verified additive and backward-compatible before use, same discipline as every other train.py
+change this session: `--selftest` (V26) still passes; a fresh end-to-end check (200 samples,
+`structural_content_ratio=0.3`) gives 59/200 (~30%, matches) with correct shapes and confirms
+val is never structural; **two independent `--smoke --smoke_iters 6 --seed 42` runs before and
+after this edit reproduce the identical `SMOKE_DIGEST
+fd5e52061802c1d2c4d8034d1e224ef3a40586cc40ba48ffb75e3af396bc8da9`** (existing configs have
+`structural_content_ratio` absent, defaulting to 0.0, so behaviour is provably unchanged for
+them). Local dry-run of the actual fine-tune config (`configs/finetune_structural_content.yaml`,
+20 iters, `--iters` override) OOM'd at the config's real `batch_size: 16` on the 8 GB dev GPU
+— expected (D20's own documented dev-GPU limit at this width/depth/patch-size combination, not
+a bug) — reran with `batch_size: 4` for the LOCAL sanity check only (the real dispatch config
+is untouched at 16, sized for an 80 GB A100) and it ran clean end to end, producing a real
+val-loop result.
+
+**`configs/finetune_structural_content.yaml`:** resumes `weights/best.pt` (never from
+scratch), `lr_patch: 128` (kept from D63's scale-gap finding), `structural_content_ratio:
+0.275` (the new lever), degrade block **reverted to D43's values** (`randomise_frac: 1.20`,
+`gauss_sigma_range: [0, 0.065]`) rather than repeating D67's widening, which D68/D69 already
+showed doesn't touch this axis and does cost proxy-OOD. `optim.finetune_horizon: 40000`
+(train.py's existing mechanism, D63), deliberately larger than what 3h can reach.
+
+**Dispatch mechanism corrected per D67's lesson:** `scripts/dispatch_finetune_structural.py`
+still passes `timeout="3h"` to `run_job()` (cheap, may help) but does **not** rely on it —
+`--watch` blocks in-process, polls `inspect_job` every 2 minutes, and calls `cancel_job()`
+itself the instant elapsed time reaches the 3h cap, rather than trusting the platform.
+
+**Decision rule, fixed before the run lands (unchanged from the plan):** promote only if
+real-SEM OOD improves on a paired test AND in-distribution loss is under 0.15 dB. Evaluated
+with the same `src.metrics.paired_compare` harness as every other comparison this session.
+Scope cut, disclosed: the standalone preview/inspection script for the procedural generator
+(`scripts/gen_structural_content.py`, mentioned in the plan) was not written separately — the
+generator is exercised directly by the training pipeline and its own unit-level check above
+(30% ratio, correct shapes) already demonstrates it works; a dedicated preview script would
+only add a visualisation, not new evidence, and was deprioritised given the remaining time
+budget.

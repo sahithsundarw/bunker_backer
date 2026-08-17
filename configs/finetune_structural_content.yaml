@@ -1,0 +1,60 @@
+# PLAN PHASE 3 fine-tune. Fine-tunes weights/best.pt with procedural structural content
+# mixed into training (src/structural_content.py), targeting the CONTENT-driven real-SEM OOD
+# gap that D68/D69 established -- degradation-parameter widening (D67's finetune_ood_wide.yaml)
+# already showed it does NOT touch this axis; this config deliberately isolates the one new
+# variable (content mix) rather than repeating the degradation-widening lever a second time.
+#
+# Everything else matches configs/finetune_ood_wide.yaml except:
+#   - degrade block REVERTED to the original D43 values (randomise_frac 1.20, gauss_sigma_range
+#     0.065), NOT D67's widened 1.50/0.09 -- D67 already showed widening this alone breaks
+#     proxy-OOD without fixing real-SEM OOD, so this run does not repeat that change.
+#   - structural_content_ratio: 0.275 (~25-30% per the plan) -- the new lever.
+#   - lr_patch stays 128 (full inference resolution, same free win as D63's scale-gap finding).
+model:
+  name: NAFSR
+  width: 64
+  num_blocks: 32
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+  dw_expand: 2
+  ffn_expand: 2
+  layerscale_init: 1.0
+  film_dim: 16          # MUST match weights/best.pt -- --resume load_state_dict is strict=True
+  uncertainty: true      # MUST match weights/best.pt
+data:
+  lr_patch: 128           # full inference resolution (D63's scale-gap finding, kept)
+  batch_size: 16
+  synth_ratio: 0.5
+  structural_content_ratio: 0.275   # THE new lever this run tests (plan Phase 3)
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 1.20         # REVERTED to D43's value, not D67's 1.50
+    gauss_sigma_range: [0.0, 0.065]   # REVERTED to D43's value, not D67's 0.09
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 2.0e-4               # same fine-tune LR as D67's run (1/5 of the original peak)
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 300
+  finetune_horizon: 40000  # larger than what 3h can reach -- the job's own manual poll+cancel
+                           # at 3h is the REAL cap this time (D67: HF Jobs' timeout kwarg was
+                           # NOT reliably enforced; do not repeat that mistake).
+loss:
+  weights:
+    uncertainty: 0.01
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 2000
+  save_best_on: psnr

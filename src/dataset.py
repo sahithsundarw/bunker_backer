@@ -47,6 +47,7 @@ import torch
 from torch.utils.data import Dataset, get_worker_info
 
 from .degrade import DegradeConfig, conv_downsample_2x, degrade
+from .structural_content import random_structural_image
 
 __all__ = [
     "DataConfig",
@@ -370,6 +371,12 @@ class DataConfig:
     lr_patch: int = 64                 # -> 128 GT patch (SPEC 6.2)
     scale: int = 2                     # F2: exactly x2
     synth_ratio: float = 0.5           # SPEC 9 default; fraction of samples degraded on the fly
+    structural_content_ratio: float = 0.0  # fraction of TRAIN samples replaced with procedural
+                                        # structural content (src/structural_content.py) --
+                                        # plan Phase 3 (docs/decisions.md D68/D69). F15-permitted
+                                        # synthetic data derived from a fixed generator, never a
+                                        # foreign dataset. 0.0 (default): unchanged behaviour.
+                                        # Never applied to split="val" (see __getitem__).
     crops_per_image: int = 1           # __len__ multiplier for the train split
     dihedral: bool = True              # 8 orientations, identical on LR and GT (SPEC 6.3)
     cutblur_prob: float = 0.5          # Yoo et al., CVPR 2020 (SPEC 6.3)
@@ -388,7 +395,8 @@ class DataConfig:
         if not isinstance(block, Mapping):
             raise TypeError(f"expected a mapping for the data config, got {type(block)!r}")
         known = {
-            "lr_patch", "scale", "synth_ratio", "crops_per_image", "dihedral", "cutblur_prob",
+            "lr_patch", "scale", "synth_ratio", "structural_content_ratio", "crops_per_image",
+            "dihedral", "cutblur_prob",
             "cutblur_alpha", "preload", "preload_headroom", "seed", "degrade",
             # tolerated but not used here -- they belong to the loader, not the dataset
             "batch_size", "num_workers", "pin_memory", "persistent_workers", "prefetch_factor",
@@ -401,6 +409,9 @@ class DataConfig:
         sr = float(block.get("synth_ratio", 0.5))
         if not 0.0 <= sr <= 1.0:
             raise ValueError(f"synth_ratio must be in [0,1], got {sr}")
+        scr = float(block.get("structural_content_ratio", 0.0))
+        if not 0.0 <= scr <= 1.0:
+            raise ValueError(f"structural_content_ratio must be in [0,1], got {scr}")
         scale = int(block.get("scale", 2))
         if scale != 2:
             raise ValueError(
@@ -411,6 +422,7 @@ class DataConfig:
             lr_patch=int(block.get("lr_patch", 64)),
             scale=scale,
             synth_ratio=sr,
+            structural_content_ratio=scr,
             crops_per_image=int(block.get("crops_per_image", 1)),
             dihedral=bool(block.get("dihedral", True)),
             cutblur_prob=float(block.get("cutblur_prob", 0.5)),
@@ -601,8 +613,44 @@ class PairedRestorationDataset(Dataset):
         off = m // 2
         return lr[off : off + patch, off : off + patch]
 
+    def _structural_pair(
+        self, patch: int, scale: int, rng: np.random.Generator
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Fresh procedural GT + freshly-degraded LR, same margin handling as
+        ``_synth_lr_patch`` (a 2-GT-pixel margin so the kept LR pixels have full kernel
+        support, discarded after degrading). No real image is involved -- generated at
+        exactly the padded size needed, not cropped from anything."""
+        m = 2
+        full = scale * patch + 2 * m
+        region = random_structural_image(full, rng).astype(np.float64)
+        lr = degrade(region, rng, cfg=self.cfg.degrade)
+        off = m // 2
+        lr_patch = lr[off : off + patch, off : off + patch]
+        gt_patch = region[m : m + scale * patch, m : m + scale * patch].astype(np.float32)
+        return lr_patch, gt_patch
+
     def __getitem__(self, idx: int) -> dict[str, Any]:
         k = int(idx) % len(self.names)
+
+        if (self.split == "train" and self.cfg.structural_content_ratio > 0.0
+                and self.rng().random() < self.cfg.structural_content_ratio):
+            rng = self.rng()
+            p, s = self.cfg.lr_patch, self.cfg.scale
+            lr_patch, gt_patch = self._structural_pair(p, s, rng)
+            if self.cfg.dihedral:
+                kk = int(rng.integers(0, 8))
+                lr_patch = dihedral(lr_patch, kk)
+                gt_patch = dihedral(gt_patch, kk)
+            return {
+                "lr": torch.from_numpy(np.ascontiguousarray(lr_patch, dtype=np.float32)[None]),
+                "gt": torch.from_numpy(np.ascontiguousarray(gt_patch, dtype=np.float32)[None]),
+                "name": f"structural_{k}",
+                "split": "train",
+                "synthetic": True,
+                "structural": True,
+                "index": k,
+            }
+
         lr_img, gt_img = self._pair(k)
 
         if self.split == "val":
@@ -616,6 +664,7 @@ class PairedRestorationDataset(Dataset):
                 "name": self.names[k],
                 "split": "val",
                 "synthetic": False,
+                "structural": False,
                 "index": k,
             }
 
@@ -659,6 +708,7 @@ class PairedRestorationDataset(Dataset):
             "name": self.names[k],
             "split": "train",
             "synthetic": synthetic,
+            "structural": False,
             "index": k,
         }
 
