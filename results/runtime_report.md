@@ -12,20 +12,36 @@ the original headline below:
 **Local CUDA external-process benchmark: 400 images, median 23.19 s (17.3 img/s), batch 32,
 bf16, n=5 repeats (26.97, 23.19, 23.10, 23.13, 23.38 s -- spread 16.7%).**
 
-**Honest comparison caveat, stated plainly rather than smoothed over:** this is FASTER than the
-8.3 img/s headline recorded below for the smaller D49 checkpoint, despite the model being 3.6x
-larger by parameter count -- a counter-intuitive result at first glance. The most likely
-explanation, not just asserted: the OLD measurement's own record below states a **681.4%
-spread** (min 34.7s, max 363.6s across 5 repeats) -- a very high-variance measurement,
-consistent with system noise/contention at the time it was taken, not a clean steady-state
-number. This new measurement's spread is 16.7%, an order of magnitude tighter. Rather than
-silently prefer whichever number is more flattering, both are recorded: the new number is
-real, reproducible, and measured on the exact same 400-image set as the original headline, but
-a like-for-like re-benchmark of the OLD checkpoint under equally quiet conditions has not been
-done, so "the new checkpoint is definitively faster" is not asserted as an architecture-level
-finding -- only that this specific, clean measurement shows it running at this throughput.
-This project's own memory-bandwidth-bound finding (D21) makes a modest slowdown from 3.6x more
-parameters plausible in principle, but not measured as a slowdown here.
+**2026-08-17 update -- the like-for-like re-benchmark this section said was missing is now
+done (plan Phase B2, `docs/decisions.md` D65-adjacent).** The prior paragraph left open
+whether the new (bigger) checkpoint being faster than the noisy old measurement was a real
+architecture-level finding or an artifact of the old measurement's 681% spread. It was the
+latter. Recovered the superseded checkpoint byte-identical from git history (commit `19e4e76`,
+never retrained) and benchmarked BOTH checkpoints back-to-back, same session, same input set,
+same device, n=5 each:
+
+| Checkpoint | median | range | spread | img/s |
+|---|---|---|---|---|
+| Superseded (388,225 params) | 20.21 s | 19.82--21.37 s | 7.8% | 19.79 |
+| **Current shipped (1,393,938 params)** | 31.28 s | 31.12--31.42 s | 1.0% | **12.79** |
+
+Under controlled, back-to-back, equally-quiet conditions, **the bigger checkpoint is
+measurably slower — +54.8% wall-clock, a real throughput cost, not an artifact.** This is the
+physically expected result for 3.6x more parameters and matches this project's own
+memory-bandwidth-bound finding (D21): it was NOT observed in the original comparison only
+because the old absolute number (8.3 img/s) was contaminated by a 681%-spread session, not
+because the new checkpoint is actually faster in general.
+
+**A separate, disclosed methodology caveat this comparison surfaced:** this controlled
+same-session run of the current checkpoint measured median 31.28 s, while the standalone
+17.3 img/s (23.19 s) headline above it — measured in an EARLIER session — does not even
+overlap in range with this run's 31.12--31.42 s. Both are genuine measurements; the
+discrepancy is consistent with RTX 4060 Laptop GPU boost-clock/thermal-state variance across
+sessions (confirmed idle-clock throttle state present between runs via `nvidia-smi`), not a
+methodology error in either one. **Conclusion: absolute img/s figures on this laptop GPU
+should not be compared across different measurement sessions; only same-session,
+back-to-back comparisons (like the table above) support a relative claim.** Full raw output:
+`results/eda/runtime_old_ckpt_b2.md`, `results/eda/runtime_new_ckpt_b2.md`.
 
 The detailed batch/precision/memory-format sweep, profiler breakdown, and import-cost tables
 below were measured against **the D49 (388,225-param) checkpoint/architecture size**, not the

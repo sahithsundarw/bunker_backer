@@ -38,11 +38,15 @@ resolution and a single PixelShuffle ×2 head.
 > - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 >   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
 >   same 400-image val-split input set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16,
->   batch 32): total wall-clock **median 23.19 s (17.3 img/s)**, n=5, spread 16.7%. This is
->   faster than the prior checkpoint's own recorded 8.3 img/s despite 3.6x more parameters — the
->   prior number's own record shows a 681% spread (high system noise), so the two are not a
->   clean apples-to-apples speed comparison; see `results/runtime_report.md` for the full,
->   honest caveat. No H100 number exists or is claimed.
+>   batch 32): total wall-clock **median 23.19 s (17.3 img/s)**, n=5, spread 16.7%.
+>   **A controlled back-to-back re-measurement (plan Phase B2) shows this checkpoint is
+>   actually ~55% slower than the superseded, smaller one** when both are benchmarked in the
+>   same session under equally quiet conditions (12.79 img/s vs 19.79 img/s) — the physically
+>   expected result for 3.6x more parameters. An earlier draft of this section claimed the new
+>   checkpoint was faster; that was an artifact of comparing against the superseded
+>   checkpoint's own noisy, 681%-spread measurement from a different session, not a real
+>   speed advantage — corrected once the controlled comparison was actually run. No H100
+>   number exists or is claimed.
 > - **V22 is a known, disclosed, LIVE fail, not fixed — and now priced, not just disclosed.**
 >   bf16 vs fp32 outputs diverge (mean 1.85e-3, max 2.65e-2 on outputs in [0,1]) — root-caused
 >   to smooth depth-compounding over 32 residual blocks, not a discrete unpromoted op. Priced
