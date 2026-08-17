@@ -43,13 +43,17 @@ resolution and a single PixelShuffle ×2 head.
 >   prior number's own record shows a 681% spread (high system noise), so the two are not a
 >   clean apples-to-apples speed comparison; see `results/runtime_report.md` for the full,
 >   honest caveat. No H100 number exists or is claimed.
-> - **V22 is a known, disclosed, LIVE fail, not fixed.** bf16 vs fp32 outputs diverge (mean
->   1.85e-3, max 2.65e-2 on outputs in [0,1]) — root-caused to smooth depth-compounding over 32
->   residual blocks, not a discrete unpromoted op. Presented to the human and accepted as a
->   disclosed trade-off rather than forced; the verifier's tolerance was **not** touched
->   (Prime Directive 1). Full investigation: `docs/BLOCKERS.md` B12, `docs/decisions.md` D61.
->   **V24** (cross-process determinism) is separately flaky under `cudnn.benchmark=True`,
->   ~20% of runs, pre-existing: `docs/BLOCKERS.md` B11.
+> - **V22 is a known, disclosed, LIVE fail, not fixed — and now priced, not just disclosed.**
+>   bf16 vs fp32 outputs diverge (mean 1.85e-3, max 2.65e-2 on outputs in [0,1]) — root-caused
+>   to smooth depth-compounding over 32 residual blocks, not a discrete unpromoted op. Priced
+>   (`docs/decisions.md` D65, full 400-pair paired test): fp32 wins PSNR (+0.00189 dB) and SSIM
+>   (+0.00013) with statistical significance but negligible practical magnitude, while LOSING
+>   LPIPS (bf16 is better there) and costing **+10.6% throughput**. **Decision: keep bf16.** A
+>   real, measured throughput cost for a quality change that is a wash at best and a net loss
+>   on the metric this checkpoint is already weakest on is not a good trade, on a submission
+>   KLA explicitly scores for throughput. The verifier's tolerance was **not** touched (Prime
+>   Directive 1). **V24** (cross-process determinism) is separately flaky under
+>   `cudnn.benchmark=True`, ~20% of runs, pre-existing: `docs/BLOCKERS.md` B11.
 > - **`results/restored_test_outputs/` is published.** 400 outputs regenerated against this
 >   checkpoint, archived, uploaded as GitHub Release `artifacts-v2`, and verified fetchable
 >   from a logged-out session (`curl`, sha256-matched). See that folder's own README for the

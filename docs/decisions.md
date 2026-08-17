@@ -3235,3 +3235,53 @@ to the original tracked deck — the negative-control swap touched nothing perma
 above it. Also required installing `pypdf` and `reportlab` for this dev environment's `py
 -3.12` interpreter — both were already pinned in `requirements.txt` but missing from this
 particular install, a latent gap in this machine's setup rather than a new dependency.
+
+Full fresh `--strict` run after all of the above: **64 PASS / 5 FAIL (V04, V22, V24, V46,
+V53)**, 69 checks implemented. No regression: V53 is new and correctly FAILs (real gap); V24
+rolled its known ~20% intermittent flake (B11); V04/V22/V46 unchanged. README/STATE.md
+corrected from the stale 65/3 figure they were still carrying.
+
+---
+
+## D65 — B1: priced the V22 bf16/fp32 trade-off; decision is to KEEP bf16 (not switch)
+
+D61 accepted V22's bf16/fp32 divergence "as a disclosed trade-off ... for throughput" without
+ever measuring what bf16 actually costs in quality, or what fp32 actually costs in throughput.
+`scripts/precision_ablation.py` measured both, on the real `inference.py` forward path, full
+400-pair val split, paired (`src.metrics.paired_compare`):
+
+| Metric | fp32 mean | bf16 mean | diff (fp32−bf16) | t | fp32 wins? |
+|---|---|---|---|---|---|
+| PSNR | 29.25476 | 29.25287 | +0.00189 dB | +6.08 | yes (significant, negligible magnitude) |
+| SSIM | 0.79211 | 0.79198 | +0.00013 | +10.37 | yes (significant, negligible magnitude) |
+| LPIPS | 0.25625 | 0.25470 | +0.00155 (worse) | +10.50 | **no — bf16 is better** |
+
+Throughput (`scripts/benchmark_runtime.py`, same 400 val-split LR files, 3 repeats each,
+median): bf16 31.08s, fp32 34.36s — **fp32 costs +10.6%**.
+
+**Decision rule, fixed before measuring:** "switch to fp32 if it wins ANY metric with paired
+significance AND costs <15% throughput." Both conditions are technically met. **Decision:
+KEEP bf16 — do not switch.** Reasoning, stated plainly rather than silently overriding the
+rule after seeing an inconvenient result: the "win" on PSNR/SSIM is real by the paired test but
+of negligible practical magnitude (thousandths of a dB/SSIM point) — significant only because
+n=400 gives the test high power to detect noise-level shifts, not because the restoration is
+meaningfully better. fp32 is simultaneously WORSE on LPIPS, which is already this checkpoint's
+weakest margin over the U-Net baseline (t=−3.26, README's own disclosure). Paying a real,
+measured 10.6% throughput cost — on a submission KLA explicitly scores for throughput — for a
+quality change that is a wash at best and a net loss on one axis is not a good trade, even
+though the letter of the pre-committed rule says switch. This is a disclosed judgment call
+resolving a case the rule's "wins ANY metric" phrasing didn't anticipate (a mixed result),
+not a post-hoc reinterpretation to avoid work — the data point that actually decided this is
+the LPIPS loss, which was measured, not assumed.
+
+**Correction to D63's own claim:** D63 said "if we switch, V22 goes green because the shipped
+configuration changed." This is WRONG — checked `check_V22`'s actual implementation
+(`scripts/verify_all.py`): it explicitly runs `inference.py --precision bf16` and
+`--precision fp32` itself and compares them, regardless of what `--precision auto` defaults
+to. V22 measures the intrinsic bf16-vs-fp32 divergence, not which one ships. Switching the
+default would NOT have resolved V22 either way — it remains a disclosed, live FAIL under this
+decision, exactly as it was under D61/D62's.
+
+`inference.py` is unchanged by this decision (no edit needed — bf16 was already the default).
+`results/eda/precision_ablation.json`, `results/eda/runtime_bf16_ablation.md`,
+`results/eda/runtime_fp32_ablation.md` hold the measurements.

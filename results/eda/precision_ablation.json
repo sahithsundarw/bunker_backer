@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-08-17T11:36:36Z",
+  "device": "cuda",
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "n": 400,
+  "means": {
+    "bf16": {
+      "psnr": 29.252869388778333,
+      "ssim": 0.7919785327068337,
+      "lpips": 0.254697832185775
+    },
+    "fp32": {
+      "psnr": 29.25475522386573,
+      "ssim": 0.7921130112617689,
+      "lpips": 0.2562454655393958
+    }
+  },
+  "paired_fp32_vs_bf16": {
+    "psnr": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": 0.0018858350873969699,
+      "sem": 0.0003102794241088325,
+      "t": 6.077860601982751,
+      "images_better": 255,
+      "significant": true,
+      "win": true,
+      "loss": false
+    },
+    "ssim": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": 0.00013447855493518797,
+      "sem": 1.2974292971019957e-05,
+      "t": 10.365000638999453,
+      "images_better": 336,
+      "significant": true,
+      "win": true,
+      "loss": false
+    },
+    "lpips": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": 0.0015476333536207675,
+      "sem": 0.00014739645511920867,
+      "t": 10.499800367445067,
+      "images_better": 94,
+      "significant": true,
+      "win": false,
+      "loss": true
+    }
+  },
+  "decision_rule": "fixed before running: switch inference.py's CUDA default to fp32 only if fp32 wins ANY metric with paired significance AND the separately-measured throughput cost is <15% (see scripts/benchmark_runtime.py --precision fp32 vs --precision bf16)",
+  "wall_clock_s": 77.2
+}

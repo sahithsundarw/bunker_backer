@@ -329,6 +329,19 @@ throughput cost, undermining much of bf16's benefit at exactly the resolution/ba
 this project has spent effort optimizing), or (b) a human decision on the tolerance/architecture
 trade-off. **Not fixed. Verifier tolerance NOT touched.**
 
+**2026-08-17 update — the trade-off is now priced, not just disclosed (`docs/decisions.md`
+D65).** Full 400-pair paired comparison, real `inference.py` forward path: fp32 wins PSNR
+(+0.00189 dB, t=+6.08) and SSIM (+0.00013, t=+10.37) with statistical significance but
+negligible practical magnitude, while LOSING LPIPS (bf16 is actually better there, t=+10.50)
+and costing a measured **+10.6% throughput** (`scripts/benchmark_runtime.py`, median of 3
+repeats each precision). Confirmed directly against `check_V22`'s own source: switching the
+`--precision auto` default would NOT make V22 pass either way — V22 explicitly runs both
+`--precision bf16` and `--precision fp32` itself and compares them, independent of the
+script's default. **Decision: keep bf16 as the default, do not switch.** The quality "win" is
+noise-level, not a real improvement, and it comes with a real throughput cost on exactly the
+metric (LPIPS) this checkpoint is already weakest on. V22 remains a disclosed, live FAIL —
+this update prices the trade-off decided in D61/D62, it does not change the decision.
+
 ### V51 (tracked-file size cap): a real gap in the existing checkpoint exemption
 
 `weights/best.pt` is now 11,565,729 bytes (11.03 MiB), exceeding `MAX_TRACKED_FILE_BYTES`
