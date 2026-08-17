@@ -3601,3 +3601,52 @@ generator is exercised directly by the training pipeline and its own unit-level 
 (30% ratio, correct shapes) already demonstrates it works; a dedicated preview script would
 only add a visualisation, not new evidence, and was deprioritised given the remaining time
 budget.
+
+**Run outcome: cut short at ~85 minutes by an external cancellation, cause unconfirmed but
+not a code bug.** The job (`6a83212acd3824960fcbb566`) was found `CANCELED` when the watcher's
+next poll landed — NOT by the watcher's own cap logic (its 3h/10800s threshold was never
+reached; no "CAP REACHED" message was printed). Pulled the full job log
+(`fetch_job_logs`) to check for a crash: training was completely healthy throughout, actively
+logging at 1.97 it/s through iteration 85810 (elapsed 1:22:59) with no error, no OOM, no
+stall — it was killed exactly 190 iterations before its next scheduled checkpoint push
+(2000-iter interval), which is why no new checkpoint appeared past step 84000 despite the
+extra ~55 minutes of apparent runtime. Asked the user directly whether they cancelled it
+manually: **they did not.** Leading hypothesis, not confirmed (no billing API exists to check
+directly, per `docs/PLAN_CLOUD.md`): the org's ~$30 HF credit was exhausted or hit a
+platform-enforced spend guard — the running total immediately before this run was ~$25.92,
+and ~85 minutes of this run at $2.50/hr adds ~$3.55, landing right at ~$29.47, consistent
+with a $30 ceiling being enforced. Stated as the leading hypothesis, not asserted as fact.
+
+**Evaluated the last checkpoint the run produced anyway** (step 84000, ~8000 fine-tune
+iters), paired against the incumbent, same harness as every other comparison this session
+(`results/eda/phase3_candidate_vs_shipped_paired.json`):
+
+| Set | PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| val (n=400, in-dist) | **win** +0.330 dB (t=+24.24) | **win** +0.0025 (t=+6.94) | tie (t=−1.11) |
+| proxy-OOD (n=40) | **win** +14.19 dB (t=+10.96, 40/40) | **win** +0.027 (t=+13.67) | **win** −0.034 (t=−10.92) |
+| real-SEM OOD (n=45) | tie (t=−0.56) | tie (t=−0.72) | **win** −0.031 (t=−4.12, 33/45) |
+
+**This is the first fine-tune attempt this session that shows a genuine, paired-significant
+improvement on real-SEM OOD** (LPIPS, the other two metrics tie rather than lose) — with NO
+regression anywhere: it also wins in-distribution and proxy-OOD, unlike D67's attempt which
+traded an in-distribution win for a proxy-OOD loss and no real-SEM gain, and unlike D69's
+interpolation sweep which never found any point that helped real-SEM at all.
+
+**Honest caveat on the proxy-OOD result, stated plainly rather than left to look better than
+it is:** the +14.19 dB proxy-OOD gain is very large — almost certainly because proxy-OOD is
+itself procedural geometric content (gratings, contact-hole grids, checkerboards) and this
+fine-tune trained on 27.5% freshly-generated content from the SAME five categories (different
+random instances, not the same images — `src/structural_content.py` reuses the documented
+recipe, not the proxy-OOD set's own files). This is closing a content-distribution gap
+between training and that specific eval set, not evidence of general-purpose OOD robustness
+gained from nothing — disclosed exactly as such, not oversold as "generalisation."
+
+**Against the plan's pre-committed decision rule** ("promote only if real-SEM OOD improves on
+a paired test AND in-distribution loss is under 0.15 dB"): satisfied on both counts — real-SEM
+OOD improves (LPIPS win, no losses on the other two) and in-distribution does not lose at all
+(it wins). **This candidate is promotable.** Reported to the user before promoting — checkpoint
+promotion triggers the full regeneration cascade (qualitative panels, metrics_summary,
+runtime_report, restored-outputs republish, README, ledger) and is exactly the kind of
+consequential, hard-to-cheaply-reverse action this project's own precedent (D49, D61) treats
+as a deliberate, disclosed step, not a silent one.
