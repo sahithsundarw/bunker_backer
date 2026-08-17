@@ -1,0 +1,107 @@
+{
+  "val": {
+    "psnr": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": -0.02336476749483398,
+      "sem": 0.004055076786148854,
+      "t": -5.761855749474902,
+      "images_better": 126,
+      "significant": true,
+      "win": false,
+      "loss": true
+    },
+    "ssim": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": -0.0003777450987123025,
+      "sem": 0.00015620640733145387,
+      "t": -2.418243304903405,
+      "images_better": 113,
+      "significant": true,
+      "win": false,
+      "loss": true
+    },
+    "lpips": {
+      "test": "paired",
+      "n": 400,
+      "mean_diff": -0.001975309723056853,
+      "sem": 0.0007807491248193841,
+      "t": -2.530018491552987,
+      "images_better": 195,
+      "significant": true,
+      "win": true,
+      "loss": false
+    }
+  },
+  "proxy_ood": {
+    "psnr": {
+      "test": "paired",
+      "n": 40,
+      "mean_diff": 0.4331788732608911,
+      "sem": 0.06730947477447573,
+      "t": 6.435629972040071,
+      "images_better": 37,
+      "significant": true,
+      "win": true,
+      "loss": false
+    },
+    "ssim": {
+      "test": "paired",
+      "n": 40,
+      "mean_diff": 0.002033379571964186,
+      "sem": 0.00043247880087011255,
+      "t": 4.701686112413348,
+      "images_better": 32,
+      "significant": true,
+      "win": true,
+      "loss": false
+    },
+    "lpips": {
+      "test": "paired",
+      "n": 40,
+      "mean_diff": -0.006020515621639788,
+      "sem": 0.0016859155827033308,
+      "t": -3.5710658845598995,
+      "images_better": 34,
+      "significant": true,
+      "win": true,
+      "loss": false
+    }
+  },
+  "real_sem_ood": {
+    "psnr": {
+      "test": "paired",
+      "n": 45,
+      "mean_diff": -0.013749674223739324,
+      "sem": 0.005552721730171388,
+      "t": -2.4762044438547677,
+      "images_better": 11,
+      "significant": true,
+      "win": false,
+      "loss": true
+    },
+    "ssim": {
+      "test": "paired",
+      "n": 45,
+      "mean_diff": -0.005798512523323359,
+      "sem": 0.0019529182775067815,
+      "t": -2.9691526727509077,
+      "images_better": 14,
+      "significant": true,
+      "win": false,
+      "loss": true
+    },
+    "lpips": {
+      "test": "paired",
+      "n": 45,
+      "mean_diff": 0.01820289691289266,
+      "sem": 0.009428866730662991,
+      "t": 1.9305498139767134,
+      "images_better": 19,
+      "significant": false,
+      "win": false,
+      "loss": false
+    }
+  }
+}

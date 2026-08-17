@@ -3285,3 +3285,53 @@ decision, exactly as it was under D61/D62's.
 `inference.py` is unchanged by this decision (no edit needed — bf16 was already the default).
 `results/eda/precision_ablation.json`, `results/eda/runtime_bf16_ablation.md`,
 `results/eda/runtime_fp32_ablation.md` hold the measurements.
+
+---
+
+## D66 — B3: free re-score of every long-run "new best" checkpoint; no swap warranted
+
+Every checkpoint `configs/long_run_e.yaml`'s run pushed to the Hub as a new PSNR-best (35
+checkpoints, step 2000 through the shipped 76000) was re-scored on the full 400-pair val split
+under PSNR-only, SSIM-only, LPIPS-only and a disclosed equal-weighted z-score blend
+(`scripts/rescore_checkpoints.py`, `results/eda/rescore_long_run_e.json`) — checking whether
+`train.py`'s hardcoded PSNR-only selection left a better checkpoint on the table at zero
+additional training cost.
+
+**Mean-based blend result (misleading on its own, see below):** the blend's naive winner was
+**step 54000**, not the shipped step 76000 — mean PSNR 29.2314 vs 29.2548 (worse), mean SSIM
+0.79174 vs 0.79211 (worse), mean LPIPS 0.25427 vs 0.25625 (better). PSNR/SSIM-only criteria
+both correctly pick the shipped 76000 (monotonic improvement toward the end of the run).
+
+**This mean-comparison result does NOT survive a proper paired test** — exactly the kind of
+self-serving reading `docs/decisions.md` D31 and `src.metrics.paired_verdict` exist to
+prevent, and the reason this project never trusts a bare mean delta. Ran the real paired test
+(candidate=step54000, ref=shipped step76000) on val, proxy-OOD and real-SEM OOD:
+
+| Set | PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| val (n=400, in-dist) | **loss** (t=−5.76) | **loss** (t=−2.42) | win (t=−2.53) |
+| proxy-OOD (n=40) | win (t=+6.44) | win (t=+4.70) | win (t=−3.57) |
+| real-SEM OOD (n=45) | **loss** (t=−2.48) | **loss** (t=−2.97) | tie (t=+1.93, just under 1.96) |
+
+Step 54000 wins outright only on proxy-OOD (a set that was already fine for the shipped
+checkpoint per D63 — no problem there to fix). On the in-distribution val split it wins only
+1 of 3 metrics, below V28's own "win >= 2/3" bar for a promotable candidate. **On real-SEM
+OOD — the actual axis this whole investigation exists to improve — it is WORSE, not better**,
+losing PSNR and SSIM significantly with only a LPIPS tie. **Decision: no swap. The shipped
+checkpoint (step 76000) remains the correct pick; the selection-metric gap is real (PSNR-only
+selection during training) but re-scoring shows it did not cost anything in this run** — an
+honest null result, not the free win the mean-based blend suggested at first glance.
+
+The LPIPS-only "winner," step 12000, was not paired-tested further: its own reported means
+(PSNR 28.90, SSIM 0.7826, both far below the shipped checkpoint's 29.25/0.7921) make it an
+implausible candidate on its face — a checkpoint already losing badly on 2 metrics by
+~30-60x this comparison's typical margins does not warrant a formal test.
+
+**Scope cut, disclosed:** the 6 Pareto-sweep "final" checkpoints (different
+architectures/widths entirely, from the config-selection sweep D55 already settled) were not
+re-scored under this same procedure — lower relevance (they are not candidates for swapping
+into the shipped checkpoint's slot; the sweep already made that architecture decision) and
+outside the remaining time budget. Not silently dropped: recorded here as a deliberate cut,
+not an oversight.
+
+`results/eda/step54000_vs_shipped_paired.json` holds the full paired comparison.

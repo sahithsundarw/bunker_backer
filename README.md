@@ -172,10 +172,15 @@ this but is not itself a switch — there is no blended-criterion option in the 
 KLA scores an undisclosed PSNR+SSIM+LPIPS blend, and the shipped checkpoint's own margin over
 the U-Net baseline is narrowest on LPIPS (t=−3.26, the weakest of its three wins above) — so a
 PSNR-only selection criterion is a real, disclosed limitation, not a neutral implementation
-detail. Mitigation in progress: every checkpoint the Round 2 sweep and long run produced is
-being re-scored under PSNR-only, SSIM-only, LPIPS-only and a blended criterion
-(`docs/decisions.md` D63's plan, B3) to check whether a different checkpoint the training run
-already produced — at zero additional training cost — would have been a better pick.
+detail. **Checked, not just disclosed** (`docs/decisions.md` D66): re-scored all 35 "new best"
+checkpoints the long run pushed, under PSNR-only, SSIM-only, LPIPS-only and a blended
+criterion. A naive mean-based blend suggested an earlier checkpoint (step 54000) scored
+better overall — but that did **not** survive a proper paired significance test: step 54000
+loses PSNR and SSIM significantly on the in-distribution val split (only 1 of 3 metrics won,
+below this project's own "win ≥ 2/3" bar) and is WORSE, not better, on real-SEM OOD — the
+actual axis PSNR-only selection was worth worrying about. **No swap warranted; the shipped
+checkpoint is the correct pick.** The selection-metric limitation itself is still real and
+still disclosed — this run just didn't happen to cost anything.
 
 ### Failure cases
 

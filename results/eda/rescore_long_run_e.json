@@ -1,0 +1,1242 @@
+{
+  "generated_at": "2026-08-17T13:01:36Z",
+  "device": "cuda",
+  "repo_id": "Team-Ceciroleo67/kla-ps01-checkpoints",
+  "pattern": "20260816T211258Z-long_run_e-s42/step_*/*",
+  "n_val": 400,
+  "blend_method": "EQUAL-WEIGHTED z-score across PSNR/SSIM/(negated)LPIPS -- a disclosed, defensible choice, NOT KLA's real undisclosed weights",
+  "candidates": [
+    {
+      "n": 400,
+      "psnr_mean": 28.259427317677392,
+      "psnr_std": 4.2139597873317785,
+      "ssim_mean": 0.7537097977539636,
+      "ssim_std": 0.15597130108423865,
+      "meta": {
+        "iter": 2000,
+        "embedded_metrics": {
+          "val_psnr": 29.813619983631373,
+          "val_ssim": 0.7932953078804921,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.28915881281718614,
+      "lpips_std": 0.17805724075568757,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00002000/long_run_e.pt",
+      "blend_score": -4.489198878792507
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.58687486933222,
+      "psnr_std": 4.371635493266283,
+      "ssim_mean": 0.7694630524160544,
+      "ssim_std": 0.14987416281306487,
+      "meta": {
+        "iter": 4000,
+        "embedded_metrics": {
+          "val_psnr": 30.159429934524784,
+          "val_ssim": 0.8043945257489475,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2591935800667852,
+      "lpips_std": 0.1511347222763152,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00004000/long_run_e.pt",
+      "blend_score": -1.5278746547882223
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.75393912820968,
+      "psnr_std": 4.479292253024966,
+      "ssim_mean": 0.7766639000160012,
+      "ssim_std": 0.1484733246399394,
+      "meta": {
+        "iter": 6000,
+        "embedded_metrics": {
+          "val_psnr": 30.33455540923683,
+          "val_ssim": 0.8100811444696189,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.26133353066165,
+      "lpips_std": 0.15091113049535806,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00006000/long_run_e.pt",
+      "blend_score": -1.0742123665616143
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.831891072110487,
+      "psnr_std": 4.52526032786564,
+      "ssim_mean": 0.7803746712150479,
+      "ssim_std": 0.14620946042851146,
+      "meta": {
+        "iter": 8000,
+        "embedded_metrics": {
+          "val_psnr": 30.420021826012576,
+          "val_ssim": 0.8128363497899664,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25876672108657656,
+      "lpips_std": 0.14406101128649318,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00008000/long_run_e.pt",
+      "blend_score": -0.638302169361941
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.87857848627777,
+      "psnr_std": 4.547461282395509,
+      "ssim_mean": 0.7815374656125147,
+      "ssim_std": 0.1467433515488187,
+      "meta": {
+        "iter": 10000,
+        "embedded_metrics": {
+          "val_psnr": 30.474400023182515,
+          "val_ssim": 0.8136043767481973,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2603760850802064,
+      "lpips_std": 0.14600519751571944,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00010000/long_run_e.pt",
+      "blend_score": -0.6083346417999326
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.900169614222705,
+      "psnr_std": 4.5484103671468565,
+      "ssim_mean": 0.7826092184689641,
+      "ssim_std": 0.14549150108407893,
+      "meta": {
+        "iter": 12000,
+        "embedded_metrics": {
+          "val_psnr": 30.500076356324,
+          "val_ssim": 0.8144042145614185,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2523911587125622,
+      "lpips_std": 0.13984163831908636,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00012000/long_run_e.pt",
+      "blend_score": -0.059863721383903355
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.92729531693767,
+      "psnr_std": 4.565815114974854,
+      "ssim_mean": 0.7836368876337966,
+      "ssim_std": 0.14589653170911937,
+      "meta": {
+        "iter": 14000,
+        "embedded_metrics": {
+          "val_psnr": 30.52814725493012,
+          "val_ssim": 0.8155335472637993,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25807225740514694,
+      "lpips_std": 0.14448312275976785,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00014000/long_run_e.pt",
+      "blend_score": -0.30467762598547754
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.94482011787904,
+      "psnr_std": 4.565863635777905,
+      "ssim_mean": 0.784177055772187,
+      "ssim_std": 0.14561557976148165,
+      "meta": {
+        "iter": 16000,
+        "embedded_metrics": {
+          "val_psnr": 30.54474574005238,
+          "val_ssim": 0.8155559581881588,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25436959327664227,
+      "lpips_std": 0.14144879922703424,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00016000/long_run_e.pt",
+      "blend_score": -0.03673849747214708
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.962960368298003,
+      "psnr_std": 4.574661217811483,
+      "ssim_mean": 0.7849424061146866,
+      "ssim_std": 0.14541185120657804,
+      "meta": {
+        "iter": 18000,
+        "embedded_metrics": {
+          "val_psnr": 30.567171033585854,
+          "val_ssim": 0.8165491511548801,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25824431275483223,
+      "lpips_std": 0.14616688975064462,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00018000/long_run_e.pt",
+      "blend_score": -0.20141878858307502
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.977072751500888,
+      "psnr_std": 4.579361071156608,
+      "ssim_mean": 0.7853251017540467,
+      "ssim_std": 0.14564823373411437,
+      "meta": {
+        "iter": 20000,
+        "embedded_metrics": {
+          "val_psnr": 30.581065145022603,
+          "val_ssim": 0.8164823398803418,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2628990622423589,
+      "lpips_std": 0.1502041385372347,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00020000/long_run_e.pt",
+      "blend_score": -0.4349716565580515
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.9900824119963,
+      "psnr_std": 4.586181345270739,
+      "ssim_mean": 0.78601146493971,
+      "ssim_std": 0.1447572286313523,
+      "meta": {
+        "iter": 22000,
+        "embedded_metrics": {
+          "val_psnr": 30.598300601554993,
+          "val_ssim": 0.8171317018647583,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2606742743542418,
+      "lpips_std": 0.14533036949112355,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00022000/long_run_e.pt",
+      "blend_score": -0.2540983372999041
+    },
+    {
+      "n": 400,
+      "psnr_mean": 28.999801565243438,
+      "psnr_std": 4.586355396281845,
+      "ssim_mean": 0.7861674282936008,
+      "ssim_std": 0.14506871288112502,
+      "meta": {
+        "iter": 24000,
+        "embedded_metrics": {
+          "val_psnr": 30.605745370687522,
+          "val_ssim": 0.8175933656573677,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2628524507349357,
+      "lpips_std": 0.1495328609830693,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00024000/long_run_e.pt",
+      "blend_score": -0.3595617961258579
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.00919931219318,
+      "psnr_std": 4.587697892816915,
+      "ssim_mean": 0.7866374539769697,
+      "ssim_std": 0.14470826908556095,
+      "meta": {
+        "iter": 26000,
+        "embedded_metrics": {
+          "val_psnr": 30.61380403199082,
+          "val_ssim": 0.8178118739123653,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.26090631016530097,
+      "lpips_std": 0.14871238749599178,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00026000/long_run_e.pt",
+      "blend_score": -0.21020109555948754
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.021931699238213,
+      "psnr_std": 4.588388041910663,
+      "ssim_mean": 0.7873473549705721,
+      "ssim_std": 0.14396604879551436,
+      "meta": {
+        "iter": 28000,
+        "embedded_metrics": {
+          "val_psnr": 30.619723696603792,
+          "val_ssim": 0.8184067795295753,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2590253952750936,
+      "lpips_std": 0.14694260402371498,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00028000/long_run_e.pt",
+      "blend_score": -0.04884621249435119
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.041541425530458,
+      "psnr_std": 4.590422841022347,
+      "ssim_mean": 0.7877012925994592,
+      "ssim_std": 0.1440598938594897,
+      "meta": {
+        "iter": 30000,
+        "embedded_metrics": {
+          "val_psnr": 30.639887947325665,
+          "val_ssim": 0.8186270293764261,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.259630254143849,
+      "lpips_std": 0.1493623650920162,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00030000/long_run_e.pt",
+      "blend_score": -0.03804994341078002
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.066858822751037,
+      "psnr_std": 4.589197629058139,
+      "ssim_mean": 0.788008544151339,
+      "ssim_std": 0.1443971705882727,
+      "meta": {
+        "iter": 32000,
+        "embedded_metrics": {
+          "val_psnr": 30.66321095055074,
+          "val_ssim": 0.8188002666969867,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2582989290636033,
+      "lpips_std": 0.1468867839538165,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00032000/long_run_e.pt",
+      "blend_score": 0.0929019039258438
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.09435494525631,
+      "psnr_std": 4.595052025625462,
+      "ssim_mean": 0.7886196632966257,
+      "ssim_std": 0.14385093088547796,
+      "meta": {
+        "iter": 34000,
+        "embedded_metrics": {
+          "val_psnr": 30.692838612244405,
+          "val_ssim": 0.819213477818217,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2574968841252849,
+      "lpips_std": 0.14661984536638178,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00034000/long_run_e.pt",
+      "blend_score": 0.20971765662656508
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.11652908957907,
+      "psnr_std": 4.593294279081166,
+      "ssim_mean": 0.7890140242327053,
+      "ssim_std": 0.14449546653846657,
+      "meta": {
+        "iter": 36000,
+        "embedded_metrics": {
+          "val_psnr": 30.715203500105126,
+          "val_ssim": 0.8198641155702228,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25942100315354766,
+      "lpips_std": 0.1507527301937957,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00036000/long_run_e.pt",
+      "blend_score": 0.14907255557607305
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.138961946360904,
+      "psnr_std": 4.59889637602998,
+      "ssim_mean": 0.7893711080485372,
+      "ssim_std": 0.14461730603408166,
+      "meta": {
+        "iter": 38000,
+        "embedded_metrics": {
+          "val_psnr": 30.743738253163006,
+          "val_ssim": 0.8203183189184778,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25881630238611253,
+      "lpips_std": 0.15009354700206531,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00038000/long_run_e.pt",
+      "blend_score": 0.23520607071725272
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.172933965378096,
+      "psnr_std": 4.602981604145362,
+      "ssim_mean": 0.7899340767359945,
+      "ssim_std": 0.14441324502550343,
+      "meta": {
+        "iter": 40000,
+        "embedded_metrics": {
+          "val_psnr": 30.768828508990058,
+          "val_ssim": 0.8206498928096144,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25904379003215583,
+      "lpips_std": 0.1499478365074125,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00040000/long_run_e.pt",
+      "blend_score": 0.299708402287558
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.188644543993654,
+      "psnr_std": 4.609915212824205,
+      "ssim_mean": 0.7905242312312568,
+      "ssim_std": 0.14337635768559273,
+      "meta": {
+        "iter": 42000,
+        "embedded_metrics": {
+          "val_psnr": 30.77106491611971,
+          "val_ssim": 0.8209238598017238,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25793039056006817,
+      "lpips_std": 0.14703127659209517,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00042000/long_run_e.pt",
+      "blend_score": 0.4154715349456399
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.198435178086118,
+      "psnr_std": 4.611920946688898,
+      "ssim_mean": 0.7907430510335022,
+      "ssim_std": 0.14341560876036952,
+      "meta": {
+        "iter": 44000,
+        "embedded_metrics": {
+          "val_psnr": 30.779045187505634,
+          "val_ssim": 0.8212378463408666,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25610198934562506,
+      "lpips_std": 0.146930175367191,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00044000/long_run_e.pt",
+      "blend_score": 0.5474300789715284
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.213051994040885,
+      "psnr_std": 4.614520840810038,
+      "ssim_mean": 0.7911637142309444,
+      "ssim_std": 0.14297125166014885,
+      "meta": {
+        "iter": 46000,
+        "embedded_metrics": {
+          "val_psnr": 30.79415267681221,
+          "val_ssim": 0.8213542317496314,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25615098257549107,
+      "lpips_std": 0.1455056307410008,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00046000/long_run_e.pt",
+      "blend_score": 0.585944713323975
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.22216892566241,
+      "psnr_std": 4.6170375005254165,
+      "ssim_mean": 0.7914326182620498,
+      "ssim_std": 0.14273138050604692,
+      "meta": {
+        "iter": 48000,
+        "embedded_metrics": {
+          "val_psnr": 30.798686275124158,
+          "val_ssim": 0.8217339268437526,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2564448276348412,
+      "lpips_std": 0.14469420050700266,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00048000/long_run_e.pt",
+      "blend_score": 0.5948445987717289
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.2279435589816,
+      "psnr_std": 4.616185318491043,
+      "ssim_mean": 0.7916528851229626,
+      "ssim_std": 0.14245313987704808,
+      "meta": {
+        "iter": 50000,
+        "embedded_metrics": {
+          "val_psnr": 30.806790328490965,
+          "val_ssim": 0.8218859340217279,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2554313274472952,
+      "lpips_std": 0.14466063627877698,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00050000/long_run_e.pt",
+      "blend_score": 0.6729136060690477
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.234998621572284,
+      "psnr_std": 4.620235539565928,
+      "ssim_mean": 0.7915236216785153,
+      "ssim_std": 0.14310548379575846,
+      "meta": {
+        "iter": 52000,
+        "embedded_metrics": {
+          "val_psnr": 30.818168680593068,
+          "val_ssim": 0.8220600524841908,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25751253897789866,
+      "lpips_std": 0.14800337664241733,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00052000/long_run_e.pt",
+      "blend_score": 0.5563499701877849
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.231390456370892,
+      "psnr_std": 4.6226950438405385,
+      "ssim_mean": 0.7917352661630567,
+      "ssim_std": 0.14277340942949704,
+      "meta": {
+        "iter": 54000,
+        "embedded_metrics": {
+          "val_psnr": 30.819724917992858,
+          "val_ssim": 0.8220940774642089,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25427015581633894,
+      "lpips_std": 0.14374635995356586,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00054000/long_run_e.pt",
+      "blend_score": 0.7498976679736774
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.237896662158764,
+      "psnr_std": 4.621209617503556,
+      "ssim_mean": 0.791470891163984,
+      "ssim_std": 0.1438901361337933,
+      "meta": {
+        "iter": 56000,
+        "embedded_metrics": {
+          "val_psnr": 30.826974291974775,
+          "val_ssim": 0.8221036314078924,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25788919733837246,
+      "lpips_std": 0.14942728731444507,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00056000/long_run_e.pt",
+      "blend_score": 0.5364795885298498
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.241652924543235,
+      "psnr_std": 4.629547460917776,
+      "ssim_mean": 0.7918393316700438,
+      "ssim_std": 0.14303208428763994,
+      "meta": {
+        "iter": 58000,
+        "embedded_metrics": {
+          "val_psnr": 30.828240752279385,
+          "val_ssim": 0.8221300218853436,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25620978949591516,
+      "lpips_std": 0.1447678175005892,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00058000/long_run_e.pt",
+      "blend_score": 0.6569456675409399
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.24506328379527,
+      "psnr_std": 4.630921158055574,
+      "ssim_mean": 0.7919807898867478,
+      "ssim_std": 0.14292270378491467,
+      "meta": {
+        "iter": 60000,
+        "embedded_metrics": {
+          "val_psnr": 30.828619233444545,
+          "val_ssim": 0.822229348033993,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2566156410938129,
+      "lpips_std": 0.1457770904824736,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00060000/long_run_e.pt",
+      "blend_score": 0.6447616394103858
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.249455585697433,
+      "psnr_std": 4.62680267240166,
+      "ssim_mean": 0.7918056260329074,
+      "ssim_std": 0.14338083079782163,
+      "meta": {
+        "iter": 62000,
+        "embedded_metrics": {
+          "val_psnr": 30.833716008164743,
+          "val_ssim": 0.822310463330762,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25645852025598287,
+      "lpips_std": 0.14493320586767267,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00062000/long_run_e.pt",
+      "blend_score": 0.6530422914947652
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.244491305339125,
+      "psnr_std": 4.616755563262053,
+      "ssim_mean": 0.7919661022070414,
+      "ssim_std": 0.14297623886756394,
+      "meta": {
+        "iter": 64000,
+        "embedded_metrics": {
+          "val_psnr": 30.83652712237194,
+          "val_ssim": 0.822365187008633,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2557313466537744,
+      "lpips_std": 0.14563834819315402,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00064000/long_run_e.pt",
+      "blend_score": 0.6949835878281222
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.247220753354277,
+      "psnr_std": 4.6175099759573355,
+      "ssim_mean": 0.7919568595894279,
+      "ssim_std": 0.14308617048960412,
+      "meta": {
+        "iter": 66000,
+        "embedded_metrics": {
+          "val_psnr": 30.836884732753855,
+          "val_ssim": 0.8222745943781544,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2558713636221364,
+      "lpips_std": 0.14596913592329552,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00066000/long_run_e.pt",
+      "blend_score": 0.6906280677486488
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.25102024458216,
+      "psnr_std": 4.615986425385786,
+      "ssim_mean": 0.7920721497563846,
+      "ssim_std": 0.14294295691836423,
+      "meta": {
+        "iter": 68000,
+        "embedded_metrics": {
+          "val_psnr": 30.840530473870217,
+          "val_ssim": 0.8223656108129928,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.25739131765905765,
+      "lpips_std": 0.14646901517840144,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00068000/long_run_e.pt",
+      "blend_score": 0.6126765825245649
+    },
+    {
+      "n": 400,
+      "psnr_mean": 29.25475522386573,
+      "psnr_std": 4.620957477690264,
+      "ssim_mean": 0.7921130112617689,
+      "ssim_std": 0.14320831256260044,
+      "meta": {
+        "iter": 76000,
+        "embedded_metrics": {
+          "val_psnr": 30.84271004238913,
+          "val_ssim": 0.8225016133586374,
+          "val_n": 100,
+          "selection": "ema/psnr",
+          "split": "configs/split_val.txt",
+          "structural_kind": "ssim"
+        },
+        "config": {
+          "name": "NAFSR",
+          "width": 64,
+          "num_blocks": 32,
+          "scale": 2,
+          "in_ch": 1,
+          "out_ch": 1,
+          "dw_expand": 2,
+          "ffn_expand": 2,
+          "layerscale_init": 1.0,
+          "film_dim": 16,
+          "uncertainty": true
+        }
+      },
+      "lpips_mean": 0.2562454655393958,
+      "lpips_std": 0.14627115202531754,
+      "hub_path": "20260816T211258Z-long_run_e-s42/step_00076000/long_run_e.pt",
+      "blend_score": 0.6873742017232117
+    }
+  ],
+  "winners_by_criterion": {
+    "psnr_only": "20260816T211258Z-long_run_e-s42/step_00076000/long_run_e.pt",
+    "ssim_only": "20260816T211258Z-long_run_e-s42/step_00076000/long_run_e.pt",
+    "lpips_only": "20260816T211258Z-long_run_e-s42/step_00012000/long_run_e.pt",
+    "blended_equal_zscore": "20260816T211258Z-long_run_e-s42/step_00054000/long_run_e.pt"
+  },
+  "wall_clock_s": 4024.98
+}
