@@ -228,6 +228,15 @@ recommendation is: state it, ship on time, fix it properly in Round 2 if selecte
 
 ## B11 — V24 (cross-process determinism) is genuinely flaky, pre-existing, not from the V22 fix
 
+**2026-08-17 update: the same flake class now confirmed also hitting V21.** A full `--strict`
+run reported `V21 FAIL: repeat runs are not byte-identical` for the first time. `check_V21`
+(`scripts/verify_all.py`) shares V24's exact mechanism — it launches `inference.py` as
+separate subprocesses and compares outputs, the same cross-process-boundary path where
+`cudnn.benchmark=True` algorithm selection can tie-break differently. Re-ran `--only V21`
+three times immediately after: PASS all three, confirming this is the same known intermittent
+class (B11), not a new regression from any edit this session made. Broadening this entry's
+scope to cover both V21 and V24 rather than opening a second blocker for the identical cause.
+
 Found by `inference-engineer` while fixing V22 (`docs/decisions.md` D42), confirmed
 independently by the main session: `py -3.12 scripts/verify_all.py --only V24` fails roughly
 half the time (measured: PASS, FAIL, PASS, FAIL over 4 consecutive runs). **This is present on

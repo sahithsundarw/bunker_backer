@@ -630,16 +630,18 @@ clean-room checks. It is **not** listed as a fenced command here because it exit
 while the project is incomplete, and no command in this README exits non-zero.
 
 **The suite is not green, and this README does not claim it is.** Full fresh run, 2026-08-17:
-**64 PASS / 5 FAIL** (V04, V22, V24, V46, V53). V04 and V46 require `--fresh-clone` and were
-independently verified passing on a real Linux/CUDA container (`docs/STATE.md`) but are not
-run in that mode by default on this dev machine. **V22 is a disclosed, live fail, not a bug
-being chased** — see the status block at the top of this file and `docs/BLOCKERS.md` B12 for
-the bf16/fp32 divergence investigation and why the human accepted it as a trade-off rather
-than authorising a fix. **V24** (cross-process determinism) is a pre-existing, genuinely
-intermittent flake (~20% of runs, `docs/BLOCKERS.md` B11) — it rolled a fail on this run; it
-has also been observed passing. **V53** (the deck contract) correctly FAILs: the deck at the
-repo root is still `PLACEHOLDER_TEAM_KLA_PS01.pdf` with unfilled team-info placeholders, a
-real, not-yet-closed gap, not a check malfunction. No check has ever been weakened, skipped,
+**63 PASS / 6 FAIL** (V04, V21, V22, V24, V46, V53). V04 and V46 require `--fresh-clone` and
+were independently verified passing on a real Linux/CUDA container (`docs/STATE.md`) but are
+not run in that mode by default on this dev machine. **V22 is a disclosed, live fail, not a
+bug being chased** — see the status block at the top of this file and `docs/BLOCKERS.md` B12
+for the bf16/fp32 divergence investigation and why the human accepted it as a trade-off
+rather than authorising a fix. **V21 and V24** (both cross-process determinism checks) share
+a pre-existing, genuinely intermittent flake (~20% of runs, `docs/BLOCKERS.md` B11, root
+cause `cudnn.benchmark=True` algorithm tie-breaks across separate process launches) — V21
+rolled a fail on this run and passed 3/3 on immediate re-run, confirming it is the known
+class, not a new break. **V53** (the deck contract) correctly FAILs: the deck at the repo
+root is still `PLACEHOLDER_TEAM_KLA_PS01.pdf` with unfilled team-info placeholders, a real,
+not-yet-closed gap, not a check malfunction. No check has ever been weakened, skipped,
 or had its tolerance widened to turn a FAIL green (Prime Directive 1) — every V-check addition
 in this project's history was a strengthening, negative-controlled before being trusted. The
 authoritative per-check status is always `results/verification_report.json`, regenerated on
