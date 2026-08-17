@@ -1,0 +1,11 @@
+{
+  "checkpoint": "C:\\Users\\sahit\\AppData\\Local\\Temp\\claude\\C--Users-sahit-OneDrive-Desktop-semi\\07e92344-20ec-4903-8211-c601a70eaa61\\scratchpad\\sweep_e.pt",
+  "n_images": 400,
+  "n_pooled_pixels": 80000,
+  "per_image_pearson_r": 0.9645787787020643,
+  "per_image_spearman_r": 0.940707441921512,
+  "pooled_pixel_pearson_r": 0.4431172170315376,
+  "pooled_pixel_spearman_r": 0.5644078581095091,
+  "mean_exp_log_var": 0.002311225825251313,
+  "mean_sq_err": 0.002278599616001884
+}

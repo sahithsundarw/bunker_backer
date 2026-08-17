@@ -1,0 +1,14 @@
+{
+  "checkpoint": "C:\\Users\\sahit\\AppData\\Local\\Temp\\claude\\C--Users-sahit-OneDrive-Desktop-semi\\07e92344-20ec-4903-8211-c601a70eaa61\\scratchpad\\sweep_e.pt",
+  "n": 300,
+  "pearson_r_embed_norm_vs_true_noise_std": 0.018729296954936064,
+  "max_abs_pearson_r_single_dim_vs_true_noise_std": 0.05391914910793197,
+  "held_out_linear_probe_r2": 0.23123943552665804,
+  "embed_norm_mean": 0.6286871079603831,
+  "embed_norm_std": 0.10491487850090833,
+  "true_noise_std_mean": 0.1611272920809275,
+  "true_noise_std_range": [
+    0.0,
+    0.24225310636981034
+  ]
+}

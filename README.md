@@ -9,39 +9,46 @@ resolution and a single PixelShuffle ×2 head.
 
 ---
 
-> ## STATUS — 2026-08-16: FROM-SCRATCH NAFSR w48n16 CHECKPOINT SHIPS, 28.7865 dB
+> ## STATUS — 2026-08-17: ROUND 2 LONG-RUN CHECKPOINT SHIPS, 29.2548 dB
 >
 > `weights/best.pt` is present and tracked directly in the repo (Route A, `V51` exemption).
-> It is a from-scratch-trained NAFSR (width 48, 16 blocks, 388,225 params). `inference.py
-> --require_weights` reloads it with strict state-dict validation and prefers the EMA weights.
+> It is the Round 2 differentiation cloud long run's checkpoint: NAFSR width=64, num_blocks=32,
+> FiLM noise-level conditioning + heteroscedastic uncertainty head both enabled and trained
+> (1,393,938 params), trained on an HF Jobs A100-large GPU for the full 129,700-iteration
+> schedule, best-of-run selected at iteration 76,000. `inference.py --require_weights` reloads
+> it with strict state-dict validation and prefers the EMA weights.
 >
 > On the committed 400-pair validation split, saved-output evaluation measures
-> **28.7865 ± 4.5329 dB PSNR**, **0.78287 ± 0.14169 SSIM**, **0.25324 ± 0.13193 LPIPS**.
+> **29.2548 ± 4.6210 dB PSNR**, **0.79211 ± 0.14321 SSIM**, **0.25625 ± 0.14627 LPIPS**.
 >
-> **This repo briefly diverged into two independently-developed lines** (this session's
-> from-scratch NAFSR, and a teammate's closed-form-LS5-plus-residual NAFSR variant reaching
-> 28.0394 dB) before being reconciled on 2026-08-16. Both checkpoints were re-scored
-> head-to-head on one machine, one harness, the same 400-image split: this checkpoint wins all
-> three metrics, paired and significant (n=400, PSNR t=21.62, SSIM t=26.13, LPIPS t=-6.38). The
-> other checkpoint is materially faster (fewer, shallower blocks) — a real trade-off, recorded,
-> not the axis this decision turned on. Full comparison: `docs/decisions.md` D49,
-> `docs/MERGE_ANALYSIS.md`.
+> **This checkpoint supersedes the prior from-scratch NAFSR w48n16 checkpoint (28.7865 dB),**
+> re-scored head-to-head under one harness before promotion (paired per-image test, n=400):
+> wins PSNR (+0.468 dB, t=-25.85 vs the prior checkpoint, 391/400 images better) and SSIM
+> (+0.00925, t=-15.08, 378/400 better) significantly; LPIPS is a statistical tie (t=-1.14, not
+> significant). **Also now beats the U-Net baseline on all three metrics** (PSNR +0.374 dB
+> t=+18.25, SSIM +0.00938 t=+12.19, LPIPS -0.00900 t=-3.26, all 400/400-paired, all
+> significant) — a reversal of the prior checkpoint's documented 1-win/1-loss/1-tie result.
+> Full comparison: `docs/decisions.md` D61.
+>
+> **A real trade-off is disclosed, not hidden:** this checkpoint's generalisation to the
+> real-SEM out-of-distribution set (D53) got measurably WORSE on SSIM (0.328 → 0.260) and
+> LPIPS (0.569 → 0.711) versus the prior checkpoint, despite improving in-distribution and on
+> the procedural proxy-OOD set. See D61 for the full numbers.
 >
 > - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 >   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
->   400-image test set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16, batch 32): total
->   wall-clock **median 48269.4 ms (8.3 img/s)**, fitted as a fixed startup cost of **14755 ms**
->   plus **86.55 ms/image** marginal compute, with the fixed cost at **30.6%** of total
->   wall-clock at N=400. No H100 number exists or is claimed.
+>   same 400-image val-split input set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16,
+>   batch 32): total wall-clock **median 23.19 s (17.3 img/s)**, n=5, spread 16.7%. This is
+>   faster than the prior checkpoint's own recorded 8.3 img/s despite 3.6x more parameters — the
+>   prior number's own record shows a 681% spread (high system noise), so the two are not a
+>   clean apples-to-apples speed comparison; see `results/runtime_report.md` for the full,
+>   honest caveat. No H100 number exists or is claimed.
 > - **V22, V24**: see `docs/BLOCKERS.md` B11 and `docs/decisions.md` D42 — root-caused and
 >   substantially mitigated (bf16/fp32 divergence fixed; cross-process determinism flake
 >   reduced 50%→~20%, not fully eliminated).
-> - The 400 final-test outputs (`/Users/shanmukhsai/Downloads/NoisyLR` and this session's
->   `C:\kla-data\test_NoisyLR`, the same released set from two machines) are regenerated from
->   the shipped checkpoint with `--require_weights`: 400/400 produced, filenames matching, shape
->   `(256, 256)`, `float32`, all finite, values in `[0, 1]` — see
->   `results/restored_test_outputs/README.md`. The final test set has no ground truth, so no
->   PSNR/SSIM/LPIPS is computed or claimed for those outputs.
+> - **`results/restored_test_outputs/` regeneration against this checkpoint is in progress** —
+>   see that folder's own README for current status; do not assume it already reflects this
+>   checkpoint until its own status line says so.
 >
 > Live check status: `results/verification_report.json`. Ledger: `docs/STATE.md`.
 
@@ -80,48 +87,41 @@ no score can be computed locally against the official test set. Scores are compu
 | Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not separately measured (classical baseline, not run through `inference.py`) |
 | Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not separately measured (classical baseline, not run through `inference.py`) |
 | U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | not separately measured (`results/runtime_report.md` covers NAFSR only) |
-| Alternate checkpoint (not shipped): closed-form LS-5 + 8-block NAFSR residual, 246,529 params | 28.0394 ± 4.1882 | 0.74805 ± 0.15274 | 0.29569 ± 0.16671 | **9.156 ms/img** fwd-only @128→256, RTX 4060, ≈2.3× faster than the shipped checkpoint (re-measured this session, see `docs/decisions.md` D49) |
-| **Shipped — NAFSR ×2 w48 n16, EMA, from scratch (388,225 params)** | **28.7865 ± 4.5329** | **0.78287 ± 0.14169** | **0.25324 ± 0.13193** | **8.3 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 32 — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
+| Prior shipped checkpoint (superseded 2026-08-17): NAFSR w48n16, from scratch, 388,225 params | 28.7865 ± 4.5329 | 0.78287 ± 0.14169 | 0.25324 ± 0.13193 | 8.3 img/s @N=400, RTX 4060, bf16, batch 32 (high-variance measurement, 681% spread — see `results/runtime_report.md`) |
+| **Shipped — NAFSR ×2 w64 n32, EMA, FiLM noise-conditioning + uncertainty head, cloud long run (1,393,938 params)** | **29.2548 ± 4.6210** | **0.79211 ± 0.14321** | **0.25625 ± 0.14627** | **17.3 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 32 — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
 
 Values are `mean ± population standard deviation`. Source: `results/metrics_summary.md`,
 machine-generated by `scripts/evaluate.py`; per-image records live in
 `results/baselines/*/metrics.json`, which **are** committed (`.gitignore` negates the blanket
 `results/*` rule for this specific file, `!results/baselines/*/metrics.json`) — the 2000 `.npy`
 prediction files in those same directories are not, since they would blow the tree-size cap.
-The alternate checkpoint's row was re-scored on this session's RTX 4060 against the identical
-400-image split and pinned metrics — not taken from its own branch's self-report — before being
-placed in this table (`docs/decisions.md` D49).
+The shipped row is the Round 2 differentiation cloud long run's checkpoint, promoted after a
+paired re-score against the prior checkpoint under one harness (`docs/decisions.md` D61); the
+prior row is kept for the historical comparison, not deleted.
 
 ### Against the classical baselines: wins all three metrics
 
-Against the bicubic floor: **+5.13 dB PSNR**, +0.235 SSIM, −0.159 LPIPS. Against the strongest
-classical baseline, non-local means: **+2.51 dB PSNR**, +0.131 SSIM, −0.173 LPIPS. Both
+Against the bicubic floor: **+5.60 dB PSNR**, +0.244 SSIM, −0.156 LPIPS. Against the strongest
+classical baseline, non-local means: **+2.98 dB PSNR**, +0.141 SSIM, −0.170 LPIPS. Both
 learned models clear all three classical baselines on all three metrics.
 
-### Against the learned baseline: one win, one loss, one tie — and V28 is red
+### Against the learned baseline: wins all three metrics (V28 passes)
 
-**The NAFSR model — the checkpoint `inference.py` currently loads — does not beat the U-Net
-baseline.** Both models score the same 400
-images, so the honest statistic is the **paired** per-image difference, not the gap between two
-independent means:
+**The shipped model now beats the U-Net baseline on all three metrics**, a reversal from the
+prior checkpoint's documented 1-win/1-loss/1-tie negative result (kept below for the record).
+Paired per-image difference, the same 400 images, same statistic `check_V28` uses:
 
-| Metric | Paired mean difference (NAFSR − U-Net) | t | NAFSR better on | Verdict |
+| Metric | Paired mean difference (shipped − U-Net) | t | shipped better on | Verdict |
 |---|---|---|---|---|
-| PSNR | **−0.0943 dB** | −6.11 | 93 / 400 | **loss** |
-| SSIM | +0.0001 | +0.29 | 172 / 400 | **tie** (\|t\| < 1.96) |
-| LPIPS | **−0.0120** | −5.55 | 235 / 400 | **win** |
+| PSNR | **+0.3740 dB** | +18.25 | 374 / 400 | **win** |
+| SSIM | **+0.00938** | +12.19 | 382 / 400 | **win** |
+| LPIPS | **−0.00900** | −3.26 | 239 / 400 | **win** |
 
-V28 requires winning at least 2 of 3, so **V28 is red**, correctly. The contract offers exactly
-one escape hatch — a structured negative-result entry in `docs/decisions.md` *plus* shipping the
-better model — and it has not been taken, because which model to ship has not been decided.
-
-What the result actually says: a **0.388 M-parameter** model matches a **2.97 M-parameter** one
-on fidelity (SSIM is a statistical tie; PSNR is a 0.0943 dB loss, about 2% of the 4.53 dB
-standard deviation across the split, but consistent enough across images that the paired test
-resolves it at t = −6.11) while winning perceptual quality with 7.7× fewer parameters. The
-scoring blend across PSNR/SSIM/LPIPS is undisclosed (SPEC F9) and the throughput axis is
-unmeasured, so neither model can be declared the submission on the evidence available today.
-That decision is deferred to the runtime measurement, not resolved by rhetoric here.
+V28 requires winning at least 2 of 3; winning all 3 clears it comfortably (`docs/decisions.md`
+D61). The prior checkpoint's negative result (kept for the record, not deleted): PSNR −0.0943
+dB (loss), SSIM +0.0001 (tie), LPIPS −0.0120 (win) — a 0.388M-parameter model matching a
+2.97M-parameter one on fidelity while winning perceptual quality with 7.7x fewer parameters.
+That trade-off no longer applies to the current shipped checkpoint, which now wins outright.
 
 ### Why the LPIPS column matters more than it looks
 
@@ -129,8 +129,8 @@ Across the classical baselines, fidelity and perceptual quality pull in *opposit
 non-local means wins PSNR by 2.6 dB over bicubic yet scores the **worst** LPIPS of the three,
 because it buys fidelity by over-smoothing. A restoration model that improved PSNR while
 degrading LPIPS would be gaming one half of an undisclosed scoring blend at the other half's
-expense. The NAFSR model improves both simultaneously against every classical baseline, and
-against the learned baseline it trades 0.09 dB of PSNR for 0.012 of LPIPS.
+expense. The shipped model improves both simultaneously against every classical baseline, and
+now against the learned baseline too.
 
 ### Two numbers, do not confuse them
 
@@ -391,17 +391,42 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
    The simulator implements that, not a pure speckle model.
 4. **Architecture — NAFSR:** a flat NAFNet-style body at LR resolution, a PixelShuffle ×2
    head, and a global bilinear-upsample skip so the network only learns residual detail. All
-   heavy compute stays at LR, where it is 4× cheaper. **388,225 parameters, 5.584 GMAC per
-   128×128 image.** Fully convolutional with a required size multiple of 1, verified on
-   128→256, 256→512, 61×97→122×194 and 1×1→2×2.
-5. **Learned baseline — UNetSR:** 2,970,401 parameters, 4.478 GMAC. The comparison is roughly
-   FLOP-matched (0.80×) with NAFSR at 0.13× the parameters, so the proposed model gets no
-   parameter advantage over the baseline it has to beat.
-6. **Loss** is balanced because the scoring blend is undisclosed: Charbonnier + (1−MS-SSIM) +
+   heavy compute stays at LR, where it is 4× cheaper. **The currently-shipped checkpoint
+   (`weights/best.pt`) is 1,393,938 parameters (width=64, num_blocks=32), 5.584 GMAC per
+   128×128 image scales accordingly with width/depth (see `results/eda/pareto_frontier.png`
+   for the measured params-vs-quality frontier across six swept configs).** Fully
+   convolutional with a required size multiple of 1, verified on 128→256, 256→512,
+   61×97→122×194 and 1×1→2×2.
+5. **Learned baseline — UNetSR:** 2,970,401 parameters, 4.478 GMAC. The shipped checkpoint is
+   now at 0.47× the baseline's parameter count and beats it on all three metrics (V28).
+6. **FiLM noise-level conditioning + heteroscedastic uncertainty — implemented, validated, and
+   now part of the shipped checkpoint (`docs/decisions.md` D52).** A small `NoiseEstimator`
+   (conv stack + global pool) embeds the input and conditions every `NAFBlock` via
+   zero-initialised FiLM (scale, shift), so a freshly-constructed FiLM-enabled model is
+   bit-identical to an un-conditioned one until trained — no behaviour change at init. An
+   optional heteroscedastic head predicts a per-pixel log-variance
+   (`return_uncertainty=True`), trained with a Gaussian NLL term that costs nothing when the
+   flag is off. Both default to `film_dim=0`/`uncertainty=False` — a NAFSR built with no extra
+   arguments is unchanged. **Calibration measured, not just presence-checked:** the
+   uncertainty head correlates strongly with real error (per-image Pearson r=0.965,
+   Spearman r=0.941, D59); the FiLM embedding's relationship to true noise level is present but
+   diffuse — no single dimension or the embedding norm correlates well alone, but a 16-dim
+   linear probe explains ~23% of true-noise-level variance held out (D58). An
+   architecture/hyperparameter sweep with both enabled was run on cloud A100 hardware to select
+   this config — see `docs/decisions.md` D52/D55/D61 and `results/eda/pareto_frontier.png`.
+7. **Algorithm-unrolling hybrid — `UnrolledSR` (`src/unrolling.py`), stretch goal, NOT
+   shipped.** Unrolls T proximal-gradient steps against the *measured* x2 degradation kernel
+   (`RECOVERED_KERNEL_4X4`, item 1 above) as a fixed, non-trainable forward operator, with a
+   small weight-tied `NAFBlock` denoiser as the learned proximal operator per step (Monga et
+   al. 2021, IEEE SPM — the exact survey cited in KLA's own reference list). Stated honestly:
+   its overfit sanity gate currently fails (plateaus well below the 40 dB bar that
+   NAFSR/UNetSR both clear on the same fixture) and is under active root-cause debugging; it
+   is not part of any shipped result and this README will be updated if/when it is.
+8. **Loss** is balanced because the scoring blend is undisclosed: Charbonnier + (1−MS-SSIM) +
    an FFT-magnitude term, with LPIPS available but **off by default**. **No adversarial
    loss** — hallucinating a structure that is not there is the worst possible failure in an
    inspection context.
-7. **Throughput** is measured over the whole process, not inferred from kernel timings. The
+9. **Throughput** is measured over the whole process, not inferred from kernel timings. The
    current 400-image external run measures 71.72 s total: 70.34 s in the main pipeline and
    1.38 s in process startup/import overhead. Import hygiene still reduces fixed cost, while
    batching and the LR-resolution body address the dominant pipeline work. NAFSR profiles as

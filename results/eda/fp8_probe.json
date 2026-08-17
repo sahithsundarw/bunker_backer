@@ -1,0 +1,31 @@
+{
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "compute_capability": [
+    8,
+    9
+  ],
+  "conv2d_fp8_supported": false,
+  "conv2d_fp8_error": "RuntimeError: getCudnnDataTypeFromScalarType() not supported for Float8_e4m3fn",
+  "gemm_probe": [
+    {
+      "label": "64->128 (FFN expand)",
+      "M": 65536,
+      "K": 64,
+      "N": 128,
+      "bf16_ms": 0.1134839998849202,
+      "fp8_ms": 0.13750400001299568,
+      "speedup": 0.8253141717636918,
+      "error": null
+    },
+    {
+      "label": "128->64 (FFN project)",
+      "M": 65536,
+      "K": 128,
+      "N": 64,
+      "bf16_ms": 0.16170999995665625,
+      "fp8_ms": 0.13237999999546446,
+      "speedup": 1.2215591476219723,
+      "error": null
+    }
+  ]
+}

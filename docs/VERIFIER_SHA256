@@ -14,10 +14,41 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-c0b71a9226357fd58f4b2e7c44b193672cc8458fb070c443208cfaf4cd64ca73  scripts/verify_all.py
+55bffaa44459fe342268af1e8f107311c66d86c9e137710d08acc11b10e17208  scripts/verify_all.py
 b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-17  V51 STRENGTHENED-CONSISTENTLY: CHECKPOINT_BLOB_EXEMPTION (weights/best.pt) was
+#             already wired into the extension-ban check (D41) but never into the per-file
+#             5 MB / total-tree 25 MB size-cap loop that follows it -- an implementation gap,
+#             not a deliberate second ceiling on the one file V59 already requires tracked and
+#             V43 already caps separately at 100 MB. Exercised for the first time when the
+#             Round 2 long-run checkpoint (11.03 MiB) was promoted (D61) and correctly failed:
+#             1 file exceeds 5 MB, then (fixed) tracked tree exceeds 25 MB with best.pt
+#             counted twice against unrelated caps. Extended the SAME exemption to both the
+#             per-file and total-tree accounting. Human-authorised via AskUserQuestion
+#             (2026-08-17, Prime Directive 1 reserves this judgment for a human) rather than
+#             decided unilaterally. Negative-controlled: a genuine 6 MB tracked .txt file
+#             (non-checkpoint, non-banned extension) correctly still fails V51 after the fix;
+#             reverted and reconfirmed green. See docs/decisions.md D62.
+#             prior pin: b9b6c1c2c370031edf3032a0e0735f0322fc6b32f2ef7cf321cde9b8447f0282
+# 2026-08-17  ADDED V66, V67, V68 -- Round 2 differentiation additions (FiLM, uncertainty,
+#             the real-SEM OOD report, UnrolledSR) shipped with ZERO dedicated V-checks,
+#             validated only by src/model.py::_selftest, which nothing invokes (the same
+#             "dead code is not a guard" lesson V61 already learned once for UNetSR). V66
+#             promotes _selftest's own FiLM-zero-init-identity and return_uncertainty-
+#             contract assertions into the verifier. V67 mirrors V63 exactly (same file,
+#             same pattern) for the real-SEM OOD section instead of the procedural proxy-OOD
+#             section. V68 extends V61's per-architecture shape/determinism sweep to
+#             UnrolledSR (mechanical soundness only -- the overfit quality gate for this
+#             architecture is src/unrolling.py's own gate, currently failing and under
+#             active debugging, deliberately NOT papered over by V68). All three negative-
+#             controlled: V66 broken two ways (non-zero FiLM init, uncertainty side channel
+#             perturbing the restoration) both correctly went red; V67 broken by removing
+#             membership_check.json, correctly went red; V68 broken by cropping UnrolledSR's
+#             output by one pixel, correctly went red. All three reverted byte-exact and
+#             reconfirmed green. See docs/decisions.md D56.
+#             prior pin: c0b71a9226357fd58f4b2e7c44b193672cc8458fb070c443208cfaf4cd64ca73
 # 2026-08-16  V65's embedded OOM-probe script fixed to pass allow_bicubic_fallback=True,
 #             matching origin's inference.py semantic flip (require_weights -> the inverted
 #             allow_bicubic_fallback). Test-only change; inference.py's own behaviour and the

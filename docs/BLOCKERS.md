@@ -282,3 +282,80 @@ FAIL on either run by chance (~1-in-5). Operational recommendation: if a `--stri
 V24 FAIL and nothing else is red, re-running the suite is legitimate (V24 is independently
 seeded per invocation, not gamed) rather than treating one flaky-check failure as a full
 iteration failure — but this should be re-investigated properly, not relied upon indefinitely.
+
+## B12 — V22 and V51: two real regressions from promoting the Round 2 long-run checkpoint, each requiring a human policy decision, not a code fix (docs/decisions.md D61)
+
+Promoting the long-run checkpoint (width=64, num_blocks=32, FiLM+uncertainty, 1,393,938
+params — 3.6x the prior 388,225-param checkpoint) turned two previously-green checks red.
+Both were investigated with the same empirical rigor as D42, root-cause found in each case,
+and in neither case is there a single-line code fix available — both are genuine scale-vs-
+policy trade-offs, which Prime Directive 1 reserves for a human ("if a check seems wrong, log
+it here and stop — do not edit it").
+
+### V22 (bf16 vs fp32 divergence): root cause is depth-compounding, not an unpromoted op
+
+Measured: mean 1.85e-03 (cap 1e-3), max 2.65e-02 (cap 1e-2) on the V22 fixture.
+
+Investigated in order:
+1. **Is FiLM the cause?** No. Measured the SAME width=64/num_blocks=32 architecture with
+   `film_dim=0` (FiLM disabled) at random init: mean 2.30e-03, max 1.24e-02 — already over
+   the cap with FiLM entirely absent. FiLM only adds a small increment (2.30e-03→2.39e-03
+   mean, 1.24e-02→1.32e-02 max).
+2. **Is D42's SCA fix still in effect?** Yes, verified present and unmodified in
+   `src/blocks.py`.
+3. **Does keeping the residual accumulator in fp32 across the block loop help?** No —
+   monkeypatch-tested directly (confirmed the patch executed and the accumulator really did
+   stay fp32 through every block via a dtype trace), and the final divergence was
+   bit-for-bit IDENTICAL to unpatched (mean 3.24e-03, max 2.73e-02 either way). ATen's
+   ordinary type promotion (`fp32 + bf16*fp32 -> fp32`, confirmed in isolation) does keep the
+   accumulator's container fp32, but this does not help: the information lost is inside each
+   block's own bf16-computed conv/gate/SCA branch output, which is already rounded before it
+   re-enters the accumulator — no amount of accumulator-dtype bookkeeping recovers that.
+4. **Is the divergence a discrete jump at one op (an unpromoted-op bug, D42's class), or
+   smooth compounding (a genuine scale effect)?** Traced divergence at every 4th block:
+   grows from mean 3.06e-02 (block 3) to a peak of ~2.03e-01 (block 23), then DECREASES
+   toward the end of the stack (4.81e-02 at block 31), then drops sharply at `body_tail`
+   (3.30e-02) and again at the final output (3.24e-03) — the deterministic bilinear-upsample
+   skip connection (computed identically in both precisions) dilutes most of the internal
+   noise. This is the signature of ordinary compounding random-walk-like rounding error over
+   32 sequential lossy transformations, not a discrete unpromoted op — there is no single
+   line to fix, matching D42's SCA case.
+
+**Why the old checkpoint passed:** D42 measured the prior 16-block checkpoint at max 7.79e-3,
+already close to the 1e-2 cap. Doubling the block count pushes the same natural bf16 rounding
+process over the line — a margin-vs-scale issue, not a bug this session introduced or can
+patch away without either (a) running substantially more of the forward pass in fp32 (real
+throughput cost, undermining much of bf16's benefit at exactly the resolution/batch sizes
+this project has spent effort optimizing), or (b) a human decision on the tolerance/architecture
+trade-off. **Not fixed. Verifier tolerance NOT touched.**
+
+### V51 (tracked-file size cap): a real gap in the existing checkpoint exemption
+
+`weights/best.pt` is now 11,565,729 bytes (11.03 MiB), exceeding `MAX_TRACKED_FILE_BYTES`
+(5 MiB) in `scripts/verify_all.py`'s per-file size-cap loop (the section commented "Size caps
+catch a dataset dump regardless of extension").
+
+`CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"` already exists in the same function and is
+used one code block earlier to exempt `best.pt` from the blob-EXTENSION ban (D41) — but the
+per-file SIZE-cap loop that follows does not check this exemption at all; it applies the 5 MiB
+cap to every tracked file uniformly, including the one file the contract already treats as a
+sanctioned, mandatory, deliberately-tracked large blob (V59 requires it be tracked; V43
+separately caps it at 100 MB specifically). The prior 388,225-param checkpoint (3.14 MiB) was
+simply always under 5 MiB by coincidence, so this gap was never exercised before.
+
+This reads like an implementation gap (the exemption exists but was only wired into one of the
+two places it needed to be), not a deliberately-designed 5 MiB ceiling on the checkpoint
+specifically — but per Prime Directive 1, that judgment is not this session's to act on
+unilaterally. **Not fixed. `scripts/verify_all.py` NOT edited.**
+
+### Decision needed (human)
+
+For V22: accept the larger checkpoint's measured bf16 divergence as a disclosed trade-off
+(document, do not force a fix), OR invest in a real (and costly) fp32-heavier stabilization
+pass, OR reconsider whether this checkpoint should ship at its current size given this
+regression. For V51: extend `CHECKPOINT_BLOB_EXEMPTION`'s use to the size-cap loop too
+(consistent with its existing purpose and with V43's separate, more appropriate 100 MB cap
+already governing this exact file), OR decline to promote a checkpoint whose file size
+exceeds the existing 5 MiB cap. Both are real, live FAILs in `results/verification_report.json`
+as of this checkpoint promotion (docs/decisions.md D61) and are not silently on this session's
+"acceptable known-FAIL" list until a human resolves them.

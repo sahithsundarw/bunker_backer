@@ -58,8 +58,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .blocks import ConvReLU, NAFBlock, NoiseEstimator, PixelShuffleHead, bilinear_upsample
+from .unrolling import UnrolledSR
 
-__all__ = ["build_model", "NAFSR", "UNetSR", "count_parameters", "estimate_macs"]
+__all__ = ["build_model", "NAFSR", "UNetSR", "UnrolledSR", "count_parameters", "estimate_macs"]
 
 
 # --------------------------------------------------------------------------------------
@@ -94,6 +95,25 @@ _ALIASES: dict[str, str] = {
     "unet": "UNetSR",
     "unetbaseline": "UNetSR",
     "baselineunet": "UNetSR",
+    "unrolledsr": "UnrolledSR",
+    "unrolled": "UnrolledSR",
+    "ista": "UnrolledSR",
+    "istanet": "UnrolledSR",
+    "algorithmunrolling": "UnrolledSR",
+}
+
+#: UnrolledSR-specific defaults (Round 2 Phase 4 stretch goal, docs/decisions.md D56). Kept
+#: separate from _DEFAULTS above since num_steps/denoiser_blocks/share_denoiser/step_size_init
+#: have no meaning for NAFSR/UNetSR and would be confusing merged into one shared dict.
+_UNROLLED_DEFAULTS: dict[str, Any] = {
+    "width": 32,
+    "num_steps": 6,
+    "denoiser_blocks": 2,
+    "scale": 2,
+    "in_ch": 1,
+    "out_ch": 1,
+    "share_denoiser": True,
+    "step_size_init": 0.05,
 }
 
 
@@ -378,8 +398,28 @@ def build_model(cfg: Mapping[str, Any]) -> nn.Module:
             uncertainty=bool(get("uncertainty")),
         )
 
-    # UNetSR. `num_blocks` is accepted as a synonym for `levels` only if `levels` is
-    # absent, so a config written for NAFSR still builds a sane baseline.
+    if name == "UnrolledSR":
+        # Separate default table (_UNROLLED_DEFAULTS): num_steps/denoiser_blocks/
+        # share_denoiser/step_size_init have no meaning for NAFSR/UNetSR, so they are not
+        # merged into the shared _DEFAULTS dict `get()` above reads from.
+        def get_u(key: str) -> Any:
+            v = m.get(key, _UNROLLED_DEFAULTS[key])
+            return _UNROLLED_DEFAULTS[key] if v is None else v
+
+        return UnrolledSR(
+            width=int(get_u("width")),
+            num_steps=int(get_u("num_steps")),
+            denoiser_blocks=int(get_u("denoiser_blocks")),
+            scale=scale,
+            in_ch=in_ch,
+            out_ch=out_ch,
+            share_denoiser=bool(get_u("share_denoiser")),
+            step_size_init=float(get_u("step_size_init")),
+        )
+
+    # UNetSR (name == "UNetSR" -- the only remaining value _ALIASES can resolve to).
+    # `num_blocks` is accepted as a synonym for `levels` only if `levels` is absent, so a
+    # config written for NAFSR still builds a sane baseline.
     levels = m.get("levels", m.get("num_blocks_unet", None))
     if levels is None:
         levels = _DEFAULTS["levels"]
@@ -447,6 +487,10 @@ def _selftest() -> int:
         "NAFSR w48 n16 FiLM+uncertainty": {
             "name": "NAFSR", "width": 48, "num_blocks": 16, "scale": 2,
             "in_ch": 1, "out_ch": 1, "film_dim": 16, "uncertainty": True,
+        },
+        "UnrolledSR w32 steps6": {
+            "name": "UnrolledSR", "width": 32, "num_steps": 6, "denoiser_blocks": 2,
+            "scale": 2, "in_ch": 1, "out_ch": 1,
         },
     }
     bad = 0

@@ -24,13 +24,14 @@ mechanism V06 already permits for the model checkpoint. Full reasoning: `docs/de
 
 ---
 
-## Status — 2026-08-16, reconciled (`docs/decisions.md` D49)
+## Status — 2026-08-17, Round 2 long-run checkpoint (`docs/decisions.md` D61)
 
-**The outputs exist, are published, and have been generated from the shipped 28.7865 dB
-checkpoint.** This repo briefly diverged into two lines of work with two different checkpoints;
-these outputs were regenerated from the checkpoint that won the head-to-head re-score
-(`docs/decisions.md` D49), using the real `inference.py --require_weights` production
-entrypoint, not a re-implemented forward pass.
+**The outputs exist, are published, and have been regenerated from the promoted 29.2548 dB
+Round 2 long-run checkpoint**, which superseded the prior D49 checkpoint (28.7865 dB) after
+a paired head-to-head re-score (`docs/decisions.md` D61), using the real
+`inference.py --require_weights` production entrypoint, not a re-implemented forward pass.
+Published as a **new** GitHub Release (`artifacts-v2`) rather than overwriting `artifacts-v1`,
+which remains available unchanged as the historical D49-checkpoint record.
 
 Normal `inference.py` submission runs fail if the checkpoint is missing or cannot be loaded.
 The parameter-free bicubic baseline is available only through the explicit demo flag
@@ -38,7 +39,59 @@ The parameter-free bicubic baseline is available only through the explicit demo 
 these outputs used `--require_weights`, so a missing or unloadable checkpoint would have
 failed loudly.
 
-## Provenance — what produced these outputs
+## Provenance — what produced these outputs (current)
+
+| field | value |
+|---|---|
+| Inputs | the **400 released test inputs**, `C:\kla-data\test_NoisyLR\000000.npy` … `000399.npy` |
+| Input properties | `.npy`, `float32`, 2-D `(128, 128)`, grayscale |
+| Outputs | 400 files, `.npy`, `float32`, `(256, 256)` — exactly 2× — clipped to `[0, 1]` |
+| Filenames | **byte-identical** to the inputs; no suffix, no extension change (verified: `matching_input_exists = true` for all 400 rows) |
+| Ground truth | **none exists.** The released test set ships inputs only, so no score can be computed against it locally. Every metric below is measured on the held-out validation split of `train/` |
+| Checkpoint used | `weights/best.pt`, sha256 `8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c` |
+| Checkpoint validation metrics (disk-verified, full 400-pair val split — **not** a final-test score) | PSNR 29.2548 dB / SSIM 0.79211 / LPIPS 0.25625 |
+| Command used | `python inference.py --input_dir C:\kla-data\test_NoisyLR --output_dir <out> --require_weights --verbose` |
+| Runtime headline | See `results/runtime_report.md` — **NVIDIA GeForce RTX 4060 Laptop GPU**, not Mac CPU, not H100. |
+| Git SHA of the producing run | `2e530586c55f9baf5ad92154d319534226adaf73` (checkpoint's own `git` key records `unknown` — trained via an HF Jobs tarball snapshot, not a git clone; see `weights/README.md`) |
+
+**No PSNR/SSIM/LPIPS is computed on these 400 outputs.** The final test set has no ground
+truth, so no such score is possible; the figures above describe the checkpoint's
+validation-split performance, not this folder's outputs.
+
+**Filename collision hazard.** All 400 test filenames also exist under `train/`, referring to
+different images. Never key a cache, manifest or results structure on a bare filename — qualify
+it by split or use the full path. Both sets share shape and dtype, so a collision produces
+silently wrong results rather than an exception.
+
+## Download and verify (current, `artifacts-v2`)
+
+| field | value |
+|---|---|
+| Archive name | `restored_test_outputs.zip` |
+| Archive sha256 | `6355b2bf802d0d7817d6c42d10893dff96e99285f2b03b4888c2a6310a8e7364` |
+| Archive size (bytes) | 90,963,266 |
+| File count inside | 400 |
+| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v2/restored_test_outputs.zip` |
+
+Verified fetchable from a **logged-out** session with the sha256 above reproduced exactly
+(via `curl`; `urllib.request` 404'd on the redirect chain for unrelated reasons and was not
+used for verification) before this README was updated.
+
+```bash
+curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v2/restored_test_outputs.zip
+sha256sum restored_test_outputs.zip   # must equal 6355b2bf802d0d7817d6c42d10893dff96e99285f2b03b4888c2a6310a8e7364
+```
+
+---
+
+## Superseded — 2026-08-16, reconciled (`docs/decisions.md` D49)
+
+The tables below this line describe the PRIOR (28.7865 dB) checkpoint's outputs, still
+published at `artifacts-v1` for anyone wanting to reproduce that exact comparison. They are
+NOT what `weights/best.pt` currently produces, and NOT what `manifest.csv`/`manifest.json` in
+this directory currently describe (those now reflect the current checkpoint above).
+
+## Provenance — what produced these outputs (superseded, D49)
 
 | field | value |
 |---|---|
@@ -63,7 +116,7 @@ different images. Never key a cache, manifest or results structure on a bare fil
 it by split or use the full path. Both sets share shape and dtype, so a collision produces
 silently wrong results rather than an exception.
 
-## Download and verify
+## Download and verify (superseded, `artifacts-v1`)
 
 Releases page: `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
 
@@ -90,7 +143,7 @@ py -3.12 -c "import hashlib,pathlib,sys;print(hashlib.sha256(pathlib.Path(sys.ar
 powershell -Command "(Get-FileHash restored_test_outputs.zip -Algorithm SHA256).Hash.ToLower()"
 ```
 
-## Manifest
+## Manifest (current — describes the checkpoint in the "current" section above, not the superseded one)
 
 `manifest.csv` in this directory lets a reviewer verify the extracted archive file by file,
 without trusting the archive digest alone. Header and first row:

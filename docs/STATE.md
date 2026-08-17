@@ -2,7 +2,52 @@
 
 ---
 
-# ⚠ RESUME HERE — reconciled 2026-08-16, main session (Windows/RTX 4060)
+# ⚠ RESUME HERE — Round 2 differentiation, main session (Windows/RTX 4060), 2026-08-17
+
+Plan: `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md`. Status by priority:
+
+- **Long run — DONE.** HF Jobs A100, job `6a822762c97db76cbdf33506`, `configs/long_run_e.yaml`
+  (w64n32, FiLM+uncertainty on), completed the full 129,700-iteration schedule (22,895.55s /
+  6h21m, well under the 8h cap), best checkpoint at iter 76,000.
+- **Checkpoint promoted.** Re-scored head-to-head against the prior checkpoint under one
+  harness (paired test): wins PSNR/SSIM significantly, LPIPS a tie; also now beats U-Net on
+  all 3 metrics (V28 FAIL -> PASS). Promoted to `weights/best.pt`
+  (sha256 `8f54f9a20822...`). All downstream artifacts regenerated (baselines, metrics_summary,
+  README, weights/README). Real, disclosed trade-off: real-SEM OOD SSIM/LPIPS got worse. Full
+  writeup: `docs/decisions.md` D61.
+- **Two NEW blockers from the promotion, need human decision — see `docs/BLOCKERS.md` B12:**
+  V22 (bf16/fp32 divergence, root-caused to depth-compounding across 32 blocks, no single-line
+  fix exists — FiLM ruled out as cause, fp32-accumulator fix tested and does NOT help, traced
+  to smooth compounding not a discrete bug) and V51 (checkpoint now 11.03 MiB, exceeds the
+  5 MiB per-file cap; `CHECKPOINT_BLOB_EXEMPTION` exists but was never wired into the size-cap
+  loop, only the extension-ban loop — looks like a gap, not a deliberate limit, but this is a
+  verifier-contract judgment call reserved for a human per Prime Directive 1). **Neither the
+  tolerance nor the check was touched.** Full verifier run: 64 PASS / 4 FAIL (V04, V46 — both
+  require `--fresh-clone`, pre-existing/expected; V22, V51 — new, need a decision).
+- **`results/restored_test_outputs/` regeneration — IN PROGRESS.** Fresh 400/400 outputs
+  produced against the new checkpoint (contract-verified: float32, (256,256), finite, [0,1]).
+  User approved re-uploading as a new GitHub Release asset; not yet completed as of this
+  writing — check this section's own next update or the folder's README status line.
+- **PRIORITY 0.5 (`UnrolledSR` overfit bug) — investigation COMPLETE, root cause not fully
+  isolated, reported honestly as a negative result.** All 3 planned hypotheses tested and
+  cleared (adjoint identity ~0.4% error, step-size stable ~0.48x margin, weight-tying makes NO
+  measurable difference — share=True/False plateau at the same ~23.5dB by iter 240 on the real
+  2-pair fixture, constant LR, also ruling out the LR-schedule-decay hypothesis). No single
+  fixable bug found; `UnrolledSR` converges much slower than NAFSR/UNetSR for an unidentified
+  reason. NOT shipped, disclosed honestly in README. Full writeup: `docs/decisions.md` D60.
+- **PRIORITY 0.1 (origin/main reconciliation)** — still deferred; the long run is now done, so
+  this is the next priority-0 item once the current promotion cleanup finishes.
+- **P1.1/P1.2/P1.3/P1.4 (FiLM calibration, uncertainty calibration, Pareto plot, FP8 probe) —
+  DONE.** See D57/D58/D59, `results/eda/{pareto_frontier.png,film_calibration.json,
+  uncertainty_calibration.json,fp8_probe.json}`.
+
+**Everything below this point (including the next "RESUME HERE" heading) is archived history
+from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by
+this section.
+
+---
+
+# ARCHIVED — RESUME HERE (superseded above) — reconciled 2026-08-16, main session (Windows/RTX 4060)
 
 Two independent lines of work on this repo (this session's Windows/RTX-4060 verification-driven
 line, D1–D47; a teammate's `shanmukh sai` Mac/MPS `codex/*` line, D1–D48 with its own D41)

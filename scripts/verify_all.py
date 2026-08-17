@@ -88,6 +88,16 @@ TIERS["V63"] = 4
 # V65: real 256->512 batch correctness + genuinely-forced OOM-recovery (docs/decisions.md D45).
 TIERS["V65"] = 1
 
+# Round-2 differentiation additions (docs/decisions.md D52/D53, plan PRIORITY 0.2): FiLM,
+# uncertainty, the real-SEM OOD report and UnrolledSR shipped with zero dedicated V-checks --
+# validated only by src/model.py::_selftest (nothing invokes it) and decisions.md narrative.
+# Same band as their nearest existing check: V66 promotes _selftest's own FiLM/uncertainty
+# assertions (model correctness band), V67 mirrors V63 exactly (OOD report band), V68 extends
+# V61's per-architecture shape sweep (model correctness band).
+TIERS["V66"] = 2
+TIERS["V67"] = 4
+TIERS["V68"] = 2
+
 # Whitelisted SKIPs, verbatim from the contract. V39's CUDA allowance was REMOVED by human
 # authorisation (docs/decisions.md D10) — threshold-free wall-clock is measurable anywhere.
 SKIP_WHITELIST: dict[str, str] = {
@@ -2136,10 +2146,23 @@ def check_V51(ctx: Ctx) -> CheckResult:
                            f"cap is {SAMPLE_INPUTS_MAX_BYTES} B",
                            {"count": len(samples), "bytes": sample_bytes})
 
-    # Size caps catch a dataset dump regardless of extension.
+    # Size caps catch a dataset dump regardless of extension. weights/best.pt is exempted
+    # here too, not just from the extension-ban above: it is the one file this contract
+    # already requires be tracked (V59) and already separately caps at 100 MB (V43) --
+    # these caps exist to catch an ACCIDENTAL dataset-sized blob, not to re-litigate the one
+    # sanctioned, mandatory checkpoint via a second, unrelated 5 MB/25 MB ceiling nobody sized
+    # for a checkpoint this large. The 388,225-param checkpoint was always under 5 MB by
+    # coincidence, which is why this gap was never exercised before a bigger checkpoint
+    # (docs/decisions.md D61/D62, docs/BLOCKERS.md B12) shipped. Human-authorised
+    # (AskUserQuestion, 2026-08-17): extend the exemption already used one block above to
+    # both the per-file cap and the total-tree sum, rather than leave it exempt from one and
+    # not the other (which would just move the same failure from "1 file exceeds 5 MB" to
+    # "tree exceeds 25 MB").
     total = 0
     oversized = []
     for f in tracked:
+        if f == CHECKPOINT_BLOB_EXEMPTION:
+            continue
         p = ctx.p(*f.split("/"))
         if not p.exists():
             continue
@@ -3240,6 +3263,263 @@ def check_V62(ctx: Ctx) -> CheckResult:
                        f"0 and >{V62_SIGMA_HI}, all 6 D/S/G orderings observed, canonical "
                        f"{canonical:.1%}, S-before-D {s_before_d:.1%}, G-before-D "
                        f"{g_before_d:.1%}", ev)
+
+
+def check_V66(ctx: Ctx) -> CheckResult:
+    """FiLM zero-init identity + return_uncertainty contract, promoted out of
+    src/model.py::_selftest (nothing invokes it -- dead code is not a guard, same lesson V61
+    already learned once) into the verifier itself (plan PRIORITY 0.2, docs/decisions.md D52).
+
+    Two independent properties, both required for FiLM/uncertainty to be trustworthy rather
+    than merely present:
+      (a) a FiLM-enabled model must be an EXACT identity vs an un-conditioned twin loaded from
+          the same state_dict at construction time -- FiLM's Linear is zero-initialised, so
+          conditioning must contribute nothing until trained. If this drifts (e.g. a future
+          edit removes the zero-init), a fresh FiLM-enabled model would silently diverge from
+          NAFSR's known-good behaviour from the very first training step.
+      (b) return_uncertainty=True must return (restoration, log_var) where the restoration is
+          BIT-IDENTICAL to the default (return_uncertainty=False) call, and log_var must be
+          finite and shaped like the restoration -- the uncertainty head must be a pure side
+          channel, never perturbing the model's actual prediction.
+    """
+    if not ctx.exists("src", "model.py"):
+        return not_impl("V66", "src/model.py")
+    try:
+        import torch
+
+        sys.path.insert(0, str(ctx.root))
+        from src.model import build_model
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V66", FAIL, f"cannot import build_model: {type(exc).__name__}: {exc}")
+
+    torch.manual_seed(0)
+    base_cfg = {"name": "NAFSR", "width": 24, "num_blocks": 4, "scale": 2,
+                "in_ch": 1, "out_ch": 1}
+    problems: list[str] = []
+
+    # --- (a) FiLM zero-init identity ---------------------------------------------------
+    film_cfg = dict(base_cfg, film_dim=16, uncertainty=False)
+    try:
+        film_model = build_model(film_cfg).eval()
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V66", FAIL, f"cannot build FiLM-enabled model: {exc}")
+    if getattr(film_model, "film_dim", 0) <= 0:
+        problems.append("build_model with film_dim=16 produced a model with film_dim <= 0")
+    else:
+        plain_cfg = dict(base_cfg, film_dim=0, uncertainty=False)
+        twin = build_model(plain_cfg).eval()
+        # strict=False is required here, not a laxness bug: the plain twin structurally has
+        # no noise_est/film submodules at all (film_dim=0), so those keys are legitimately
+        # "unexpected" on the twin's side every time -- that is the DEFINITION of "identical
+        # body/head weights, no FiLM machinery", not a loading failure. Missing keys (body/head
+        # params the twin needs but film_model's state_dict lacks) would be a real problem, so
+        # those are checked; unexpected keys are not.
+        missing, _unexpected = twin.load_state_dict(film_model.state_dict(), strict=False)
+        if missing:
+            problems.append(f"twin missing body/head keys after loading FiLM state_dict: "
+                            f"{missing[:5]}")
+        with torch.no_grad():
+            x = torch.randn(1, 1, 40, 48)
+            film_out = film_model(x)
+            twin_out = twin(x)
+        if not torch.equal(film_out, twin_out):
+            max_diff = (film_out - twin_out).abs().max().item()
+            problems.append(f"FiLM zero-init is NOT an exact identity vs un-conditioned twin "
+                            f"(max abs diff {max_diff:.3e})")
+
+    # --- (b) return_uncertainty contract ------------------------------------------------
+    unc_cfg = dict(base_cfg, film_dim=16, uncertainty=True)
+    try:
+        unc_model = build_model(unc_cfg).eval()
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V66", FAIL, f"cannot build uncertainty-enabled model: {exc}",
+                           {"problems_so_far": problems})
+    if not getattr(unc_model, "has_uncertainty", False):
+        problems.append("build_model with uncertainty=True produced has_uncertainty=False")
+    else:
+        with torch.no_grad():
+            x = torch.randn(1, 1, 32, 36)
+            out_only = unc_model(x)
+            result = unc_model(x, return_uncertainty=True)
+        if not (isinstance(result, tuple) and len(result) == 2):
+            problems.append(f"return_uncertainty=True returned {type(result).__name__}, "
+                            f"not a 2-tuple")
+        else:
+            out_pair, log_var = result
+            if tuple(out_pair.shape) != tuple(out_only.shape):
+                problems.append(f"restoration shape changed under return_uncertainty=True: "
+                                f"{tuple(out_only.shape)} -> {tuple(out_pair.shape)}")
+            elif not torch.equal(out_only, out_pair):
+                problems.append("restoration differs between return_uncertainty=False and "
+                                "=True -- the uncertainty head is not a pure side channel")
+            if tuple(log_var.shape) != tuple(out_only.shape):
+                problems.append(f"log_var shape {tuple(log_var.shape)} != restoration shape "
+                                f"{tuple(out_only.shape)}")
+            if not torch.isfinite(log_var).all():
+                problems.append("log_var contains non-finite values")
+        # default call must never accidentally return a tuple
+        if isinstance(out_only, tuple):
+            problems.append("return_uncertainty=False (default) returned a tuple, not a tensor")
+
+    if problems:
+        return CheckResult("V66", FAIL, "; ".join(problems))
+    return CheckResult("V66", PASS,
+                       "FiLM zero-init is an exact identity vs an un-conditioned twin; "
+                       "return_uncertainty=True returns (restoration, log_var) with the "
+                       "restoration bit-identical to the default call and log_var finite")
+
+
+def check_V67(ctx: Ctx) -> CheckResult:
+    """U-9-adjacent: a REAL-SEM OOD robustness report exists and is real, not prose (plan
+    PRIORITY 0.2, docs/decisions.md D53). Mirrors check_V63 exactly (same file, same author,
+    same pattern) but for scripts/evaluate.py::render_real_sem_ood_section's section instead
+    of the procedural proxy-OOD section -- genuine electron-microscopy content (Zenodo
+    17315241, CC-BY 4.0), evaluation-only, disclosed per F14.
+    """
+    summary = ctx.p("results", "metrics_summary.md")
+    if not summary.exists():
+        return not_impl("V67", "results/metrics_summary.md")
+    text = summary.read_text(encoding="utf-8")
+
+    m = re.search(r"^## Real-SEM OOD robustness report.*$", text, re.MULTILINE)
+    if not m:
+        return CheckResult("V67", FAIL,
+                           "no '## Real-SEM OOD robustness report' heading in "
+                           "results/metrics_summary.md")
+    nxt = re.search(r"\n## ", text[m.end():])
+    section = text[m.start(): m.end() + (nxt.start() if nxt else len(text) - m.end())]
+
+    problems = []
+    if "17315241" not in section:
+        problems.append("section does not cite Zenodo record 17315241")
+    if "CC-BY" not in section:
+        problems.append("section does not state the CC-BY licence")
+    for label, pat in (
+        ("PSNR", r"PSNR.*?[-+]?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+        ("SSIM", r"SSIM.*?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+        ("LPIPS", r"LPIPS.*?\d+\.\d+\s*\+/-\s*\d+\.\d+"),
+    ):
+        if not re.search(pat, section, re.DOTALL):
+            problems.append(f"no mean +/- std reported for {label}")
+    bad = _v63_positive_banned_matches(section)
+    if bad:
+        problems.append(f"banned positive semiconductor-imagery phrasing found: {bad}")
+
+    membership = ctx.p("results", "eda", "real_sem_ood", "membership_check.json")
+    if not membership.exists():
+        problems.append("results/eda/real_sem_ood/membership_check.json missing")
+    else:
+        try:
+            mc = json.loads(membership.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult("V67", FAIL, f"membership_check.json invalid JSON: {exc}")
+        n_real = mc.get("n_real_sem_ood")
+        if not isinstance(n_real, int) or n_real <= 0:
+            problems.append(f"membership_check.json n_real_sem_ood={n_real!r}, expected a "
+                            f"positive int")
+
+    pred_metrics = ctx.p("results", "baselines", "real_sem_ood", "final", "metrics.json")
+    if not pred_metrics.exists():
+        problems.append("results/baselines/real_sem_ood/final/metrics.json missing")
+    else:
+        try:
+            pm = json.loads(pred_metrics.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult("V67", FAIL, f"real_sem_ood/final/metrics.json invalid JSON: {exc}")
+        n = pm.get("n")
+        if not isinstance(n, int) or n <= 0:
+            problems.append(f"real_sem_ood/final/metrics.json n={n!r}, expected a positive int")
+        mm = pm.get("metrics", {})
+        for k in ("psnr", "ssim", "lpips"):
+            v = mm.get(k, {}).get("mean")
+            if v is None or not math.isfinite(v):
+                problems.append(f"real_sem_ood/final/metrics.json metrics.{k}.mean "
+                                f"missing/non-finite")
+        if pm.get("pred_dtype") not in (["float32"], "float32"):
+            problems.append(f"real_sem_ood/final/metrics.json pred_dtype={pm.get('pred_dtype')!r}"
+                            f", expected float32")
+        if pm.get("unclipped_files"):
+            problems.append(f"{len(pm['unclipped_files'])} unclipped real-SEM-OOD "
+                            f"prediction(s)")
+
+    if problems:
+        return CheckResult("V67", FAIL, "; ".join(problems))
+    return CheckResult("V67", PASS,
+                       "real-SEM OOD section present, cites Zenodo 17315241 (CC-BY), all "
+                       "three metrics reported; membership and prediction well-formedness "
+                       "verified")
+
+
+#: V68's shape sweep. Deliberately smaller than V61_SIZES (UnrolledSR's proximal-gradient
+#: step involves a real strided conv against the measured kernel, not a free-form body, so a
+#: 1x1 degenerate input is not a meaningful case here the way it is for V61's NAFSR/UNetSR --
+#: this keeps V68 focused on genuinely representative sizes, not a copy-paste of V61's list).
+V68_SIZES = ((128, 128), (256, 256), (66, 90))
+
+
+def check_V68(ctx: Ctx) -> CheckResult:
+    """UnrolledSR shape/determinism, extending V61's per-architecture shape sweep to the
+    Round-2 algorithm-unrolling stretch goal (plan PRIORITY 0.2) so a future accidental break
+    in src/unrolling.py is caught the same way NAFSR/UNetSR breaks already are by V61.
+
+    Deliberately does NOT assert a quality bar -- src/unrolling.py's overfit gate (mirroring
+    V25) is the quality gate for this architecture, and per docs/STATE.md it currently fails
+    it (an open, root-caused-in-progress bug, not something this shape check should paper
+    over). This only asserts the architecture is even mechanically sound: correct output
+    shape at F2's x2 scale, finite output, and eval-mode determinism -- the same three
+    properties V61 checks for the two shipped architectures.
+    """
+    if not ctx.exists("src", "unrolling.py"):
+        return not_impl("V68", "src/unrolling.py")
+    try:
+        import torch
+
+        sys.path.insert(0, str(ctx.root))
+        from src.model import build_model
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V68", FAIL, f"cannot import build_model: {type(exc).__name__}: {exc}")
+
+    try:
+        net = build_model({"name": "UnrolledSR", "scale": 2, "in_ch": 1, "out_ch": 1,
+                           "width": 16, "num_steps": 3, "denoiser_blocks": 2}).eval()
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("V68", FAIL, f"build_model(UnrolledSR) failed: {exc}")
+
+    ran, bad = 0, []
+    for (h, w) in V68_SIZES:
+        x = torch.zeros((1, 1, h, w))
+        try:
+            with torch.no_grad():
+                y = net(x)
+        except Exception as exc:  # noqa: BLE001
+            bad.append({"size": [h, w], "why": f"{type(exc).__name__}: {str(exc)[:160]}"})
+            continue
+        ran += 1
+        if tuple(y.shape) != (1, 1, 2 * h, 2 * w):
+            bad.append({"size": [h, w],
+                       "why": f"got {tuple(y.shape)}, expected (1, 1, {2*h}, {2*w})"})
+        elif not bool(torch.isfinite(y).all()):
+            bad.append({"size": [h, w], "why": "non-finite output"})
+
+    # Determinism in eval(): same input twice must be bit-identical (V24's convention).
+    x = torch.randn(1, 1, 48, 48)
+    with torch.no_grad():
+        same = torch.equal(net(x), net(x))
+    if not same:
+        bad.append({"size": "determinism", "why": "eval-mode repeat call is not bit-identical"})
+
+    need = len(V68_SIZES)
+    if bad:
+        return CheckResult("V68", FAIL,
+                           f"{len(bad)} problem(s) in UnrolledSR shape/determinism sweep",
+                           {"violations": bad, "ran": ran, "required": need})
+    if ran < need:  # anti-vacuity: silence is not a pass
+        return CheckResult("V68", FAIL, f"only {ran} of {need} sizes actually ran",
+                           {"ran": ran, "required": need})
+    return CheckResult("V68", PASS,
+                       f"UnrolledSR yields exactly (1,1,2H,2W), finite, for {ran} sizes; "
+                       f"eval-mode determinism holds",
+                       {"sizes": [list(s) for s in V68_SIZES]})
 
 
 # ======================================================================================

@@ -11,7 +11,46 @@ architecture. `inference.py` prefers the **EMA** weights when present.
 
 ---
 
-## Status — 2026-08-16, reconciled (`docs/decisions.md` D49)
+## Status — 2026-08-17, Round 2 long run promoted (`docs/decisions.md` D61)
+
+**A new checkpoint from the Round 2 differentiation cloud long run supersedes D49's.**
+
+`weights/best.pt` is now the long-run checkpoint from `configs/long_run_e.yaml` (Pareto-sweep
+config `e`, D55): NAFSR width=64, num_blocks=32, **FiLM noise-level conditioning
+(`film_dim=16`) and a heteroscedastic uncertainty head (`uncertainty=True`) both enabled and
+trained end-to-end** (D52). Trained on an HF Jobs A100-large GPU, full 129,700-iteration
+schedule, best-of-run selected at iteration 76,000 by `ema/psnr` over the full run (not the
+final iteration). Re-scored head-to-head against D49's checkpoint under one harness, paired
+per-image test, before promotion — see D61 for the full table. Wins PSNR and SSIM
+significantly; LPIPS is a statistical tie. **Also now beats the U-Net baseline on all three
+metrics** (V28, previously a documented 1/3-win negative result under D49's checkpoint).
+
+| Field | Value |
+|---|---|
+| SHA256 | `8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c` |
+| File size | 11,565,729 bytes (11.03 MiB) |
+| Architecture | NAFSR, width=64, num_blocks=32, scale=2, in_ch=out_ch=1, film_dim=16, uncertainty=True (embedded in `config.model`) |
+| Total parameters | 1,393,938 |
+| Training seed | 42 |
+| Training iterations | 129,700 total run; best selected at iter 76,000 (`iter`/`metrics.best_iter` keys) |
+| Wall-clock (HF Jobs A100-large) | 22,895.55 s (6h 21m) |
+| Git SHA at training time | `unknown` — the HF Jobs container fetched a tarball snapshot of the `windows-session` branch (docs/PLAN_CLOUD.md), not a git clone, so `git_sha()`'s fallback fired. Honest gap, not fabricated: the branch/commit dispatched is recorded in `docs/PLAN_CLOUD.md`'s execution log instead. |
+| Val PSNR (disk-verified, full 400-pair split) | **29.2548 dB** |
+| Val SSIM (disk-verified, full 400-pair split) | **0.79211** |
+| Val LPIPS (disk-verified, full 400-pair split) | **0.25625** |
+| Validation protocol | `scripts/make_baselines.py` -> `scripts/evaluate.py`, reloaded from disk (V30 round-trip), `configs/split_val.txt` (400 pairs), never the final test set |
+
+**Trade-off disclosed, not hidden:** this checkpoint's real-SEM-OOD generalisation (D53/D61)
+got measurably WORSE on SSIM (0.328 -> 0.260) and LPIPS (0.569 -> 0.711) versus D49's smaller
+checkpoint, despite improving in-distribution and procedural-proxy-OOD. See D61 for the full,
+honest comparison — not averaged away or omitted because it cuts against the promotion.
+
+D49's checkpoint (388,225 params, no FiLM/uncertainty) remains available via the GitHub Release
+`artifacts-v1` asset for anyone wanting to reproduce that comparison exactly.
+
+---
+
+## Superseded — 2026-08-16, reconciled (`docs/decisions.md` D49)
 
 **A trained checkpoint is present and tracked (Route A — committed directly).**
 
@@ -60,12 +99,11 @@ overridden by `--require_weights`. `results/restored_test_outputs/` was generate
 
 ## Availability and verification
 
-**Route A — committed directly.** `weights/best.pt` is tracked in this repository at 3.14 MiB,
+**Route A — committed directly.** `weights/best.pt` is tracked in this repository at 11.03 MiB,
 far under GitHub's 100 MB limit. No external link, no Release asset required for a reviewer to
-obtain it — though a Release copy also exists (`artifacts-v1`), which is how it was recovered
-after the merge described above. (The separate 400-file *restored test outputs* archive is too
-large for this route and ships as a Release asset instead — see
-`results/restored_test_outputs/README.md`.)
+obtain it. (The separate 400-file *restored test outputs* archive is too large for this route
+and ships as a Release asset instead — see `results/restored_test_outputs/README.md`.) The
+previous (D49) checkpoint remains available via the GitHub Release `artifacts-v1` asset.
 
 Verify the committed bytes match the table above:
 
@@ -73,18 +111,21 @@ Verify the committed bytes match the table above:
 python -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('weights/best.pt').read_bytes()).hexdigest())"
 ```
 
-should print `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313`.
+should print `8f54f9a208220dfd6cd3d67766945ad781bf141fcc03fac41d216caf4fa9643c`.
 
 ## Reproduction
 
 ```bash
-python train.py --config configs/final.yaml --seed 42
+python train.py --config configs/long_run_e.yaml --seed 42 --hub_repo <a HF Hub model repo>
 ```
 
-20,000 iterations, batch 32, 64px patches, bf16, EMA decay 0.999, `save_best_on: psnr`. Full
-config is embedded in the checkpoint's own `config` key, so the run is traceable without
-external notes. Measured wall-clock: 4,303.5 s (1:11:43) on an RTX 4060 Laptop GPU
-(`results/experiments.csv`, run `20260815T062831Z-final-s42`).
+129,700 iterations (Pareto-sweep config `e`: width=64, num_blocks=32, FiLM+uncertainty
+enabled), batch 32, bf16, EMA decay 0.999, `save_best_on: psnr`, warmup 3,000 iters, cosine
+schedule. Full config is embedded in the checkpoint's own `config` key, so the run is
+traceable without external notes. Measured wall-clock: 22,895.55 s (6h 21m) on an HF Jobs
+A100-large (`docs/PLAN_CLOUD.md`, `docs/decisions.md` D55/D61) — `--hub_repo` is required for
+a cloud job since Job storage is ephemeral; a local GPU run does not need it. This checkpoint
+was NOT trained locally, unlike D49's predecessor (kept below for that record).
 
 ## Checklist before submission
 

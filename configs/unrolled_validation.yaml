@@ -1,0 +1,47 @@
+# LOCAL VALIDATION CONFIG for the Round-2 algorithm-unrolling stretch goal
+# (.claude/plans/as-of-now-whatever-steady-lemur.md Phase 4). NOT a submission config.
+#
+# UnrolledSR: T=6 proximal-gradient steps against the MEASURED degradation kernel (D1,
+# src/degrade.py::RECOVERED_KERNEL_4X4), weight-tied 2-block NAFBlock denoiser as the
+# learned proximal operator per step (src/unrolling.py). Cites Monga et al. 2021 (KLA's
+# own supplied reference).
+model:
+  name: UnrolledSR
+  width: 32
+  num_steps: 6
+  denoiser_blocks: 2
+  scale: 2
+  in_ch: 1
+  out_ch: 1
+  share_denoiser: true
+  step_size_init: 0.05
+data:
+  lr_patch: 64
+  batch_size: 32
+  synth_ratio: 0.5
+  degrade:
+    kernel: recovered_4x4
+    bicubic_alt_prob: 0.25
+    noise_after_downsample: true
+    a: 0.011253
+    v: 0.015745
+    randomise_frac: 1.20
+    gauss_sigma_range: [0.0, 0.065]
+    clip_lr: false
+optim:
+  optimizer: AdamW
+  lr: 1.0e-3
+  betas: [0.9, 0.9]
+  weight_decay: 0.0
+  scheduler: cosine
+  min_lr: 1.0e-6
+  warmup_iters: 150
+  total_iters: 3000
+train:
+  amp: bf16
+  grad_clip: 1.0
+  ema_decay: 0.999
+  seed: 42
+  channels_last: true
+  val_every: 500
+  save_best_on: psnr

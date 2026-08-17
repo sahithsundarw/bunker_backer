@@ -1,0 +1,77 @@
+{
+  "repo_id": "Team-Ceciroleo67/kla-ps01-checkpoints",
+  "results": [
+    {
+      "name": "sweep_a",
+      "path_in_repo": "20260816T195217Z-sweep_a_w32n16-s42/final/sweep_a_w32n16.pt",
+      "width": 32,
+      "num_blocks": 16,
+      "params": 238194,
+      "val_psnr": 28.231254947663437,
+      "val_ssim": 0.7550522695274593,
+      "val_lpips": 0.2871382996067405,
+      "iter": 2000,
+      "git": "unknown"
+    },
+    {
+      "name": "sweep_b",
+      "path_in_repo": "20260816T195553Z-sweep_b_w48n16-s42/final/sweep_b_w48n16.pt",
+      "width": 48,
+      "num_blocks": 16,
+      "params": 502978,
+      "val_psnr": 28.314307693556884,
+      "val_ssim": 0.759854488391602,
+      "val_lpips": 0.28420615373179314,
+      "iter": 1500,
+      "git": "unknown"
+    },
+    {
+      "name": "sweep_c",
+      "path_in_repo": "20260816T195937Z-sweep_c_w64n16-s42/final/sweep_c_w64n16.pt",
+      "width": 64,
+      "num_blocks": 16,
+      "params": 866578,
+      "val_psnr": 28.39563853145842,
+      "val_ssim": 0.7629773466252516,
+      "val_lpips": 0.27974075111560526,
+      "iter": 1500,
+      "git": "unknown"
+    },
+    {
+      "name": "sweep_d",
+      "path_in_repo": "20260816T200331Z-sweep_d_w48n32-s42/final/sweep_d_w48n32.pt",
+      "width": 48,
+      "num_blocks": 32,
+      "params": 812482,
+      "val_psnr": 28.358007201447982,
+      "val_ssim": 0.76149701204965,
+      "val_lpips": 0.280117829144001,
+      "iter": 1500,
+      "git": "unknown"
+    },
+    {
+      "name": "sweep_e",
+      "path_in_repo": "20260816T200918Z-sweep_e_w64n32-s42/final/sweep_e_w64n32.pt",
+      "width": 64,
+      "num_blocks": 32,
+      "params": 1393938,
+      "val_psnr": 28.43981661558135,
+      "val_ssim": 0.7665533832387513,
+      "val_lpips": 0.27306893261149523,
+      "iter": 2000,
+      "git": "unknown"
+    },
+    {
+      "name": "sweep_f",
+      "path_in_repo": "20260816T201554Z-sweep_f_w96n32-s42/final/sweep_f_w96n32.pt",
+      "width": 96,
+      "num_blocks": 32,
+      "params": 3025330,
+      "val_psnr": 28.500682845174506,
+      "val_ssim": 0.7672332182036732,
+      "val_lpips": 0.27859234184026715,
+      "iter": 1500,
+      "git": "unknown"
+    }
+  ]
+}
