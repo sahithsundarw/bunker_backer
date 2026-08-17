@@ -19,10 +19,12 @@ see below). Status:
   logged-out) — the "IN PROGRESS" status this section carried earlier is stale; confirmed live
   via `gh release view artifacts-v2` (5 downloads recorded).
 - **V51 FIXED** (human-authorised, `docs/decisions.md` D62, `docs/BLOCKERS.md` B12 updated).
-  **V22 stays open**, human chose to accept it as a disclosed trade-off. Full suite as of this
-  writing: **65 PASS / 3 FAIL (V04, V22, V46)** — V04/V46 are `--fresh-clone`-only and
-  independently verified passing on Linux; V22 is the accepted trade-off. (The prior "64/4"
-  figure this section carried is stale.)
+  **V22 stays open**, human chose to accept it as a disclosed trade-off. **Full fresh run,
+  2026-08-17 (post V53 addition, 69 checks implemented): 64 PASS / 5 FAIL (V04, V22, V24,
+  V46, V53).** V04/V46 `--fresh-clone`-only, independently verified passing on Linux; V22 the
+  accepted trade-off; V24 a pre-existing, genuinely intermittent flake (~20%, B11 — rolled a
+  fail this run, has also passed); V53 correctly FAILs because the deck is still a placeholder
+  (real, open gap, not a check bug — `docs/decisions.md` D64).
 - **PRIORITY 0.1 (origin/main reconciliation) is MOOT.** `main` was force-pushed to `origin`
   earlier this session (explicit, twice-confirmed human authorisation) — `origin/main` now
   equals local `main`. There is no divergence left to reconcile.
