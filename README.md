@@ -500,11 +500,15 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
    optional heteroscedastic head predicts a per-pixel log-variance
    (`return_uncertainty=True`), trained with a Gaussian NLL term that costs nothing when the
    flag is off. Both default to `film_dim=0`/`uncertainty=False` — a NAFSR built with no extra
-   arguments is unchanged. **Calibration measured, not just presence-checked:** the
-   uncertainty head correlates strongly with real error (per-image Pearson r=0.965,
-   Spearman r=0.941, D59); the FiLM embedding's relationship to true noise level is present but
-   diffuse — no single dimension or the embedding norm correlates well alone, but a 16-dim
-   linear probe explains ~23% of true-noise-level variance held out (D58). An
+   arguments is unchanged. **Calibration measured against the actual shipped checkpoint** (the
+   figure originally cited here, D59, was measured against a stale sweep checkpoint by
+   mistake — corrected 2026-08-17): per-image Pearson r=**0.980**, Spearman r=**0.972**;
+   pooled per-pixel (400,000 pixels) Pearson r=0.462, Spearman r=0.612 (weaker, as expected —
+   NLL trains the mean relationship, not pixel-exact prediction). Mean predicted variance
+   (0.00208) closely matches mean actual squared error (0.00199). The FiLM embedding's
+   relationship to true noise level is present but diffuse — no single dimension or the
+   embedding norm correlates well alone, but a 16-dim linear probe explains ~23% of
+   true-noise-level variance held out (D58). An
    architecture/hyperparameter sweep with both enabled was run on cloud A100 hardware to select
    this config — see `docs/decisions.md` D52/D55/D61 and `results/eda/pareto_frontier.png`.
 7. **Algorithm-unrolling hybrid — `UnrolledSR` (`src/unrolling.py`), stretch goal, NOT

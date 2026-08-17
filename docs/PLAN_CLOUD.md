@@ -189,9 +189,18 @@ Every timing number produced under this plan is labelled with its device:
 | 2026-08-16 | First sweep attempt (`6a82111c1f5885ae605beac6`) — failed fast on a `--hub_repo` arg mismatch (stale code, never pushed) | a100-large | ~2 min | ~$0.08 (est.) | ~$0.08 |
 | 2026-08-16 | Pareto sweep, 6 configs (`6a821471c97db76cbdf3346c`), config e chosen (D55) | a100-large | ~32 min training + setup, ~40 min total (est. from run timestamps, not a billing-API readout) | ~$1.67 (est.) | ~$1.75 |
 | 2026-08-16/17 | **Long run DONE** (`6a822762c97db76cbdf33506`), config e, completed the full 129,700-iter schedule at 22,895.55s (6h21m35s, well under the 8h cap) | a100-large | 6h21m35s | $15.90 (measured duration x $2.50/hr) | ~$17.65 |
-| 2026-08-17 | Post-promotion fine-tune (`6a82df61e55292eada79b3b6`), `configs/finetune_ood_wide.yaml`, resumed from `weights/best.pt`, dispatched via `scripts/dispatch_finetune_job.py`, **`timeout="3h"` hard cap** (D63) | a100-large | up to 3h (cap) | up to $7.50 (cap; billed only for actual run time) | up to ~$25.15 if the cap is hit |
+| 2026-08-17 | Post-promotion fine-tune (`6a82df61e55292eada79b3b6`), `configs/finetune_ood_wide.yaml`, resumed from `weights/best.pt`, dispatched via `scripts/dispatch_finetune_job.py`. **`timeout="3h"` was NOT enforced by the platform** (D67) — found still `RUNNING` at 3h18m24s elapsed, manually cancelled via `cancel_job()`. Result: NOT promoted (D67) | a100-large | 3h18m24s (measured, not the intended cap) | **$8.27** (measured duration x $2.50/hr) | **~$25.92** |
 
-**No public billing API exists to read the exact dollar balance** (`GET /api/organizations/.../billing` → 404, checked in the PLAN_PHASE2 session) — costs above are computed from measured job/run durations × the published per-minute rate, not read from an authoritative HF billing endpoint. Stop-and-report threshold: **$24.00** spent. The fine-tune's 3h cap could bring the running total to ~$25.15 in the worst case (full timeout reached), slightly over the $24 stop-and-report threshold — flagged here explicitly rather than silently exceeded; the actual measured duration (not the cap) is what will be recorded once the job's terminal status is checked, and this is close to the last remaining budget before the $30 org credit (expires 2026-09-01) — no further cloud spend should be committed after this run without re-checking the actual balance.
+**STOP-AND-REPORT THRESHOLD ($24.00) HAS BEEN EXCEEDED — running total is ~$25.92.** Flagged
+here explicitly rather than silently passed through. No public billing API exists to read the
+exact dollar balance (`GET /api/organizations/.../billing` → 404, checked in the PLAN_PHASE2
+session); the total above is computed from measured job durations x the published per-minute
+rate. Of the original ~$30 org credit (expires 2026-09-01), an estimated **~$4/hour of
+A100-large runway remains** (~$30 − $25.92 = ~$4.08, i.e. under 2 hours at this flavor).
+**Any further cloud spend (plan Phase 3) requires explicit user sign-off before dispatch** —
+not assumed, not started unilaterally — both because the stop-and-report threshold this
+project itself set is already behind us, and because the remaining runway is tight enough
+that a second `timeout`-not-enforced incident could exhaust the org credit entirely.
 
 ---
 

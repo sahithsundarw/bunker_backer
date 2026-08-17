@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-08-17T14:22:50Z",
+  "n_natural": 200,
+  "n_sem": 45,
+  "edge_threshold": 0.1,
+  "metrics": {
+    "spectral_peakiness": {
+      "natural_mean": 457.57897578558413,
+      "natural_std": 568.7914850903644,
+      "sem_mean": 60.28367285658241,
+      "sem_std": 25.720648270178145,
+      "sem_zscore_vs_natural": -0.6984902435131972
+    },
+    "gradient_anisotropy": {
+      "natural_mean": 1.868858606846226,
+      "natural_std": 1.954559115376545,
+      "sem_mean": 1.0336465052809987,
+      "sem_std": 0.032491517167388864,
+      "sem_zscore_vs_natural": -0.4273148327899636
+    },
+    "bimodality_coefficient": {
+      "natural_mean": 0.5571916615148956,
+      "natural_std": 0.1576608054073338,
+      "sem_mean": 0.6482843265227439,
+      "sem_std": 0.11051907882584336,
+      "sem_zscore_vs_natural": 0.5777762251848233
+    },
+    "spectral_slope": {
+      "natural_mean": -2.543647791061388,
+      "natural_std": 0.46546520254315565,
+      "sem_mean": -1.6273418393891392,
+      "sem_std": 0.5723033323951795,
+      "sem_zscore_vs_natural": 1.9685809952405482
+    },
+    "edge_density": {
+      "natural_mean": 0.09861099243164062,
+      "natural_std": 0.11992516497118433,
+      "sem_mean": 0.5326860215928819,
+      "sem_std": 0.07260979975967145,
+      "sem_zscore_vs_natural": 3.6195491518860203
+    },
+    "local_contrast": {
+      "natural_mean": 0.05693424865955679,
+      "natural_std": 0.03615148652336523,
+      "sem_mean": 0.1478622532616342,
+      "sem_std": 0.015063795181415927,
+      "sem_zscore_vs_natural": 2.5151940721250656
+    },
+    "intensity_entropy": {
+      "natural_mean": 6.937942991715229,
+      "natural_std": 0.7925124576884652,
+      "sem_mean": 7.499919358104099,
+      "sem_std": 0.2277667491346455,
+      "sem_zscore_vs_natural": 0.7091072965944234
+    }
+  }
+}

@@ -1,0 +1,288 @@
+{
+  "generated_at": "2026-08-17T14:23:58Z",
+  "device": "cuda",
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "n_images": 45,
+  "n_pixels_pooled": 2949120,
+  "pearson_err_vs_local_gradient": 0.1869797189454541,
+  "pearson_err_vs_local_variance": 0.17589635908931636,
+  "mean_abs_err_below_median_gradient_ie_flatter_regions": 0.08723935241336452,
+  "mean_abs_err_above_median_gradient_ie_edgier_regions": 0.11340673607312823,
+  "mean_abs_err_below_median_variance_ie_flat_regions": 0.08224647741236973,
+  "mean_abs_err_above_median_variance_ie_textured_regions": 0.11839178513540642,
+  "edge_vs_flat_ratio": 1.299949311129401,
+  "textured_vs_flat_ratio": 1.4394754506239862,
+  "per_image": [
+    {
+      "file": "realsem_000000.npy",
+      "mean_abs_err": 0.09627066670910978,
+      "mean_local_grad": 0.10981839721395666,
+      "mean_local_var": 0.017227650967416946
+    },
+    {
+      "file": "realsem_000001.npy",
+      "mean_abs_err": 0.09243032384992489,
+      "mean_local_grad": 0.11311533523384011,
+      "mean_local_var": 0.02459047918723576
+    },
+    {
+      "file": "realsem_000002.npy",
+      "mean_abs_err": 0.09209887070754519,
+      "mean_local_grad": 0.11461019821763535,
+      "mean_local_var": 0.02630631373648129
+    },
+    {
+      "file": "realsem_000003.npy",
+      "mean_abs_err": 0.09686914589536855,
+      "mean_local_grad": 0.11125533007811603,
+      "mean_local_var": 0.018232060539904067
+    },
+    {
+      "file": "realsem_000004.npy",
+      "mean_abs_err": 0.09882357776574935,
+      "mean_local_grad": 0.10874442620713046,
+      "mean_local_var": 0.015017622384555685
+    },
+    {
+      "file": "realsem_000005.npy",
+      "mean_abs_err": 0.09359669402231674,
+      "mean_local_grad": 0.10933497272145927,
+      "mean_local_var": 0.018336524363231157
+    },
+    {
+      "file": "realsem_000006.npy",
+      "mean_abs_err": 0.097293804920902,
+      "mean_local_grad": 0.11188315660054453,
+      "mean_local_var": 0.018076319876533548
+    },
+    {
+      "file": "realsem_000007.npy",
+      "mean_abs_err": 0.10270458822421347,
+      "mean_local_grad": 0.11243524689966404,
+      "mean_local_var": 0.015849511607424052
+    },
+    {
+      "file": "realsem_000008.npy",
+      "mean_abs_err": 0.09587296192779604,
+      "mean_local_grad": 0.11056124850026779,
+      "mean_local_var": 0.01723593506557941
+    },
+    {
+      "file": "realsem_000009.npy",
+      "mean_abs_err": 0.09271153208340266,
+      "mean_local_grad": 0.11500817610792637,
+      "mean_local_var": 0.026186695422043514
+    },
+    {
+      "file": "realsem_000010.npy",
+      "mean_abs_err": 0.0919990949138807,
+      "mean_local_grad": 0.10669021768432004,
+      "mean_local_var": 0.0183918185493683
+    },
+    {
+      "file": "realsem_000011.npy",
+      "mean_abs_err": 0.0825917475367639,
+      "mean_local_grad": 0.09455282251101227,
+      "mean_local_var": 0.014426740882520685
+    },
+    {
+      "file": "realsem_000012.npy",
+      "mean_abs_err": 0.09068506498801554,
+      "mean_local_grad": 0.1201444102624086,
+      "mean_local_var": 0.03018336062736742
+    },
+    {
+      "file": "realsem_000013.npy",
+      "mean_abs_err": 0.10243729294183623,
+      "mean_local_grad": 0.12661703740780134,
+      "mean_local_var": 0.026111634009222198
+    },
+    {
+      "file": "realsem_000014.npy",
+      "mean_abs_err": 0.10749044340058589,
+      "mean_local_grad": 0.12668327722545533,
+      "mean_local_var": 0.0241813842762574
+    },
+    {
+      "file": "realsem_000015.npy",
+      "mean_abs_err": 0.10276393920663907,
+      "mean_local_grad": 0.12722618324421242,
+      "mean_local_var": 0.027246438585444593
+    },
+    {
+      "file": "realsem_000016.npy",
+      "mean_abs_err": 0.11310047042208993,
+      "mean_local_grad": 0.12913639790020787,
+      "mean_local_var": 0.02375580133047646
+    },
+    {
+      "file": "realsem_000017.npy",
+      "mean_abs_err": 0.11611856925412667,
+      "mean_local_grad": 0.13126016523151757,
+      "mean_local_var": 0.02105649638589852
+    },
+    {
+      "file": "realsem_000018.npy",
+      "mean_abs_err": 0.10036136227220993,
+      "mean_local_grad": 0.12969519548700625,
+      "mean_local_var": 0.0312867386317021
+    },
+    {
+      "file": "realsem_000019.npy",
+      "mean_abs_err": 0.10305122815012169,
+      "mean_local_grad": 0.12827154163418067,
+      "mean_local_var": 0.02785839178008001
+    },
+    {
+      "file": "realsem_000020.npy",
+      "mean_abs_err": 0.0892850220782293,
+      "mean_local_grad": 0.1205335085417262,
+      "mean_local_var": 0.033051093732214085
+    },
+    {
+      "file": "realsem_000021.npy",
+      "mean_abs_err": 0.12366772271886362,
+      "mean_local_grad": 0.14386643214075587,
+      "mean_local_var": 0.025259804582626624
+    },
+    {
+      "file": "realsem_000022.npy",
+      "mean_abs_err": 0.11762181061088484,
+      "mean_local_grad": 0.1337805640329947,
+      "mean_local_var": 0.023929065607068804
+    },
+    {
+      "file": "realsem_000023.npy",
+      "mean_abs_err": 0.08842878639111262,
+      "mean_local_grad": 0.12325767116568323,
+      "mean_local_var": 0.035323535381273405
+    },
+    {
+      "file": "realsem_000024.npy",
+      "mean_abs_err": 0.09712260697856578,
+      "mean_local_grad": 0.1390682808214412,
+      "mean_local_var": 0.043260226636972376
+    },
+    {
+      "file": "realsem_000025.npy",
+      "mean_abs_err": 0.08703496736522709,
+      "mean_local_grad": 0.1196808882661181,
+      "mean_local_var": 0.03316302517239791
+    },
+    {
+      "file": "realsem_000026.npy",
+      "mean_abs_err": 0.0881304935685776,
+      "mean_local_grad": 0.12214908696756273,
+      "mean_local_var": 0.03483877451217831
+    },
+    {
+      "file": "realsem_000027.npy",
+      "mean_abs_err": 0.09578192409377806,
+      "mean_local_grad": 0.12985236002764933,
+      "mean_local_var": 0.03647952200337403
+    },
+    {
+      "file": "realsem_000028.npy",
+      "mean_abs_err": 0.10952149945363487,
+      "mean_local_grad": 0.13184983498967273,
+      "mean_local_var": 0.02565011093563549
+    },
+    {
+      "file": "realsem_000029.npy",
+      "mean_abs_err": 0.10446470685127451,
+      "mean_local_grad": 0.12660819810207774,
+      "mean_local_var": 0.025224666323280336
+    },
+    {
+      "file": "realsem_000030.npy",
+      "mean_abs_err": 0.0941690331734435,
+      "mean_local_grad": 0.12623570184308475,
+      "mean_local_var": 0.03468228486836729
+    },
+    {
+      "file": "realsem_000031.npy",
+      "mean_abs_err": 0.10791810255461343,
+      "mean_local_grad": 0.13076726231076463,
+      "mean_local_var": 0.025651345278786375
+    },
+    {
+      "file": "realsem_000032.npy",
+      "mean_abs_err": 0.10407301744647413,
+      "mean_local_grad": 0.12682317567110638,
+      "mean_local_var": 0.025596593775660974
+    },
+    {
+      "file": "realsem_000033.npy",
+      "mean_abs_err": 0.11820409698169243,
+      "mean_local_grad": 0.14004212417174097,
+      "mean_local_var": 0.0252923111194421
+    },
+    {
+      "file": "realsem_000034.npy",
+      "mean_abs_err": 0.08008737226931117,
+      "mean_local_grad": 0.1018643846016515,
+      "mean_local_var": 0.023169512154625718
+    },
+    {
+      "file": "realsem_000035.npy",
+      "mean_abs_err": 0.08278537287045395,
+      "mean_local_grad": 0.1130824332517042,
+      "mean_local_var": 0.031463931373721256
+    },
+    {
+      "file": "realsem_000036.npy",
+      "mean_abs_err": 0.08930131243826622,
+      "mean_local_grad": 0.11151969934898394,
+      "mean_local_var": 0.02296256813458314
+    },
+    {
+      "file": "realsem_000037.npy",
+      "mean_abs_err": 0.10565285209489161,
+      "mean_local_grad": 0.12596654785386993,
+      "mean_local_var": 0.023430489870863123
+    },
+    {
+      "file": "realsem_000038.npy",
+      "mean_abs_err": 0.10043227447445702,
+      "mean_local_grad": 0.12026488286910345,
+      "mean_local_var": 0.023052659179222605
+    },
+    {
+      "file": "realsem_000039.npy",
+      "mean_abs_err": 0.10480180135446204,
+      "mean_local_grad": 0.12497901577450155,
+      "mean_local_var": 0.023950177759414645
+    },
+    {
+      "file": "realsem_000040.npy",
+      "mean_abs_err": 0.1219514000163997,
+      "mean_local_grad": 0.14130686795195388,
+      "mean_local_var": 0.02434532142806176
+    },
+    {
+      "file": "realsem_000041.npy",
+      "mean_abs_err": 0.11978042707283976,
+      "mean_local_grad": 0.1389572213661984,
+      "mean_local_var": 0.023466533271117914
+    },
+    {
+      "file": "realsem_000042.npy",
+      "mean_abs_err": 0.08941914054264544,
+      "mean_local_grad": 0.11114081867077615,
+      "mean_local_var": 0.02376528673822974
+    },
+    {
+      "file": "realsem_000043.npy",
+      "mean_abs_err": 0.11873648980630236,
+      "mean_local_grad": 0.13507029464354542,
+      "mean_local_var": 0.024262148583161884
+    },
+    {
+      "file": "realsem_000044.npy",
+      "mean_abs_err": 0.10671729492596427,
+      "mean_local_grad": 0.12613720004724885,
+      "mean_local_var": 0.023907132114997443
+    }
+  ],
+  "wall_clock_s": 4.04
+}

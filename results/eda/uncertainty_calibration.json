@@ -1,11 +1,11 @@
 {
-  "checkpoint": "C:\\Users\\sahit\\AppData\\Local\\Temp\\claude\\C--Users-sahit-OneDrive-Desktop-semi\\07e92344-20ec-4903-8211-c601a70eaa61\\scratchpad\\sweep_e.pt",
+  "checkpoint": "weights/best.pt",
   "n_images": 400,
-  "n_pooled_pixels": 80000,
-  "per_image_pearson_r": 0.9645787787020643,
-  "per_image_spearman_r": 0.940707441921512,
-  "pooled_pixel_pearson_r": 0.4431172170315376,
-  "pooled_pixel_spearman_r": 0.5644078581095091,
-  "mean_exp_log_var": 0.002311225825251313,
-  "mean_sq_err": 0.002278599616001884
+  "n_pooled_pixels": 400000,
+  "per_image_pearson_r": 0.9802200334924934,
+  "per_image_spearman_r": 0.9722607016293852,
+  "pooled_pixel_pearson_r": 0.4620629778997454,
+  "pooled_pixel_spearman_r": 0.6120904591501515,
+  "mean_exp_log_var": 0.0020787512655078898,
+  "mean_sq_err": 0.0019919109779402786
 }

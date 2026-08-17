@@ -3395,3 +3395,153 @@ forced. `results/eda/finetune_candidates_vs_shipped_paired.json` holds the full 
 The fine-tune's checkpoints remain on the Hub (`Team-Ceciroleo67/kla-ps01-checkpoints`,
 `20260817T101639Z-finetune_ood_wide-s42/`) if a future session wants to investigate the
 proxy-OOD regression further; nothing here is deleted.
+
+---
+
+## D68 — Phase 1 diagnosis: real-SEM OOD gap is content-driven, not degradation-coverage
+
+Following D67's negative result, ran the user-directed 4-part diagnosis before attempting any
+further training. Two hypotheses were already ruled out by code inspection alone (no new
+measurement needed):
+
+- **(b) Input distribution — confirmed ruled out.** `scripts/gen_real_sem_ood.py:84` produces
+  real-SEM `NoisyLR` via `degrade_fitted(gt, rng)`, this project's own measured degradation
+  model — identical fidelity path used everywhere else (V33). Not a foreign-noise confound.
+- **(c) Normalisation — confirmed ruled out.** Same script, lines 79-81: real-SEM GT is
+  per-image min-max normalised to exactly [0,1] before degrading, the same U1 convention as
+  every other GT in this project.
+
+**(a) Content statistics — the real explanation, measured (`scripts/content_stats_sem_vs_natural.py`,
+`results/eda/content_stats_sem_vs_natural.json`, n=200 natural GT sampled vs n=45 real-SEM
+GT):**
+
+| Metric | Natural mean | SEM mean | SEM z-score |
+|---|---|---|---|
+| Edge density (frac. pixels, grad mag > 0.10) | 0.099 | **0.533** | **+3.62** |
+| Local contrast (7x7 windowed std) | 0.057 | **0.148** | **+2.52** |
+| Spectral slope (radial log-log power fit) | −2.54 | **−1.63** | **+1.97** |
+| Bimodality coefficient (Sarle's) | 0.557 | 0.648 | +0.58 |
+| Intensity-histogram entropy | 6.94 | 7.50 | +0.71 |
+| Spectral peakiness | 457.6 | 60.3 | −0.70 |
+| Gradient anisotropy | 1.869 (std 1.95, wide) | 1.034 (std 0.03, tight) | −0.43 |
+
+Real-SEM content is a genuine, multi-axis statistical outlier: >2σ on three independent,
+mutually-consistent measures (edge density, local contrast, spectral flatness) that all point
+the same direction — real-SEM images are dense, high-frequency micro-texture (material grain
+structure), unlike the natural-photograph training content. Gradient anisotropy's near-zero
+std for SEM (vs natural's wide spread) is also notable: SEM content is statistically
+*homogeneous* — every SEM tile looks similarly isotropic-textured, whereas natural photos
+range from highly directional (facades, gratings) to not.
+
+**(d) Error localisation (`scripts/sem_error_localisation.py`,
+`results/eda/sem_error_localisation.json`, all 45 real-SEM pairs, `weights/best.pt`):**
+per-pixel `|pred-gt|` error correlates positively but modestly with local gradient magnitude
+(Pearson r=0.187) and local variance (r=0.176); error in the textured/edgy half of pixels
+runs 1.30-1.44x higher than in the flat half. **Directionally consistent with the content
+hypothesis, but a modest effect, not a dominant one** — reported as such, not oversold. The
+correlation is real (positive, same direction in both measures) but explains only a small
+fraction of pixel-level error variance; most of the OOD quality gap is not explained by
+*within-image* location alone.
+
+**Verdict: hypothesis (a) content is supported by measured evidence; (b)/(c) are cleanly
+ruled out; (d) gives weak corroborating, not conclusive, support.** This justifies Phase 2
+(free levers) next, and — if that doesn't resolve it — Phase 3's mix-in-procedural-content
+approach specifically (rather than more degradation-parameter tuning, which D67 already
+showed doesn't touch this).
+
+---
+
+## D69 — Phase 2: weight interpolation does not recover real-SEM OOD at any mixing ratio
+
+Linearly interpolated the EMA state dict between the shipped checkpoint (α=0) and D67's
+fine-tune's most mature checkpoint (α=1, step 104000) at 9 points, α ∈ [0, 1] step 0.125.
+Scored all three metrics on all three evaluation sets at every point, paired against α=0
+(`scripts/weight_interpolate_sweep.py`, `results/eda/weight_interpolate_sweep.json`).
+
+**Real-SEM OOD PSNR is essentially flat across the entire range** (17.7854 at α=0 → 17.7777
+at α=1, a 0.0077 dB drift, within noise) and **never wins a paired test at any α** — SSIM is
+actually a small but statistically significant LOSS from α=0.125 onward (t=−2.68 to −2.88),
+PSNR/LPIPS stay non-significant throughout. In-distribution PSNR improves monotonically and
+substantially with α (29.2548 → 29.7000, matching D67's own +0.445 dB at α=1 exactly, a
+correctness check on the interpolation code). Proxy-OOD degrades monotonically, reaching
+significance around α=0.25-0.5 and a large, clearly significant loss by α=1 (t=−6.57 on PSNR,
+matching D67 exactly).
+
+**Conclusion: no α on this line satisfies the decision rule** ("must win real-SEM OOD on a
+paired test vs α=0") — not because a good trade-off point is hard to find, but because the
+fine-tuned direction in weight space simply never points toward better real-SEM performance,
+at any mixing amount. This is a second, independent line of evidence (weight-space geometry,
+not just endpoint comparison) arriving at the same conclusion as D67: this fine-tune's
+information does not help real-SEM OOD, full stop, not just "not enough of it was mixed in."
+
+**Item 2 (soup among B3's near-identical long_run_e siblings, e.g. steps 68000/76000) was
+deprioritized and not run**, disclosed rather than silently dropped: item 1's result is
+already clean and decisive (no promotable point exists on the base-vs-finetune axis), and the
+long_run_e siblings are, per D66, already known to score within noise of each other and of
+the shipped checkpoint — a soup among them was always the lower-value half of Phase 2, and
+remaining time was directed at Phase 4 and reporting back per the plan's own checkpoint
+("report after Phase 1 and Phase 2 before committing any Phase 3 cloud spend") instead.
+
+**Implication for Phase 3:** D68 established the gap is content-driven; D69 establishes that
+neither the fine-tune's endpoint nor any interpolation of it recovers real-SEM OOD. Both
+conditions for attempting Phase 3 (new procedural-content training) are met — but Phase 3
+costs real additional cloud spend on top of an already-over-threshold ledger (see the
+PLAN_CLOUD.md update below) and 2-3 more hours. Reported to the user before proceeding, per
+the plan's explicit checkpoint, rather than committing that spend unilaterally.
+
+---
+
+## D70 — Phase 4: worst-case failures blur, do not hallucinate; uncertainty head recalibrated against the shipped checkpoint
+
+**Blur vs. hallucination, measured, not asserted** (`scripts/blur_vs_hallucination_check.py`,
+`results/eda/blur_vs_hallucination_check.json`). For the documented D5 failure case and the
+three worst-scoring real-SEM images: compared the prediction's FFT energy, in the frequency
+band strictly above what the LR input's Nyquist limit could have supplied (content the model
+cannot have legitimately recovered from the input, only invented or omitted), against GT's
+energy in that same band.
+
+| Case | Energy ratio (pred/GT) | Spatial correlation in that band |
+|---|---|---|
+| D5 (`000984.npy`) | **0.349** | 0.374 |
+| `realsem_000021.npy` | **0.052** | 0.250 |
+| `realsem_000040.npy` | **0.030** | 0.247 |
+| `realsem_000041.npy` | **0.071** | 0.247 |
+
+Every ratio is far below 1.0 — the model produces only 3-35% of the true high-frequency
+energy on its hardest cases, not more. Hallucination would require a ratio at or above 1.0
+(inventing detail that isn't there costs energy, it doesn't save it); this is the opposite
+signature. **The failure mode is confirmed blurring — conservative under-production — not
+hallucination**, decisively so on the real-SEM cases (ratios of 0.03-0.07, essentially not
+attempting fine texture at all). The modest positive correlation (0.25-0.37) on the small
+amount of high-frequency content the model does produce is consistent with genuinely
+recovering a little real detail, not inventing a plausible-looking wrong pattern.
+
+**Uncertainty calibration re-run against the actual shipped checkpoint** (D59's own number
+was measured against a stale scratchpad sweep checkpoint by mistake, not `weights/best.pt` —
+corrected here): `scripts/uncertainty_calibration_probe.py --checkpoint weights/best.pt
+--pixel_subsample_per_image 1000` (400,000 pooled pixels, 5x D59's sample size). Per-image
+Pearson r=**0.9802**, Spearman r=**0.9723** (both stronger than D59's stale 0.9646/0.9407);
+pooled per-pixel Pearson r=0.4621, Spearman r=0.6121 (weaker, as expected — NLL trains the
+mean relationship, not pixel-exact prediction, same interpretation as D59). Mean predicted
+variance (0.00208) closely tracks mean actual squared error (0.00199). **The uncertainty head
+genuinely knows when the model is likely wrong** — a real, now correctly-attributed,
+deck-worthy robustness property. README's Method summary corrected to cite these numbers, not
+D59's stale ones. `results/eda/uncertainty_calibration.json` overwritten with this run (the
+file always described "the checkpoint passed via --checkpoint," so overwriting it with the
+shipped-checkpoint run is the fix, not data loss — D59's narrative text in this document is
+left as the historical record of what was measured and why the mistake happened).
+
+**Quantitative characterisation of WHY the worst cases are unrecoverable**
+(`results/eda/nyquist_energy_fraction.json`), extending D5's own metric (fraction of GT
+spectral energy above the LR Nyquist limit, `scripts/visual_audit.py::hf_energy_ratio` —
+reused verbatim, not re-derived, after an initial ad-hoc recomputation without mean
+subtraction gave a wrong 20.3% for D5's own case before the bug was caught by failing to
+reproduce the documented 80.5%): the three worst real-SEM images sit at **80.6%, 80.9%, and
+81.0%** GT energy above Nyquist — strikingly close to D5's own 80.5% for `000984.npy`. **Some
+of the real-SEM OOD gap is a genuine information-theoretic limit of 2x decimation on this
+content, not solely a content-domain-transfer failure** — these images would be similarly
+hard for any model, natural-photo-trained or not. This nuances, not contradicts, D68's
+content-statistics finding: the domain shift (edge density, local contrast, spectral
+flatness) explains why the model handles this content worse than natural photos on AVERAGE,
+while this Nyquist measurement explains why its ABSOLUTE worst cases are especially hard
+regardless of training domain.

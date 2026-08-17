@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-08-17T14:36:23Z",
+  "device": "cuda",
+  "checkpoint": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+  "method": "high-frequency band = FFT radius above the LR input's Nyquist limit after 2x decimation -- content the LR input cannot have supplied. energy_ratio < 1 means the model under-shoots (blurs); a ratio >= 1 is only a hallucination concern if high_freq_spatial_correlation is also low (energy present but spatially uncorrelated with true content).",
+  "d5_case": {
+    "high_freq_energy_pred": 101309087.52587219,
+    "high_freq_energy_gt": 290023227.15345323,
+    "energy_ratio_pred_over_gt": 0.3493137033202822,
+    "high_freq_spatial_correlation": 0.3736956274803228,
+    "file": "000984.npy (D5)"
+  },
+  "worst_real_sem_cases": [
+    {
+      "high_freq_energy_pred": 4616527.639834944,
+      "high_freq_energy_gt": 89508150.28105476,
+      "energy_ratio_pred_over_gt": 0.05157661760788364,
+      "high_freq_spatial_correlation": 0.24982954780579034,
+      "file": "realsem_000021.npy"
+    },
+    {
+      "high_freq_energy_pred": 2574130.5020968877,
+      "high_freq_energy_gt": 86528817.59324405,
+      "energy_ratio_pred_over_gt": 0.029748823267150126,
+      "high_freq_spatial_correlation": 0.2474229905422204,
+      "file": "realsem_000040.npy"
+    },
+    {
+      "high_freq_energy_pred": 5896466.902137013,
+      "high_freq_energy_gt": 83453075.22556162,
+      "energy_ratio_pred_over_gt": 0.07065607691747385,
+      "high_freq_spatial_correlation": 0.24679110600076742,
+      "file": "realsem_000041.npy"
+    }
+  ],
+  "wall_clock_s": 18.37
+}
