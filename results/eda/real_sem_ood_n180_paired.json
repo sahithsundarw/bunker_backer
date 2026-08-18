@@ -1,0 +1,382 @@
+{
+  "generated_at": "2026-08-17T21:44:26Z",
+  "device": "cuda",
+  "candidate_checkpoint": {
+    "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+    "meta": {
+      "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\weights\\best.pt",
+      "size_bytes": 11557166,
+      "val_metrics": {
+        "val_psnr": 31.153990726207603,
+        "val_ssim": 0.8238908691532251,
+        "val_n": 100,
+        "selection": "ema/psnr",
+        "split": "configs/split_val.txt",
+        "structural_kind": "ms_ssim",
+        "val_lpips": 0.2636375476978719
+      },
+      "config": {
+        "name": "NAFSR",
+        "width": 64,
+        "num_blocks": 32,
+        "scale": 2,
+        "in_ch": 1,
+        "out_ch": 1,
+        "dw_expand": 2,
+        "ffn_expand": 2,
+        "layerscale_init": 1.0,
+        "film_dim": 16,
+        "uncertainty": true
+      }
+    },
+    "role": "current shipped weights/best.pt (Phase 3 structural-content fine-tune, D71/D72)"
+  },
+  "baseline_checkpoint": {
+    "source": "git show 84bba7a:weights/best.pt",
+    "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\_scratch_old_best_pre_phase3.pt",
+    "meta": {
+      "path": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\_scratch_old_best_pre_phase3.pt",
+      "size_bytes": 11565729,
+      "val_metrics": {
+        "val_psnr": 29.252896980109437,
+        "val_psnr_std": 4.618646914705462,
+        "val_ssim": 0.7919793723622707,
+        "val_ssim_std": 0.14323743210848774,
+        "val_lpips": 0.25470134522765875,
+        "val_lpips_std": 0.1451192564521922,
+        "val_n": 400,
+        "selection": "ema/psnr",
+        "selection_n": 100,
+        "split": "configs/split_val.txt",
+        "structural_kind": "ssim",
+        "best_iter": 76000,
+        "total_iters_run": 129700,
+        "wall_clock_s": 22895.55
+      },
+      "config": {
+        "name": "NAFSR",
+        "width": 64,
+        "num_blocks": 32,
+        "scale": 2,
+        "in_ch": 1,
+        "out_ch": 1,
+        "dw_expand": 2,
+        "ffn_expand": 2,
+        "layerscale_init": 1.0,
+        "film_dim": 16,
+        "uncertainty": true
+      }
+    },
+    "role": "prior Round 2 long-run checkpoint (29.2548 dB in-distribution) that Phase 3 was compared against and promoted over -- the exact baseline used by results/eda/phase3_candidate_vs_shipped_paired.json's n=45 result quoted in README.md's status block"
+  },
+  "design_note": "'baseline' here is chosen to match the existing on-record real-SEM paired result (results/eda/phase3_candidate_vs_shipped_paired.json), which compares the candidate/shipped checkpoint against the PRIOR checkpoint it superseded, not against a bicubic/classical baseline. This was the most direct way to ask 'does the earlier tie/tie/LPIPS-win verdict still hold with more statistical power', which is exactly what this task asks.",
+  "eval_set": {
+    "root": "C:\\Users\\sahit\\OneDrive\\Desktop\\semi\\results\\eda\\real_sem_ood_n180",
+    "n_crops": 180,
+    "n_tiles": 45,
+    "crops_per_tile": 4
+  },
+  "per_crop_n180": {
+    "description": "naive paired test treating all 180 crops as independent observations -- OVERSTATES power, since 4 crops/tile are correlated (same source image). Reference only.",
+    "verdict": {
+      "psnr": {
+        "test": "paired",
+        "n": 180,
+        "mean_diff": -0.0043562948900134225,
+        "sem": 0.0030437331945717405,
+        "t": -1.43123414949199,
+        "images_better": 77,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 180,
+        "mean_diff": -0.0005361595551159455,
+        "sem": 0.000755924795206676,
+        "t": -0.7092763175857397,
+        "images_better": 74,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 180,
+        "mean_diff": -0.029827471574147543,
+        "sem": 0.004787996173149562,
+        "t": -6.22963563367406,
+        "images_better": 115,
+        "significant": true,
+        "win": true,
+        "loss": false
+      }
+    }
+  },
+  "tile_clustered_n45": {
+    "description": "PRIMARY, defensible result. Per-crop (candidate-baseline) difference averaged across each tile's 4 crops first, then the paired t-test runs on these 45 tile-level mean differences. Respects the true unit of independence (one real image = one tile, not one crop).",
+    "tile_mean_diffs": {
+      "sem1000_x0_y0": {
+        "psnr": 0.0528638264560648,
+        "ssim": 0.014610643952600987,
+        "lpips": -0.15102624893188477
+      },
+      "sem1000_x0_y256": {
+        "psnr": 0.031313187586720304,
+        "ssim": 0.009767992374456039,
+        "lpips": -0.07803316414356232
+      },
+      "sem1000_x0_y448": {
+        "psnr": 0.042678290876660085,
+        "ssim": 0.011189672097154955,
+        "lpips": -0.07206492125988007
+      },
+      "sem1000_x256_y0": {
+        "psnr": 0.04102634548202566,
+        "ssim": 0.010404258285451294,
+        "lpips": -0.11931325495243073
+      },
+      "sem1000_x256_y256": {
+        "psnr": 0.0484914335058777,
+        "ssim": 0.010953513799214843,
+        "lpips": -0.14816853404045105
+      },
+      "sem1000_x256_y448": {
+        "psnr": 0.048689191347521366,
+        "ssim": 0.012125537977351204,
+        "lpips": -0.12774759531021118
+      },
+      "sem1000_x512_y0": {
+        "psnr": 0.03716540351207964,
+        "ssim": 0.009390159424436613,
+        "lpips": -0.09935028851032257
+      },
+      "sem1000_x512_y256": {
+        "psnr": 0.03350245301493615,
+        "ssim": 0.00784422274414674,
+        "lpips": -0.11488276720046997
+      },
+      "sem1000_x512_y448": {
+        "psnr": 0.04761085622364636,
+        "ssim": 0.011970172595605424,
+        "lpips": -0.13209426403045654
+      },
+      "sem1000_x768_y0": {
+        "psnr": 0.04610489470407053,
+        "ssim": 0.01104268125420891,
+        "lpips": -0.07544304430484772
+      },
+      "sem1000_x768_y256": {
+        "psnr": 0.02241127384661379,
+        "ssim": 0.005725929229328831,
+        "lpips": -0.04424189031124115
+      },
+      "sem1000_x768_y448": {
+        "psnr": 0.03066538090574067,
+        "ssim": 0.005960621117553286,
+        "lpips": -0.05466938018798828
+      },
+      "sem600_x0_y0": {
+        "psnr": -0.03988453068496778,
+        "ssim": -0.007619270410418308,
+        "lpips": 0.01649922877550125
+      },
+      "sem600_x0_y256": {
+        "psnr": -0.0053014171972822766,
+        "ssim": 0.0011759776298562556,
+        "lpips": -0.030285000801086426
+      },
+      "sem600_x0_y448": {
+        "psnr": -0.018900735916206557,
+        "ssim": -0.0030607112439652844,
+        "lpips": 0.002372361719608307
+      },
+      "sem600_x256_y0": {
+        "psnr": -0.03846565643915323,
+        "ssim": -0.006936594459105716,
+        "lpips": 0.018379099667072296
+      },
+      "sem600_x256_y256": {
+        "psnr": -0.0268013405050036,
+        "ssim": -0.007803185596088488,
+        "lpips": 0.0011008679866790771
+      },
+      "sem600_x256_y448": {
+        "psnr": -0.015587855981557652,
+        "ssim": -0.00437474285638929,
+        "lpips": 0.007499411702156067
+      },
+      "sem600_x512_y0": {
+        "psnr": -0.028032572986399273,
+        "ssim": -0.004302223053866568,
+        "lpips": 0.0077162086963653564
+      },
+      "sem600_x512_y256": {
+        "psnr": -0.022126328534961992,
+        "ssim": -0.003854162124588067,
+        "lpips": 0.005330294370651245
+      },
+      "sem600_x512_y448": {
+        "psnr": -0.036970453352258126,
+        "ssim": -0.007283098707596469,
+        "lpips": 0.017318375408649445
+      },
+      "sem600_x768_y0": {
+        "psnr": -0.01394737861357953,
+        "ssim": -0.0028383534189412463,
+        "lpips": -0.0002714991569519043
+      },
+      "sem600_x768_y256": {
+        "psnr": -0.019955840699024563,
+        "ssim": -0.003312983299282467,
+        "lpips": 0.004266858100891113
+      },
+      "sem600_x768_y448": {
+        "psnr": -0.04271852781728569,
+        "ssim": -0.005288340204846073,
+        "lpips": 0.01293383538722992
+      },
+      "sem700_x0_y0": {
+        "psnr": -0.07406753628670337,
+        "ssim": -0.007845672126196968,
+        "lpips": 0.01369541883468628
+      },
+      "sem700_x0_y256": {
+        "psnr": -0.037726250802939454,
+        "ssim": -0.003919478736732984,
+        "lpips": 5.938112735748291e-05
+      },
+      "sem700_x0_y288": {
+        "psnr": -0.04082739983673367,
+        "ssim": -0.005626543858842481,
+        "lpips": 0.0015458464622497559
+      },
+      "sem700_x256_y0": {
+        "psnr": -0.041069048364241745,
+        "ssim": -0.0020758826190184904,
+        "lpips": 0.0007265955209732056
+      },
+      "sem700_x256_y256": {
+        "psnr": -0.01792705416172513,
+        "ssim": -0.0009434721468833535,
+        "lpips": -0.009471222758293152
+      },
+      "sem700_x256_y288": {
+        "psnr": -0.023120528736381374,
+        "ssim": -0.0015647107807225946,
+        "lpips": -0.005404829978942871
+      },
+      "sem700_x288_y0": {
+        "psnr": -0.03372139964505827,
+        "ssim": -0.001116270452659232,
+        "lpips": -0.0010991916060447693
+      },
+      "sem700_x288_y256": {
+        "psnr": -0.017594336449263004,
+        "ssim": -0.0010863566448946899,
+        "lpips": -0.008856147527694702
+      },
+      "sem700_x288_y288": {
+        "psnr": -0.022826832535653097,
+        "ssim": -0.0024581151365269116,
+        "lpips": 0.00018118321895599365
+      },
+      "sem800_x0_y0": {
+        "psnr": 0.007297360714134449,
+        "ssim": 0.0010977040735267313,
+        "lpips": -0.027627304196357727
+      },
+      "sem800_x0_y256": {
+        "psnr": -0.024576567050154985,
+        "ssim": -0.0031051650615415427,
+        "lpips": -0.00715559720993042
+      },
+      "sem800_x0_y448": {
+        "psnr": -0.03692184917847996,
+        "ssim": -0.0009060789854133111,
+        "lpips": 0.0018408223986625671
+      },
+      "sem800_x256_y0": {
+        "psnr": -0.01574554296667241,
+        "ssim": -0.004009583127514826,
+        "lpips": -0.003734678030014038
+      },
+      "sem800_x256_y256": {
+        "psnr": -0.009296810619248141,
+        "ssim": -0.004593153865503432,
+        "lpips": -0.006868466734886169
+      },
+      "sem800_x256_y448": {
+        "psnr": -0.017892243957273735,
+        "ssim": -0.008299788293035987,
+        "lpips": -0.0038333460688591003
+      },
+      "sem800_x512_y0": {
+        "psnr": 0.002674370112358382,
+        "ssim": 0.0015200686580004313,
+        "lpips": -0.03684885799884796
+      },
+      "sem800_x512_y256": {
+        "psnr": 0.020474804347222708,
+        "ssim": -0.011292279880391054,
+        "lpips": -0.023431718349456787
+      },
+      "sem800_x512_y448": {
+        "psnr": 0.009932146839501499,
+        "ssim": -0.01721490697963237,
+        "lpips": -0.009599573910236359
+      },
+      "sem800_x768_y0": {
+        "psnr": -0.0021629869151791326,
+        "ssim": -0.000111547868493371,
+        "lpips": -0.01806420087814331
+      },
+      "sem800_x768_y256": {
+        "psnr": 0.0104514237751836,
+        "ssim": -0.006188406685196556,
+        "lpips": -0.03490327298641205
+      },
+      "sem800_x768_y448": {
+        "psnr": -0.00521688706757395,
+        "ssim": -0.00987525656882196,
+        "lpips": -0.009211748838424683
+      }
+    },
+    "verdict": {
+      "psnr": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.0043562948900134225,
+        "sem": 0.0047879812146607685,
+        "t": -0.9098395951668471,
+        "images_better": 17,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "ssim": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.0005361595551159455,
+        "sem": 0.0011042719505480675,
+        "t": -0.48553216881932126,
+        "images_better": 15,
+        "significant": false,
+        "win": false,
+        "loss": false
+      },
+      "lpips": {
+        "test": "paired",
+        "n": 45,
+        "mean_diff": -0.029827471574147543,
+        "sem": 0.007275079894845086,
+        "t": -4.099951066555631,
+        "images_better": 29,
+        "significant": true,
+        "win": true,
+        "loss": false
+      }
+    }
+  }
+}

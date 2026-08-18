@@ -9,7 +9,7 @@ resolution and a single PixelShuffle ×2 head.
 
 ---
 
-> ## STATUS — 2026-08-17: ROUND 2 PHASE 3 CHECKPOINT SHIPS, 29.5850 dB
+> ## STATUS — 2026-08-18: ROUND 2 PHASE 3 CHECKPOINT SHIPS, 29.5850 dB, batch_size default 32→4
 >
 > `weights/best.pt` is present and tracked directly in the repo (Route A, `V51` exemption).
 > It is a fine-tune of the Round 2 long-run checkpoint (never trained from scratch): NAFSR
@@ -32,19 +32,40 @@ resolution and a single PixelShuffle ×2 head.
 > t=+27.18, SSIM +0.0119 t=+16.35, LPIPS −0.0111 t=−3.86, all 400/400-paired, all significant).
 > Full comparison and the diagnostic work that led here: `docs/decisions.md` D68/D69/D71/D72.
 >
+> **The real-SEM OOD result was independently re-checked at ~4x the statistical power** to
+> make sure n=45 wasn't simply underpowered: the source imagery was re-cropped into 4
+> non-overlapping 256×256 quadrants per source tile (n=180, genuinely distinct real sensor
+> pixels, zero synthetic-augmentation inflation), scored two ways — naive per-crop (n=180) and
+> tile-clustered (n=45, correctly respecting that 4 crops from one tile aren't independent
+> samples). **Both agree with the original n=45 result almost exactly: PSNR and SSIM stay
+> statistical ties, LPIPS stays a significant win** (tile-clustered: PSNR t=−0.91 tie, SSIM
+> t=−0.49 tie, LPIPS t=−4.10 win). The extra power did not flip anything — a real risk we
+> checked for rather than assumed away. `results/eda/real_sem_ood_n180_paired.json`.
+>
 > **Honest caveat on the proxy-OOD win:** its size (PSNR +14.19 dB) is most likely
 > content-distribution overlap between training and that specific eval set (both are now
 > procedural geometric shapes), not evidence of general-purpose OOD robustness — disclosed as
 > such, not oversold as generalisation (D72).
 >
+> **Why the quality metric hasn't moved further: measured, not assumed.** The fine-tune above
+> was cut short at 8,000 of a planned 40,000 iterations by an external cloud-job cancellation
+> (cloud budget now exhausted, ~$29.47 of a $30 credit ceiling). Finishing it would plausibly
+> add another ~0.11 dB. We measured whether that remainder could be run locally instead of on
+> cloud: **no.** The real recipe's `batch_size: 16` genuinely OOMs on this 8 GB dev GPU on the
+> very first training step (verbatim CUDA error, reproduced); the largest batch that runs clean
+> locally (`batch_size: 4`) needs ~4x the steps to match the training signal of a batch-16 run,
+> putting a data-equivalent local finish at an estimated 6.9–18.9 hours versus the cloud
+> anchor's ~3 hours — worse in essentially every reading, not a free local substitute
+> (`docs/decisions.md` D73).
+>
 > - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 >   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
 >   same 400-image val-split input set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16,
->   batch 32): total wall-clock **median 28.43 s (14.1 img/s)**, n=5. Architecture is
->   byte-identical to the prior checkpoint (same param count), so throughput is expected to be
->   the same modulo normal session-to-session variance on this laptop GPU (documented
->   separately as a real measurement caveat, see Runtime measurement below) — no H100 number
->   exists or is claimed.
+>   batch 4 — `inference.py`'s current default, re-swept and changed from 32 this session
+>   after batch 4 measurably beat 32 by 31.8%/18.1% at 128→256/256→512, see `docs/decisions.md`
+>   D74): total wall-clock **median 20.62 s (19.40 img/s)**, n=5, measured with **no
+>   `--batch_size` override** — the exact command KLA will actually run. No H100 number exists
+>   or is claimed; smaller batch is also strictly safer against OOM on unknown hardware.
 > - **V22 is a known, disclosed, LIVE fail, not fixed — and priced, not just disclosed.**
 >   bf16 vs fp32 outputs diverge — root-caused to smooth depth-compounding over 32 residual
 >   blocks, not a discrete unpromoted op. The exact divergence is checkpoint-specific (it is a
@@ -114,7 +135,7 @@ no score can be computed locally against the official test set. Scores are compu
 | U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | not separately measured (`results/runtime_report.md` covers NAFSR only) |
 | Prior shipped checkpoint (superseded 2026-08-17): NAFSR w48n16, from scratch, 388,225 params | 28.7865 ± 4.5329 | 0.78287 ± 0.14169 | 0.25324 ± 0.13193 | 8.3 img/s @N=400, RTX 4060, bf16, batch 32 (high-variance measurement, 681% spread — see `results/runtime_report.md`) |
 | Round 2 long-run checkpoint (superseded 2026-08-17): NAFSR w64n32, FiLM+uncertainty, cloud long run (1,393,938 params) | 29.2548 ± 4.6210 | 0.79211 ± 0.14321 | 0.25625 ± 0.14627 | 17.3 img/s @N=400, RTX 4060, bf16, batch 32 (see `results/runtime_report.md`) |
-| **Shipped — NAFSR ×2 w64 n32, EMA, FiLM noise-conditioning + uncertainty head, structural-content fine-tune (1,393,938 params)** | **29.5850 ± 4.6301** | **0.79460 ± 0.14204** | **0.25416 ± 0.13263** | **14.1 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 32 — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
+| **Shipped — NAFSR ×2 w64 n32, EMA, FiLM noise-conditioning + uncertainty head, structural-content fine-tune (1,393,938 params)** | **29.5850 ± 4.6301** | **0.79460 ± 0.14204** | **0.25416 ± 0.13263** | **19.40 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 4 (current default, re-swept this session — D74) — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
 
 Values are `mean ± population standard deviation`. Source: `results/metrics_summary.md`,
 machine-generated by `scripts/evaluate.py`; per-image records live in
@@ -620,9 +641,19 @@ ground truth of any kind.
 
 **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 records the CURRENT shipped checkpoint: at the full 400-image test set (`configs/split_val.txt`),
-batch 32, precision bf16, on the **NVIDIA GeForce RTX 4060 Laptop GPU**, total wall-clock
-**median 28.43 s (14.1 img/s)**, n=5 repeats. No H100 number exists or is claimed
-anywhere in this repository.
+batch 4 (`inference.py`'s real default — no `--batch_size` override; re-swept and changed from
+32 this session, `docs/decisions.md` D74), precision bf16, on the **NVIDIA GeForce RTX 4060
+Laptop GPU**, total wall-clock **median 20.62 s (19.40 img/s)**, n=5 repeats. No H100 number
+exists or is claimed anywhere in this repository.
+
+**A batch-size re-sweep this session found batch 4 beats the old default of 32 by 31.8% lower
+wall-clock at 128→256 and 18.1% at 256→512** (monotonic across {4,8,16,32,64}, both
+resolutions, n=5 medians, one interleaved session — `results/runtime_report.md`), so the
+default was changed. A real bug was also found and fixed in the process:
+`scripts/benchmark_runtime.py` had its own hardcoded `--batch_size` default of 32 and always
+forwarded it explicitly, so it could never actually measure `inference.py`'s own default —
+every "no override" run silently pinned to 32 regardless. Fixed to only forward `--batch_size`
+when explicitly passed (`docs/decisions.md` D74).
 
 Earlier checkpoints have their own records at the same N, device and method, kept for the
 historical comparison: the Round 2 long-run checkpoint (29.2548 dB, byte-identical param

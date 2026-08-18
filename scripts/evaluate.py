@@ -350,9 +350,9 @@ def render_real_sem_ood_section(row: dict[str, Any], *, indist_row: dict[str, An
     out.append("## Real-SEM OOD robustness report (genuine electron-microscopy content, n="
                f"{row.get('n', '?')})")
     out.append("")
-    out.append("**What this is:** the shipped model (`weights/best.pt`) run on 45 real "
-               "scanning-electron-microscopy images -- one per unique underlying tile from "
-               "**Scanning Electron Microscopy (SEM) Dataset of Additively Manufactured Ni-WC "
+    out.append(f"**What this is:** the shipped model (`weights/best.pt`) run on {row.get('n', '?')} "
+               "real scanning-electron-microscopy images/crops -- from unique underlying tiles "
+               "of **Scanning Electron Microscopy (SEM) Dataset of Additively Manufactured Ni-WC "
                "Metal Matrix Composites for Semantic Segmentation**, Zenodo record 17315241, "
                "**CC-BY 4.0** (`https://zenodo.org/records/17315241`), used here for "
                "evaluation only -- no training, no parameter fitting, per F14 disclosure. "
@@ -394,8 +394,8 @@ def render_real_sem_ood_section(row: dict[str, Any], *, indist_row: dict[str, An
         out.append("")
     if bicubic_row is not None:
         bm = bicubic_row["metrics"]
-        out.append("**Versus a bicubic floor computed on these SAME 45 pairs** (isolates "
-                   "whether the low absolute scores below reflect this content being "
+        out.append(f"**Versus a bicubic floor computed on these SAME {row.get('n', '?')} pairs** "
+                   "(isolates whether the low absolute scores below reflect this content being "
                    "structurally hard for ANY method, or a model-specific failure):")
         for key, digits in (("psnr", 4), ("ssim", 5), ("lpips", 5)):
             if key not in m or key not in bm:
@@ -789,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
         real_sem_bicubic_row = score_dir(
             "real_sem_ood_bicubic", bc_dir, rs_gt, names_rs, with_lpips=not args.no_lpips,
             device=args.device, allow_unclipped=args.allow_unclipped,
-            split_desc="REAL-SEM OOD bicubic floor, same 45 pairs",
+            split_desc=f"REAL-SEM OOD bicubic floor, same {len(names_rs)} pairs",
             persist=not (args.no_write or args.no_lpips), verbose=args.verbose)
 
     command = "py -3.12 " + " ".join(

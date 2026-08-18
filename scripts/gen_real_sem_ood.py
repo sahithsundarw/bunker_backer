@@ -42,6 +42,37 @@ OUT_ROOT = REPO_ROOT / "results" / "eda" / "real_sem_ood"
 CROP_SIZE = 256
 SEED_BASE = 20260817
 
+# Non-overlapping crop-offset layouts, keyed by --crops_per_tile. 1 == today's exact
+# behaviour (single centre crop, computed the same way as before -- not hardcoded here,
+# see below). 4 == the four quadrants of a tile whose side is an exact multiple of
+# 2*CROP_SIZE (verified per-tile at runtime, never assumed).
+SUPPORTED_CROPS_PER_TILE = (1, 4)
+
+
+def _crop_offsets(h: int, w: int, crops_per_tile: int) -> list[tuple[int, int]]:
+    """Return a list of (row, col) top-left offsets for non-overlapping CROP_SIZE crops.
+
+    crops_per_tile == 1: single centre crop -- byte-identical to the script's original
+    (pre-extension) behaviour.
+    crops_per_tile == 4: the four quadrants tiling the whole tile with zero overlap and
+    zero gap, requiring h == w == 2 * CROP_SIZE exactly (checked, not assumed).
+    """
+    if crops_per_tile == 1:
+        oy, ox = (h - CROP_SIZE) // 2, (w - CROP_SIZE) // 2
+        return [(oy, ox)]
+    if crops_per_tile == 4:
+        if h != 2 * CROP_SIZE or w != 2 * CROP_SIZE:
+            raise SystemExit(
+                f"--crops_per_tile 4 requires each tile to be exactly "
+                f"{2 * CROP_SIZE}x{2 * CROP_SIZE} so it tiles into 4 non-overlapping "
+                f"{CROP_SIZE}x{CROP_SIZE} crops with no gap/overlap; got {h}x{w}."
+            )
+        return [(0, 0), (0, CROP_SIZE), (CROP_SIZE, 0), (CROP_SIZE, CROP_SIZE)]
+    raise SystemExit(
+        f"--crops_per_tile {crops_per_tile} is not supported (only "
+        f"{SUPPORTED_CROPS_PER_TILE} have a defined non-overlapping tiling)."
+    )
+
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -51,7 +82,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="dataset root (contains train/GT, train/NoisyLR, test_NoisyLR) for "
                          "the disjointness check; skipped if not given")
     ap.add_argument("--out_root", default=str(OUT_ROOT))
+    ap.add_argument("--crops_per_tile", type=int, default=1,
+                    help="non-overlapping 256x256 crops per 512x512 source tile. Default 1 "
+                         "(single centre crop) reproduces the existing 45-image set exactly. "
+                         "4 takes the four quadrants of each tile (n=180 for this source), "
+                         "using genuinely distinct real sensor pixels -- no synthetic "
+                         "augmentation. See docs/decisions.md D53 and the follow-up entry.")
     args = ap.parse_args(argv)
+    if args.crops_per_tile not in SUPPORTED_CROPS_PER_TILE:
+        raise SystemExit(
+            f"--crops_per_tile {args.crops_per_tile} not supported; choose from "
+            f"{SUPPORTED_CROPS_PER_TILE}."
+        )
 
     sem_root = Path(args.sem_root)
     out_root = Path(args.out_root)
@@ -65,33 +107,40 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"no *_HorizontalFlip.bmp files found under {sem_root}")
     bases = sorted({re.match(r"(sem\d+_x\d+_y\d+)_", f.name).group(1) for f in files})
     print(f"unique base tiles with HorizontalFlip variant: {len(bases)}")
+    print(f"crops_per_tile: {args.crops_per_tile}  -> expected n = "
+          f"{len(bases) * args.crops_per_tile}")
 
     manifest = []
     membership = []
-    for idx, base in enumerate(bases):
+    idx = 0
+    for base in bases:
         src = sem_root / f"{base}_HorizontalFlip.bmp"
         im = Image.open(src).convert("L")
         arr = np.asarray(im, dtype=np.float32) / 255.0
         h, w = arr.shape
         if h < CROP_SIZE or w < CROP_SIZE:
             raise SystemExit(f"{src}: {arr.shape} smaller than {CROP_SIZE}x{CROP_SIZE}")
-        oy, ox = (h - CROP_SIZE) // 2, (w - CROP_SIZE) // 2
-        crop = arr[oy:oy + CROP_SIZE, ox:ox + CROP_SIZE]
-        lo, hi = float(crop.min()), float(crop.max())
-        gt = ((crop - lo) / (hi - lo) if hi > lo else crop).astype(np.float32)
+        offsets = _crop_offsets(h, w, args.crops_per_tile)
 
-        rng = np.random.default_rng([SEED_BASE, idx])
-        lr = degrade_fitted(gt, rng).astype(np.float32)
+        for oy, ox in offsets:
+            crop = arr[oy:oy + CROP_SIZE, ox:ox + CROP_SIZE]
+            lo, hi = float(crop.min()), float(crop.max())
+            gt = ((crop - lo) / (hi - lo) if hi > lo else crop).astype(np.float32)
 
-        name = f"realsem_{idx:06d}.npy"
-        np.save(gt_dir / name, gt)
-        np.save(lr_dir / name, lr)
-        manifest.append({
-            "file": name, "source_tile": base, "source_file": src.name,
-            "gt_min": float(gt.min()), "gt_max": float(gt.max()),
-            "lr_min": float(lr.min()), "lr_max": float(lr.max()),
-        })
-        membership.append(name)
+            rng = np.random.default_rng([SEED_BASE, idx])
+            lr = degrade_fitted(gt, rng).astype(np.float32)
+
+            name = f"realsem_{idx:06d}.npy"
+            np.save(gt_dir / name, gt)
+            np.save(lr_dir / name, lr)
+            manifest.append({
+                "file": name, "source_tile": base, "source_file": src.name,
+                "crop_offset_row": int(oy), "crop_offset_col": int(ox),
+                "gt_min": float(gt.min()), "gt_max": float(gt.max()),
+                "lr_min": float(lr.min()), "lr_max": float(lr.max()),
+            })
+            membership.append(name)
+            idx += 1
 
     (out_root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     lines = ["# real_sem_ood membership list -- one filename per line.",

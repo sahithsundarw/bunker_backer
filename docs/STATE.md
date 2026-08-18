@@ -2,31 +2,61 @@
 
 ---
 
-# ⚠ RESUME HERE — Phase 1 close-out + Round 2 OOD investigation, main session (Windows/RTX 4060), 2026-08-17
+# ⚠ RESUME HERE — Phase 1 close-out + Round 2 OOD investigation + throughput/headroom audit, main session (Windows/RTX 4060), 2026-08-18
 
-**Deadline extended to 2026-08-18 night.** Two plans executed in sequence this session, both
-at `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md`: "Phase 1 close-out"
-(README truth pass, verifier hygiene, B1-B4/C1-C3) then, after the user requested it, "Attack
+**Deadline extended to 2026-08-18 night.** Three plans executed in sequence this session, all
+at `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md` (each overwrote the last
+once done): "Phase 1 close-out" (README truth pass, verifier hygiene, B1-B4/C1-C3), "Attack
 the real-SEM OOD gap — diagnose before training" (content-statistics diagnosis, weight
-interpolation, a targeted fine-tune). **Both are DONE. The fine-tune was promoted.**
+interpolation, a targeted fine-tune — the Phase 3 checkpoint), then, after an honest standing
+assessment identified three weak points (raw metric, thin OOD statistics, unmeasured-on-H100
+throughput), "Attack the three named weak points — $0 budget, free levers only" (four parallel
+tracks: local-training-limit measurement, real-SEM OOD n=180 expansion, batch-size re-sweep,
+paired-test scoring). **All three plans are DONE.**
 
-- **CURRENT SHIPPED CHECKPOINT: Phase 3 structural-content fine-tune (`docs/decisions.md`
-  D71/D72), sha256 `6d74ccfd...`, 29.5850 dB / 0.79460 SSIM / 0.25416 LPIPS.** Fine-tuned from
-  the D61 long-run checkpoint (never from scratch) with 27.5% procedural structural content
-  mixed into training. Paired vs the D61 checkpoint: wins/ties every metric on every
-  evaluation set (in-distribution, procedural proxy-OOD, real-SEM OOD) with **zero
-  regressions anywhere**, including the first genuine real-SEM OOD improvement (LPIPS,
-  t=−4.12) of the whole investigation. Promoted with explicit user sign-off. Full cascade
-  done: `results/baselines/{final,proxy_ood/final,real_sem_ood/final}` regenerated,
-  `results/metrics_summary.md` regenerated, `results/runtime_report.md` updated (median
-  28.43s/14.1 img/s), `results/qualitative/` regenerated, `results/restored_test_outputs/`
-  republished as GitHub Release `artifacts-v3` (verified fetchable logged-out), README/
-  weights-README/REQUIREMENTS_MATRIX updated, `results/experiments.csv` row added
-  (`20260817T145721Z-finetune_structural_content-s42`). **A fresh full `--strict` verifier
-  run is in progress as of this writing (check `/tmp/verify_promo.log` or
-  `results/verification_report.json`'s timestamp/commit before trusting any tally quoted
-  elsewhere in this file) — the checkpoint changed, so the last-known 63 PASS / 6 FAIL is
-  stale until reconfirmed.**
+- **CURRENT SHIPPED CHECKPOINT: unchanged this round — Phase 3 structural-content fine-tune**
+  (`docs/decisions.md` D71/D72), sha256 `6d74ccfd...`, 29.5850 dB / 0.79460 SSIM / 0.25416
+  LPIPS. Fine-tuned from the D61 long-run checkpoint (never from scratch) with 27.5% procedural
+  structural content mixed into training. Paired vs the D61 checkpoint: wins/ties every metric
+  on every evaluation set with **zero regressions anywhere**, including the first genuine
+  real-SEM OOD improvement (LPIPS, t=−4.12). Promoted with explicit user sign-off. Full
+  cascade done and re-confirmed clean (`results/baselines/*`, `results/metrics_summary.md`,
+  `results/qualitative/`, GitHub Release `artifacts-v3`, README/weights-README/
+  REQUIREMENTS_MATRIX, `results/experiments.csv` row `20260817T145721Z-finetune_structural_content-s42`).
+- **NEW THIS SESSION — `inference.py`'s default `--batch_size` changed 32 → 4** (D74): a
+  re-swept, whole-process, interleaved-session sweep at {4,8,16,32,64} for the current
+  architecture found batch 4 beats the old default of 32 by 31.8% (128→256) / 18.1%
+  (256→512) lower wall-clock, monotonic across the whole range. No V-check pins the default.
+  A real, separate bug in `scripts/benchmark_runtime.py` was found and fixed in the same pass:
+  it always forwarded its own hardcoded `--batch_size 32` to `inference.py` regardless of
+  whether the user overrode it, so it could never actually measure `inference.py`'s own
+  default — fixed to only forward when explicitly passed. New honest headline throughput,
+  measured with **no override** (the exact command KLA runs): median 20.62 s (19.40 img/s),
+  n=5, `results/runtime_report.md`.
+- **NEW THIS SESSION — real-SEM OOD result re-checked at ~4x statistical power** (n=180, 4
+  non-overlapping 256×256 crops per source tile, zero synthetic-augmentation inflation,
+  scored two ways: naive per-crop n=180 and the statistically-defensible tile-clustered n=45).
+  **The existing n=45 result holds exactly: PSNR/SSIM stay ties, LPIPS stays a significant
+  win** (tile-clustered t=−4.10 vs the original −4.12). Did not flip to a hidden loss under
+  more power — a real risk we checked for rather than assumed away.
+  `results/eda/real_sem_ood_n180_paired.json`. The original n=45 set/predictions were left
+  completely untouched; n=180 is a secondary confirmation, not a replacement of the primary
+  reported evaluation. `scripts/gen_real_sem_ood.py` gained `--crops_per_tile` (default 1,
+  byte-identical to the old behaviour). `scripts/make_baselines.py` gained `--real_sem_ood`
+  (closing a real reproducibility gap — the original n=45 predictions had no committed
+  generator invocation before this).
+- **NEW THIS SESSION — local continuation of the killed fine-tune priced and measured, not
+  guessed** (D73): with cloud budget exhausted, could the remaining ~30-36k iterations run
+  locally? Measured: `batch_size: 16` (the real config) genuinely OOMs on the first training
+  step on this 8 GB card, verbatim. `batch_size: 4` is the largest that runs clean, but is 1/4
+  the real recipe's batch, so matching its training signal needs ~4x the steps: a
+  data-equivalent local finish is an estimated 6.9–18.9 hours versus the cloud anchor's ~3
+  hours. Not a free substitute. Recorded in `docs/STATE.md`'s "Do NOT retry" list so this
+  isn't re-attempted blind.
+- **Full `--strict` verifier re-run after all of the above: 65 PASS / 4 FAIL** (V04, V22, V46,
+  V53 — the same known/expected/disclosed set as before; V04/V46 need `--fresh-clone`, V22 is
+  the disclosed bf16/fp32 trade-off, V53 is the still-unfilled deck placeholder). **No new
+  failures, no regressions, no flake this run** — `results/verification_report.json`.
 - **How this checkpoint came to be (the OOD investigation, in order):** Hour 0 diagnosis
   (D63) found the real-SEM regression idiosyncratic, not systematic, plus a small scale gap.
   A first fine-tune attempt widening degradation randomisation (D67) neither fixed real-SEM
@@ -585,6 +615,21 @@ Degradation simulator (measured, `data-pipeline`), whole-set over all 2800 non-v
 - **Deferring `import torch` into `main()` to make V23 look better.** It would cut the
   `--help` measurement to ~0.25 s without changing the real run by a millisecond. Gaming the
   metric, not reducing the cost. Rejected deliberately.
+- **Finishing the remaining `configs/finetune_structural_content.yaml` fine-tune (iter 84000 ->
+  116000) locally instead of on cloud, without re-checking this measurement first.** MEASURED
+  (D73): `batch_size: 16` (the real config) OOMs on the first training step, verbatim CUDA
+  error, on the 8 GB RTX 4060 Laptop. `batch_size: 8` does not OOM but produced 12 iterations
+  in 7.5 minutes / 0 iterations in 5 minutes across two attempts (contended by a sibling
+  session's GPU benchmark sweep at 100% util, plus D20's independent allocator-spill finding
+  for this width>=64/blocks>=32 architecture — likely both). `batch_size: 4` is the largest
+  batch that ran clean, at a measured 0.25-0.566 s/iter (1.77-4.00 it/s, two clean runs, 2.3x
+  spread from sibling-session contention even at this batch size). Literal 25,000-30,000 steps
+  at batch 4 = ~1.7-4.7 h; the data-equivalent step count to match a batch-16 run (~4x more
+  steps, ~100,000-120,000) = ~6.9-18.9 h -- both ranges before accounting for the LR/optimizer
+  retuning batch 4 would also need. Worse than the ~3h/~$7.50 A100 cloud anchor in every
+  reading except the single most optimistic literal one. Do not attempt this locally again
+  without first re-measuring on a GPU-idle machine and re-deriving a batch<16-compatible
+  recipe (grad accumulation or a re-tuned LR), neither of which exists yet.
 
 ## Backlog — the 7 remaining UNCOVERED requirements (requirements-auditor, iteration 1)
 Four of the eleven gaps were closed as V54/V55/V56/V59 (D27). These seven remain; each is a

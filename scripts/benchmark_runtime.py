@@ -40,11 +40,12 @@ def _run_once(args: argparse.Namespace, output_dir: Path) -> dict[str, object]:
         args.python, str(REPO_ROOT / "inference.py"),
         "--input_dir", str(Path(args.input_dir).resolve()),
         "--output_dir", str(output_dir),
-        "--batch_size", str(args.batch_size),
         "--precision", args.precision,
         "--require_weights",
         "--verbose",
     ]
+    if args.batch_size is not None:
+        cmd.extend(["--batch_size", str(args.batch_size)])
     if args.device:
         cmd.extend(["--device", args.device])
     if args.weights:
@@ -145,7 +146,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="Python executable used to launch inference.py")
     ap.add_argument("--weights", default=None,
                     help="checkpoint override; inference.py's tracked default is used otherwise")
-    ap.add_argument("--batch_size", type=int, default=32)
+    ap.add_argument("--batch_size", type=int, default=None,
+                    help="override forwarded to inference.py as --batch_size; if omitted, "
+                         "no --batch_size flag is passed at all, so inference.py's OWN "
+                         "default governs -- this is what makes 'no --batch_size' actually "
+                         "measure what KLA gets running inference.py as-is, instead of "
+                         "silently pinning to a hardcoded 32 that could diverge from "
+                         "inference.py's real default (bug found and fixed 2026-08-18, see "
+                         "docs/decisions.md)")
     ap.add_argument("--device", default=None)
     ap.add_argument("--precision", default="auto",
                     choices=["auto", "bf16", "fp16", "fp32"])

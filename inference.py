@@ -101,8 +101,13 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS),
                     help="optional checkpoint override; defaults to weights/best.pt "
                          "beside this script")
-    ap.add_argument("--batch_size", type=int, default=32,
-                    help="per-shape-group batch size; halved automatically on CUDA OOM")
+    ap.add_argument("--batch_size", type=int, default=4,
+                    help="per-shape-group batch size; halved automatically on CUDA OOM "
+                         "(default 4: measured fastest end-to-end wall-clock at both "
+                         "128->256 and 256->512 on the current NAFSR w64/n32 checkpoint, "
+                         "31.8%%/18.1%% faster than batch 32 respectively -- see "
+                         "results/runtime_report.md's batch-size sweep, "
+                         "scripts/benchmark_runtime.py, n=5 medians)")
     ap.add_argument("--device", default=None, help="cuda | cuda:N | cpu (default: auto)")
     ap.add_argument("--precision", default="auto", choices=["auto", "bf16", "fp16", "fp32"],
                     help="auto = bf16 on CUDA, fp32 on CPU (CPU bf16 is slower and less "

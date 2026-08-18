@@ -3711,3 +3711,161 @@ replaced `weights/best.pt`.
 
 No number in any of the above was hand-typed without a script producing it first — the same
 standing rule this whole project has followed since D1.
+
+## D73 — Local continuation of the Phase 3 fine-tune priced and measured, honestly: not viable on this GPU
+
+**Question:** with cloud spend exhausted (~$29.47 of the $30 HF credit ceiling; $0 budget for
+this task), could the remaining ~30,000–36,000 iterations of `configs/finetune_structural_content.yaml`
+(`optim.finetune_horizon: 40000`, resumed at iter 84000, i.e. iter range [84000, 116000)) be
+run on the local RTX 4060 Laptop (8 GB) instead? Measured, not estimated, below. All numbers
+come from real `train.py` invocations this session, `--out` pointed at the scratchpad
+directory, `--no_ledger` (ignored for non-smoke runs per SPEC 9, so every completed run below
+appended a row to `results/experiments.csv` — those 5 throughput-probe rows were reverted with
+`git checkout -- results/experiments.csv` afterwards; they were not real training runs and do
+not belong in the permanent ledger. `weights/best.pt` was never touched: sha256
+`6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397` before and after, matching
+D72 exactly).
+
+**Gotcha found and worked around:** `--iters N` overrides `total_iters` to the *absolute*
+iteration counter, not a step count relative to `--resume`'s `start_iter`. With
+`start_iter=84000` (from `weights/best.pt`), `--iters 20` makes `total_iters=20`, so
+`while it < total_iters` (`84000 < 20`) is false immediately and **zero training steps run** —
+three separate invocations at batch 16 silently "succeeded" in under a second with no OOM and
+no per-step log line before this was caught (compare each iteration's elapsed time against
+`start_iter` before trusting a "no OOM" result on a resumed run). Every measurement below uses
+`--iters (start_iter + N)` to actually execute `N` steps.
+
+**batch_size=16 (the config's real, untouched setting): genuine CUDA OOM, first training step.**
+`python train.py --config configs/finetune_structural_content.yaml --resume weights/best.pt
+--iters 84020 --val_every 0 --out <scratch>/bs16_probe4.pt --workers 0 --verbose`, dataset
+preload done (0.59 s), model+EMA+optimizer built, first batch drawn — fails inside the very
+first residual block's `conv3` (`src/blocks.py:295`) on the very first forward pass of
+iteration 84001:
+```
+torch.AcceleratorError: CUDA error: out of memory
+Search for `cudaErrorMemoryAllocation` ...
+```
+Verbatim, uncaught, non-zero exit. This is `data.lr_patch: 128` (→ 256×256 GT crops),
+`model.width: 64`, `model.num_blocks: 32`, FiLM+uncertainty head, bf16 autocast,
+`channels_last`, batch 16 — exactly the shipped config, nothing narrowed to make it fail.
+
+**batch_size=8: does not OOM, but is not usable on this machine right now.** Two attempts,
+both against a config identical to the real one except `data.batch_size: 8` (scratch copy,
+`<scratch>/ft_bs8.yaml` — the only diff from `configs/finetune_structural_content.yaml`, which
+is not this role's file to edit):
+- Attempt 1 (`--iters 84050`): 12 iterations logged in 7m33s of an 8-minute tool timeout before
+  being killed — cumulative rate 0.02–0.03 it/s, per-step deltas 14–31 s each.
+- Attempt 2 (`--iters 84060`): **zero** iterations logged in a 5-minute timeout.
+
+`nvidia-smi` and `Get-CimInstance Win32_Process` during both attempts showed a **sibling agent
+session's `scripts/benchmark_runtime.py` + `inference.py` actively running GPU sweeps at 100%
+utilization** on this same 8 GB card at the same time — this machine is not exclusively mine
+during this session. That confound is real and I cannot rule out that batch 8 would be faster
+in isolation. It is also consistent with, and does not contradict, D20's independent finding
+(measured without any sibling load) that this exact width≥64/num_blocks≥32 architecture
+triggers a large step-time collapse from allocator spill on this 8 GB card — the two effects
+plausibly compound. Either way: batch 8 is not a usable operating point on this machine as
+observed, twice, this session.
+
+**batch_size=4: the largest batch size that gave a clean, complete, reproducible measurement.**
+Two full runs, both finished normally (final full-split validation ran, PSNR 29.57 ± 4.63,
+matching the shipped checkpoint's known score, confirming these are correct forward/backward
+passes and not silently-broken ones):
+
+| run | iters | elapsed at iter 1 (incl. one-off cudnn autotune) | elapsed at final iter | steady-state |
+|---|---|---|---|---|
+| `bs4_run.log` (25 iters) | 25 | 28 s | 34 s | (34−28)/24 = 0.25 s/iter = **4.00 it/s** |
+| `bs4_run2.log` (100 iters) | 100 | 35 s | 91 s | (91−35)/99 = 0.566 s/iter = **1.77 it/s** |
+
+The 2.3× spread between two clean batch-4 runs in the same session is itself the finding: this
+laptop's real spare throughput fluctuates with the sibling session's GPU tenancy even at a
+batch size that never OOMs. There is no single "the" rate; I report both ends.
+
+**Extrapolation arithmetic, literal question ("25,000–30,000 iterations, this batch size"):**
+
+- Conservative (0.566 s/iter): 25,000 × 0.566 s = 14,150 s = **3.93 h**; 30,000 × 0.566 s =
+  16,980 s = **4.72 h**.
+- Optimistic (0.25 s/iter): 25,000 × 0.25 s = 6,250 s = **1.74 h**; 30,000 × 0.25 s = 7,500 s =
+  **2.08 h**.
+- Range: **~1.7–4.7 h** to literally execute 25,000–30,000 steps, at batch 4.
+
+**But batch 4 is 1/4 of the config's real batch_size=16, which OOMs outright (above).** A
+batch-4 step sees 1/4 the samples of a batch-16 step, so 25,000–30,000 batch-4 steps do **not**
+reproduce the training signal of a 25,000–30,000-step batch-16 run — matching that would need
+roughly 4× the steps, ~100,000–120,000, at the same measured per-step rate:
+
+- Conservative: 100,000 × 0.566 s = 56,600 s = **15.7 h**; 120,000 × 0.566 s = 67,920 s =
+  **18.9 h**.
+- Optimistic: 100,000 × 0.25 s = 25,000 s = **6.9 h**; 120,000 × 0.25 s = 30,000 s = **8.3 h**.
+- Data-equivalent range: **~6.9–18.9 h**.
+
+Neither range accounts for the LR schedule and optimizer statistics also depending on batch
+size — a batch-4 run is not just "the same run, slower," it is a different training recipe
+that would need its own re-tuning (grad-accum to reconstitute effective batch 16, or a
+re-derived LR) before its output PSNR/SSIM/LPIPS could be trusted as comparable to what the
+cloud run was measuring. That re-tuning is out of scope for this measurement and is not
+assumed to be free.
+
+**Comparison to cloud, using the given anchor (~3 h / ~$7.50 on A100-large, currently
+unavailable at $0 remaining budget):** even the literal, best-case local number (1.7 h) is in
+the same ballpark as the cloud number only under the most optimistic, uncontended reading and
+only for the literal (not data-equivalent) interpretation; the conservative literal reading
+(3.9–4.7 h) and every data-equivalent reading (6.9–18.9 h) are worse than cloud, cost zero
+dollars but consume the one local GPU for many hours on a machine that, this session, was
+independently observed to already be shared with other agents' work.
+
+**Conclusion:** local continuation of this exact fine-tune is not a free substitute for cloud
+compute. `batch_size=16` (the real recipe) cannot run locally at all (OOM, reproduced
+verbatim). The best locally-viable operating point (`batch_size=4`) requires either 4×+ more
+wall-clock than the cloud anchor for a data-equivalent amount of training, or a materially
+different (unvalidated) recipe to fit in fewer, larger-effective-batch steps. Recorded here so
+no future session re-discovers this the hard way. See also the new bullet in
+`docs/STATE.md`'s "Do NOT retry" list.
+
+## D74 — `inference.py` default `--batch_size` changed 32 -> 4; a real benchmark-tool bug found and fixed while confirming it
+
+**Re-swept batch size end-to-end for the current (post-Phase-3) 1,393,938-param checkpoint.**
+The last committed batch-size sweep (`results/runtime_report.md`'s isolated forward-pass
+table) was measured on the superseded 388,225-param checkpoint and had never been re-run for
+the current, 3.6x-larger architecture. External, whole-process (`scripts/benchmark_runtime.py`
+-> `subprocess.run(inference.py, ...)`) sweep at batch sizes {4, 8, 16, 32, 64}, 5 interleaved
+rounds, medians over n=5, both resolutions:
+
+| resolution | batch 4 | batch 32 (old default) | batch 4 vs 32 |
+|---|---|---|---|
+| 128->256 | 21.97 s (18.21 img/s) | 32.19 s (12.43 img/s) | **31.8% lower wall-clock** |
+| 256->512 | 63.24 s (6.33 img/s) | 77.23 s (5.18 img/s) | **18.1% lower wall-clock** |
+
+Monotonic at both resolutions: throughput falls as batch size rises across the whole tested
+range, on this 8 GB card, for this architecture. No V-check pins the default batch_size value
+(confirmed by grep before changing it — the only `--batch_size` reference in
+`scripts/verify_all.py` is an explicit `--batch_size 8` override in one check, not an
+assertion about the default). **Changed `inference.py`'s `--batch_size` default from 32 to 4.**
+A smaller default is also strictly safer against OOM on unknown hardware, an independent
+argument in its favour — though, per the standing H100 discipline (D-many, `README.md`), this
+is a memory-bandwidth-boundedness result measured on an 8 GB laptop GPU and is not claimed to
+transfer quantitatively to an 80 GB H100; it is disclosed as a measured, hardware-specific
+optimum, and the smaller default is preferred on the independent OOM-safety grounds regardless.
+
+**A real, separate bug was found and fixed while confirming the new default actually took
+effect.** `scripts/benchmark_runtime.py` had its own hardcoded `ap.add_argument("--batch_size",
+type=int, default=32)` and unconditionally forwarded `--batch_size <value>` to every
+`inference.py` subprocess invocation, including when the user passed no `--batch_size` flag at
+all. This means the benchmark tool could **never** measure what "running `inference.py` with
+no batch-size override" actually does — it silently pinned every un-overridden run to 32,
+regardless of `inference.py`'s own real default. Caught because, immediately after changing
+`inference.py`'s default to 4, a bare `scripts/benchmark_runtime.py` run (no `--batch_size`)
+still measured ~28.85 s median at 128->256 — matching the *old* batch-32 number, not the
+freshly-measured batch-4 number of ~21.97 s. Fixed: the script's own `--batch_size` now
+defaults to `None`, and the flag is only forwarded to `inference.py` when explicitly passed;
+an un-overridden benchmark run now genuinely measures whatever `inference.py` itself defaults
+to. Verified fixed: a bare re-run after the fix measured median 20.62 s (19.40 img/s, n=5),
+matching an explicit `--batch_size 4` run (19.99 s median) to within normal session variance —
+`results/runtime_report.md`'s headline number was regenerated from this bare, un-overridden run
+so it honestly reflects the exact command KLA will actually invoke.
+
+**This is exactly the class of defect this project's own measurement discipline exists to
+catch** — a tool whose default silently diverges from the thing it claims to measure is worse
+than no tool, since it would have kept reporting a stale, wrong number under the label "the
+default" indefinitely if the two changes (inference.py's default, and this bug) had not been
+made in the same session and cross-checked against each other.
