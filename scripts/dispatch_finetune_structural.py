@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-GITHUB_REPO = "https://github.com/sahithsundarw/semicon-kla-image-restoration.git"
+GITHUB_REPO = "https://github.com/sahithsundarw/bunker_backer.git"
 DATA_REPO = "Team-Ceciroleo67/kla-ps01-data"
 HUB_REPO = "Team-Ceciroleo67/kla-ps01-checkpoints"
 NAMESPACE = "Team-Ceciroleo67"

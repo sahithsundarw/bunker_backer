@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "published",
-  "release_url": "https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip",
+  "release_url": "https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v3/restored_test_outputs.zip",
   "archive_name": "restored_test_outputs.zip",
   "archive_sha256": "7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef",
   "archive_size_bytes": 90929851,

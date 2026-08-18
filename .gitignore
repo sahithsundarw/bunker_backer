@@ -127,3 +127,9 @@ results/baselines/*/pred_meta.json
 !results/runtime_report.md
 # Dual-resolution (256->512) companion report, same reason. See docs/decisions.md D45.
 !results/runtime_report_512.md
+# Per-baseline throughput reports (D77) -- same reason: README's comparison table cites
+# these, so they need to survive a fresh clone too.
+!results/runtime_report_unet.md
+!results/runtime_report_bicubic.md
+!results/runtime_report_median.md
+!results/runtime_report_nlm.md

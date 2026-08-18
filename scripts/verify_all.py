@@ -3,7 +3,7 @@
 
 Implements every check V01-V52 from the contract, plus V00 (self-hash integrity).
 
-Design rules (LOOP_PROMPT.md B3):
+Design rules:
   * One function per check, named check_V##(ctx) -> CheckResult, auto-discovered by
     prefix. Adding a check must not require editing a dispatch table.
   * A check that cannot run because the code it tests does not exist returns FAIL with
@@ -3625,7 +3625,7 @@ V53_PLACEHOLDER_LITERALS = ("PLACEHOLDER", "[[ FILL IN", "[MEMBER", "[COLLEGE", 
 
 #: Repo URL the deck must carry (SPEC "GitHub & Video Link" slide) -- the same one README.md
 #: states at its own top, checked directly rather than duplicated as a second literal.
-V53_REPO_URL = "https://github.com/sahithsundarw/semicon-kla-image-restoration"
+V53_REPO_URL = "https://github.com/sahithsundarw/bunker_backer"
 
 
 def check_V53(ctx: Ctx) -> CheckResult:

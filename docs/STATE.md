@@ -450,7 +450,7 @@ this list needs it. **Since resolved — see D44.**
 **Written at:** iteration 1. Wave A + docs-scribe COMPLETE and committed. `trainer` and three
 read-only reviewers in flight. **STANDING AUTHORISATION for an autonomous overnight run is in
 effect — do not stop to ask; work to LOOP COMPLETE then the §3 hardening loop.**
-**Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/semicon-kla-image-restoration (public, anonymous clone verified).
+**Last commit:** `99f70de` (pushed). **Remote:** https://github.com/sahithsundarw/bunker_backer (public, anonymous clone verified).
 **Verifier SHA:** `590c8e3344f2a7dbfadf63bace9a255c97ee73269c7894bc56855270e709d5bd`
 
 ## Tally: PASS 41 / FAIL 12 — Tier 0 is 15/16, only V06 left

@@ -73,13 +73,13 @@ silently wrong results rather than an exception.
 | Archive sha256 | `7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef` |
 | Archive size (bytes) | 90,929,851 |
 | File count inside | 400 |
-| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip` |
+| Release asset URL | `https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v3/restored_test_outputs.zip` |
 
 Verified fetchable from a **logged-out** session with the sha256 above reproduced exactly
 (via `curl`) before this README was updated.
 
 ```bash
-curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip
+curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v3/restored_test_outputs.zip
 sha256sum restored_test_outputs.zip   # must equal 7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef
 ```
 
@@ -134,7 +134,7 @@ silently wrong results rather than an exception.
 
 ## Download and verify (superseded, `artifacts-v1`)
 
-Releases page: `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases`
+Releases page: `https://github.com/sahithsundarw/bunker_backer/releases`
 
 | field | value |
 |---|---|
@@ -142,13 +142,13 @@ Releases page: `https://github.com/sahithsundarw/semicon-kla-image-restoration/r
 | Archive sha256 | `b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1` |
 | Archive size (bytes) | 90,990,452 |
 | File count inside | 400 |
-| Release asset URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip` |
+| Release asset URL | `https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v1/restored_test_outputs.zip` |
 
 Verified fetchable from a **logged-out** session (plain `urllib.request`, no auth header) with
 the sha256 above reproduced exactly before this README was written.
 
 ```
-curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/restored_test_outputs.zip
+curl -L -o restored_test_outputs.zip https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v1/restored_test_outputs.zip
 sha256sum restored_test_outputs.zip   # must equal b1d3a581c93d6a609ccc5146d7af82c1188f04dabfaa0e2672361912674954a1
 ```
 

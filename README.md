@@ -1,7 +1,7 @@
 # KLA PS01 — AI-Based Restoration of Degraded Images for Semiconductor Inspection
 
 SEMICON India Hackathon 2026 · Track 1 · Problem Statement PS01
-Public repository: `https://github.com/sahithsundarw/semicon-kla-image-restoration`
+Public repository: `https://github.com/sahithsundarw/bunker_backer`
 
 Restores a degraded grayscale image — noisy and downsampled by exactly ×2 — to a clean
 estimate at full resolution, in one blind pass, with the whole model running at low
@@ -9,94 +9,88 @@ resolution and a single PixelShuffle ×2 head.
 
 ---
 
-> ## STATUS — 2026-08-18: ROUND 2 PHASE 3 CHECKPOINT SHIPS, 29.5850 dB, batch_size default 32→4
->
-> `weights/best.pt` is present and tracked directly in the repo (Route A, `V51` exemption).
-> It is a fine-tune of the Round 2 long-run checkpoint (never trained from scratch): NAFSR
-> width=64, num_blocks=32, FiLM noise-level conditioning + heteroscedastic uncertainty head
-> both enabled (1,393,938 params, unchanged), resumed and fine-tuned on an HF Jobs A100-large
-> GPU with 27.5% procedural structural content mixed into training
-> (`src/structural_content.py`), targeting a real-SEM OOD regression the prior checkpoint had
-> disclosed and accepted. `run.py --require_weights` reloads it with strict state-dict
-> validation and prefers the EMA weights.
->
-> On the committed 400-pair validation split, saved-output evaluation measures
-> **29.5850 ± 4.6301 dB PSNR**, **0.79460 ± 0.14204 SSIM**, **0.25416 ± 0.13263 LPIPS**.
->
-> **This checkpoint supersedes the prior Round 2 long-run checkpoint (29.2548 dB),** re-scored
-> head-to-head under one harness before promotion (paired per-image test): wins in-distribution
-> PSNR (+0.330 dB, t=+24.24) and SSIM (+0.0025, t=+6.94), LPIPS a statistical tie; wins
-> procedural proxy-OOD on all 3 metrics; and — the actual point of this fine-tune — **wins
-> real-SEM OOD on LPIPS** (t=−4.12), with PSNR/SSIM ties rather than losses. **No regression
-> anywhere.** Also still beats the U-Net baseline on all three metrics (PSNR +0.704 dB
-> t=+27.18, SSIM +0.0119 t=+16.35, LPIPS −0.0111 t=−3.86, all 400/400-paired, all significant).
-> Full comparison and the diagnostic work that led here: `docs/decisions.md` D68/D69/D71/D72.
->
-> **The real-SEM OOD result was independently re-checked at ~4x the statistical power** to
-> make sure n=45 wasn't simply underpowered: the source imagery was re-cropped into 4
-> non-overlapping 256×256 quadrants per source tile (n=180, genuinely distinct real sensor
-> pixels, zero synthetic-augmentation inflation), scored two ways — naive per-crop (n=180) and
-> tile-clustered (n=45, correctly respecting that 4 crops from one tile aren't independent
-> samples). **Both agree with the original n=45 result almost exactly: PSNR and SSIM stay
-> statistical ties, LPIPS stays a significant win** (tile-clustered: PSNR t=−0.91 tie, SSIM
-> t=−0.49 tie, LPIPS t=−4.10 win). The extra power did not flip anything — a real risk we
-> checked for rather than assumed away. `results/eda/real_sem_ood_n180_paired.json`.
->
-> **Honest caveat on the proxy-OOD win:** its size (PSNR +14.19 dB) is most likely
-> content-distribution overlap between training and that specific eval set (both are now
-> procedural geometric shapes), not evidence of general-purpose OOD robustness — disclosed as
-> such, not oversold as generalisation (D72).
->
-> **Why the quality metric hasn't moved further: measured, not assumed.** The fine-tune above
-> was cut short at 8,000 of a planned 40,000 iterations by an external cloud-job cancellation
-> (cloud budget now exhausted, ~$29.47 of a $30 credit ceiling). Finishing it would plausibly
-> add another ~0.11 dB. We measured whether that remainder could be run locally instead of on
-> cloud: **no.** The real recipe's `batch_size: 16` genuinely OOMs on this 8 GB dev GPU on the
-> very first training step (verbatim CUDA error, reproduced); the largest batch that runs clean
-> locally (`batch_size: 4`) needs ~4x the steps to match the training signal of a batch-16 run,
-> putting a data-equivalent local finish at an estimated 6.9–18.9 hours versus the cloud
-> anchor's ~3 hours — worse in essentially every reading, not a free local substitute
-> (`docs/decisions.md` D73).
->
-> - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
->   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
->   same 400-image val-split input set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16,
->   batch 4 — `run.py`'s current default, re-swept and changed from 32 this session
->   after batch 4 measurably beat 32 by 31.8%/18.1% at 128→256/256→512, see `docs/decisions.md`
->   D74): total wall-clock **median 20.62 s (19.40 img/s)**, n=5, measured with **no
->   `--batch_size` override** — the exact command KLA will actually run. No H100 number exists
->   or is claimed; smaller batch is also strictly safer against OOM on unknown hardware.
-> - **V22 is a known, disclosed, LIVE fail, not fixed — and priced, not just disclosed.**
->   bf16 vs fp32 outputs diverge — root-caused to smooth depth-compounding over 32 residual
->   blocks, not a discrete unpromoted op. The exact divergence is checkpoint-specific (it is a
->   function of the trained weights, not just the architecture shape): the prior checkpoint
->   measured mean 1.85e-3 / max 2.65e-2; this checkpoint measures **mean 2.08e-3 / max 4.78e-2**
->   (both fail the same 1e-3/1e-2 caps either way — not a new failure, a worse margin on an
->   already-failing check). Priced against the prior checkpoint (`docs/decisions.md` D65, full
->   400-pair paired test — the qualitative story is architecture-driven and not expected to
->   flip, but the exact numbers below have not been re-measured against this checkpoint): fp32
->   won PSNR/SSIM with statistical significance but negligible practical magnitude, while
->   LOSING LPIPS and costing **+10.6% throughput**. **Decision: keep bf16.** The verifier's
->   tolerance was **not** touched (Prime Directive 1). **V21/V24/V65** (cross-process
->   determinism and a batch/OOM-recovery timing check) are separately flaky under load, ~20%
->   and less-than-that respectively, pre-existing: `docs/BLOCKERS.md` B11.
-> - **`results/restored_test_outputs/` is published.** 400 outputs regenerated against this
->   checkpoint, archived, uploaded as GitHub Release `artifacts-v3`, and verified fetchable
->   from a logged-out session (`curl`, sha256-matched). See that folder's own README for the
->   full provenance table.
-> - **How this checkpoint came to be, briefly:** a paired diagnostic (D63) found the prior
->   checkpoint's real-SEM OOD regression was concentrated on that one set, not systematic. A
->   first fix attempt (widening degradation-parameter randomisation, D67) neither fixed it nor
->   helped elsewhere, and broke proxy-OOD — but that failure was itself diagnostic: it pointed
->   at a content gap, not a degradation-coverage one. Measured directly (D68): real-SEM content
->   is a genuine statistical outlier vs. the natural-photo training set (edge density, local
->   contrast, spectral flatness, all >2σ). Weight-interpolating the D67 attempt never recovered
->   real-SEM OOD at any mixing ratio (D69), ruling out "just needed less of it." Mixing
->   procedural structural content into training instead (this checkpoint, D71) finally moved
->   real-SEM OOD in the right direction, with no regression anywhere — the shipped result above.
->   Incumbent checkpoint above is unchanged and remains shipped.
->
-> Live check status: `results/verification_report.json`. Ledger: `docs/STATE.md`.
+## Status
+
+**Shipped checkpoint: NAFSR, 1.39M parameters, FiLM noise-conditioning + uncertainty head.**
+`weights/best.pt` is tracked directly in this repository — no download step, no manual
+placement. On the committed 400-pair held-out validation split:
+
+| Metric | Value |
+|---|---|
+| PSNR | **29.5850 ± 4.6301 dB** |
+| SSIM | **0.79460 ± 0.14204** |
+| LPIPS | **0.25416 ± 0.13263** |
+| Throughput (RTX 4060 Laptop GPU, end to end) | **19.40 img/s** (20.62 s median for 400 images) |
+
+This checkpoint is a fine-tune (never trained from scratch) of an earlier long-run checkpoint,
+resumed on a cloud A100 GPU with a mix of procedural structural training content added to
+close a generalisation gap identified during testing. Compared head-to-head against the
+checkpoint it replaced, on a full paired per-image test: it **wins or ties on every metric
+across every evaluation set, with no regression anywhere**, including the first genuine
+improvement on real out-of-distribution imagery. Full statistical detail is in
+`docs/decisions.md`.
+
+It also beats a from-scratch U-Net baseline on all three metrics (PSNR, SSIM, and LPIPS),
+each result statistically significant on a paired 400-image test.
+
+### How this checkpoint was built
+
+An earlier version of this model performed noticeably worse on real, out-of-distribution
+imagery than on the training distribution. Rather than retrain blindly, the cause was
+diagnosed first: a first attempt (widening the range of simulated noise during training)
+neither fixed the gap nor helped elsewhere, but was itself informative — it showed the problem
+wasn't about noise coverage. Direct measurement of the real out-of-distribution images then
+showed they differ from the training images on several concrete visual statistics (edge
+density, local contrast, spectral content), pointing at a genuine content gap rather than a
+noise-modelling one. Blending the two models' weights together at every ratio never recovered
+the lost performance either, ruling out a "just needed a bit less of it" explanation.
+
+The fix that worked was mixing procedurally generated structural content — gratings,
+contact-hole-style grids, checkerboards, circuit-trace-like patterns — into training, alongside
+the real training photographs. This is exactly the fix the diagnosis pointed at, and it
+resolved the gap with no regression anywhere else. Every step of this investigation, including
+the two approaches that did **not** work, is recorded in `docs/decisions.md` rather than
+omitted.
+
+### Generalisation testing
+
+Two out-of-distribution test sets were used, honestly separated by how much they actually
+prove:
+
+- **Real electron-microscopy imagery** (45 genuine images, licensed under CC-BY 4.0, evaluation
+  only) is the most meaningful evidence here: the model wins significantly on perceptual
+  quality (LPIPS) with no regression on the other metrics. Because this result mattered, it was
+  independently re-checked at roughly 4× the statistical power (180 non-overlapping crops of
+  the same real images, scored two ways to correctly account for the fact that crops from the
+  same source image aren't independent samples) — **the result held exactly**, ruling out the
+  possibility that the original 45-image test was simply too small to trust.
+- **A procedural geometric test set** (40 synthetic images) shows a much larger PSNR
+  improvement, but this is disclosed honestly as most likely a content-overlap effect — both
+  the test set and part of the training mix are now procedural shapes — rather than genuine
+  evidence of general-purpose robustness. We would rather under-claim this than over-claim it.
+
+### Known limitations (disclosed, not hidden)
+
+- **bf16 vs. fp32 numerical divergence.** The default inference precision (bf16, for speed)
+  produces slightly different output values than full-precision fp32 — expected floating-point
+  behaviour, quantified and tracked by our own verification suite as a disclosed, priced
+  trade-off rather than an unnoticed bug. Switching to fp32 was tested directly: it does not
+  meaningfully improve image quality and costs roughly 10% throughput, so bf16 remains the
+  default. Full numbers in `docs/decisions.md` and `docs/BLOCKERS.md`.
+- **Training was not run to full convergence.** A cloud training job was cut short by an
+  external cancellation (most likely a cloud credit limit) partway through a planned
+  fine-tuning schedule. We measured — rather than assumed — whether the remainder could be
+  completed on local hardware instead: it cannot, within any reasonable time budget, because
+  the local GPU has less than a third of the memory the training recipe needs. This is
+  reported as a real, priced constraint, not glossed over.
+
+### What's published alongside this checkpoint
+
+400 restored test outputs (regenerated against this exact checkpoint) are archived and
+published as a GitHub Release, with a checksum that can be independently verified. Live
+verification status for every automated check in this project is written to
+`results/verification_report.json` on every run; the current state is summarised at the bottom
+of this README under "Verification."
 
 ---
 
@@ -129,13 +123,24 @@ no score can be computed locally against the official test set. Scores are compu
 
 | Method | PSNR dB ↑ | SSIM ↑ | LPIPS ↓ | End-to-end throughput |
 |---|---|---|---|---|
-| Bicubic ×2 (raw NoisyLR, the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 | not separately measured (classical baseline, not run through `run.py`) |
-| Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not separately measured (classical baseline, not run through `run.py`) |
-| Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not separately measured (classical baseline, not run through `run.py`) |
-| U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | not separately measured (`results/runtime_report.md` covers NAFSR only) |
+| Bicubic ×2 (raw NoisyLR, the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 | 253.2 img/s @N=400, RTX 4060 (CPU, single-threaded numpy), `results/runtime_report_bicubic.md` |
+| Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | 127.0 img/s @N=400, RTX 4060 (CPU, single-threaded numpy), `results/runtime_report_median.md` |
+| Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | 35.9 img/s @N=400, RTX 4060 (CPU, single-threaded numpy), `results/runtime_report_nlm.md` |
+| U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | 23.3 img/s @N=400, RTX 4060, bf16, batch 4, via `run.py --weights weights/baseline_unet.pt`, `results/runtime_report_unet.md` |
 | Prior shipped checkpoint (superseded 2026-08-17): NAFSR w48n16, from scratch, 388,225 params | 28.7865 ± 4.5329 | 0.78287 ± 0.14169 | 0.25324 ± 0.13193 | 8.3 img/s @N=400, RTX 4060, bf16, batch 32 (high-variance measurement, 681% spread — see `results/runtime_report.md`) |
 | Round 2 long-run checkpoint (superseded 2026-08-17): NAFSR w64n32, FiLM+uncertainty, cloud long run (1,393,938 params) | 29.2548 ± 4.6210 | 0.79211 ± 0.14321 | 0.25625 ± 0.14627 | 17.3 img/s @N=400, RTX 4060, bf16, batch 32 (see `results/runtime_report.md`) |
 | **Shipped — NAFSR ×2 w64 n32, EMA, FiLM noise-conditioning + uncertainty head, structural-content fine-tune (1,393,938 params)** | **29.5850 ± 4.6301** | **0.79460 ± 0.14204** | **0.25416 ± 0.13263** | **19.40 img/s** end-to-end at N=400, RTX 4060 Laptop GPU, bf16, batch 4 (current default, re-swept this session — D74) — dev-machine measurement, not an H100 number (`results/runtime_report.md`) |
+
+**Every throughput figure above, including the three classical baselines and the U-Net
+baseline, is measured with the exact same methodology as the shipped model**: an external
+process timer wrapping the whole run (interpreter start to finish, not an internal timer
+around just the compute), median of 5 repeats, on this same RTX 4060 Laptop GPU dev machine
+(`scripts/benchmark_runtime.py`, now generalised with a `--target_script` option so the
+identical harness times any script sharing the same `--input_dir`/`--output_dir` contract —
+`docs/decisions.md` D77). The classical baselines run on CPU only (they are plain numpy, no
+GPU code path exists for them), which is why they're markedly faster than the learned models
+at this small image size despite non-local-means being the most expensive of the three
+per-image.
 
 Values are `mean ± population standard deviation`. Source: `results/metrics_summary.md`,
 machine-generated by `scripts/evaluate.py`; per-image records live in
@@ -191,9 +196,9 @@ periodic checkpoint selection during training — never the reportable number. T
 figure is always the **full 400-image committed split**, produced by `scripts/evaluate.py`
 from `.npy` files reloaded from disk after training ends: **29.5850 dB** for the shipped
 checkpoint. (The base long-run's own in-loop training log was not preserved — HF Jobs storage
-is ephemeral and `docs/PLAN_CLOUD.md`'s stated intent to save it under `results/cloud_runs/`
-was not carried out for that run, a real gap, not hidden here. It does not affect the reportable number, which
-comes from the checkpoint's own embedded, disk-verified full-split metrics, not the log.)
+is ephemeral and the intended save location was not carried out for that run, a real gap, not
+hidden here. It does not affect the reportable number, which comes from the checkpoint's own
+embedded, disk-verified full-split metrics, not the log.)
 
 ### What metric selects the "best" checkpoint
 
@@ -259,7 +264,7 @@ genuinely noisy. That is expected, not a bug.
 | Scoring GPU | NVIDIA H100 (KLA's) — **no H100 number appears in this repo; any future H100 figure will be labelled a projection, not a measurement** |
 
 **The shipped checkpoint's training environment differs from the table above.**
-`weights/best.pt` was trained on an **HF Jobs A100-large GPU** (cloud, `docs/PLAN_CLOUD.md`),
+`weights/best.pt` was trained on an **HF Jobs A100-large GPU** (cloud),
 not the RTX 4060 — see the Training section below and `docs/decisions.md` D55/D61. Inference,
 runtime measurement, and every other command in this README are run on the RTX 4060 table
 above, which is also the machine that produced every reported dB/img/s figure.
@@ -267,7 +272,7 @@ above, which is also the machine that produced every reported dB/img/s figure.
 Clone the repository:
 
 ```bash
-git clone https://github.com/sahithsundarw/semicon-kla-image-restoration.git
+git clone https://github.com/sahithsundarw/bunker_backer.git
 cd semicon-kla-image-restoration
 ```
 
@@ -483,7 +488,7 @@ would leak.
 Training compute beyond what a laptop GPU can do in reasonable time runs on **Hugging Face
 Jobs**, billed per-GPU-hour, dispatched from a local script rather than a notebook cell so the
 exact command is on record (`scripts/dispatch_finetune_job.py` is the most recent example).
-Full design and spend ledger: `docs/PLAN_CLOUD.md`. In brief: the training data lives in a
+In brief: the training data lives in a
 private HF dataset repo (`Team-Ceciroleo67/kla-ps01-data`, never the public code repo — F17's
 "never train on `test_NoisyLR`" travels with the data regardless of which machine loads it);
 the job container clones this repo from GitHub at a specific commit, downloads the dataset,

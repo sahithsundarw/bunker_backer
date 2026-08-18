@@ -1377,7 +1377,7 @@ uploaded as an asset.
 
 | field | value |
 |---|---|
-| URL | `https://github.com/sahithsundarw/semicon-kla-image-restoration/releases/download/artifacts-v1/best.pt` |
+| URL | `https://github.com/sahithsundarw/bunker_backer/releases/download/artifacts-v1/best.pt` |
 | size | 3288805 B (3.14 MiB) |
 | sha256 | `9c0f39a72542a313aa74c00d6d0b40205b8504b8fcf3d5acfe92ba1149592313` |
 
@@ -3994,3 +3994,128 @@ already-published artifact that genuinely was produced via `inference.py` at the
 rewriting it retroactively would be dishonest, not corrective. `docs/SPEC.md`'s own text is
 append-only and unedited; this update lives in `docs/SPEC_ADDENDUM.md` instead, per that file's
 own convention, so the original spec's historical record stays intact.
+
+## D76 — GitHub repository renamed to `bunker_backer`, per a literal reading of the announcement's folder shape
+
+**Question resolved by the human directly, not assumed.** D75 (the `run.py` compliance work)
+had stated an explicit working interpretation: the announcement's `team_name/{run.py,
+requirements.txt, README.md, models/}` folder was read as the *minimum required subset*, not
+a literal instruction to rename the whole repository. When the user later flagged that their
+own reading was "all the files are supposed to be under our team name," they were asked
+directly (`AskUserQuestion`) which was meant: a separate submission package/zip named
+`bunker_backer/`, or renaming the actual GitHub repository. **The human chose to rename the
+actual repository.** Not re-litigated; executed as directed.
+
+**What was done, in order:**
+1. `gh repo rename bunker_backer --repo sahithsundarw/semicon-kla-image-restoration` --
+   confirmed via `gh repo view sahithsundarw/bunker_backer` (`visibility: PUBLIC`).
+2. Local remote re-pointed: `git remote set-url origin
+   https://github.com/sahithsundarw/bunker_backer.git` (not done automatically by `gh` in
+   this environment -- checked, not assumed).
+3. **Verified empirically, before trusting anything, that existing published links still
+   resolve under the old name** (GitHub's rename redirect): `curl -sI` against the exact
+   Release asset URL already recorded in `results/restored_test_outputs/manifest.json`
+   (`.../semicon-kla-image-restoration/releases/download/artifacts-v3/restored_test_outputs.zip`)
+   returned `301` to the new repo's equivalent URL, which then `302`-redirected to a real
+   signed asset URL -- confirming both the repo-level redirect and the Release-asset-level
+   redirect work, not just the repo homepage. Requesting the NEW URL directly also resolved
+   correctly (skipping the redirect hop entirely).
+4. **Updated every reference to the old URL to the new canonical form anyway**, rather than
+   depend on the redirect indefinitely (a redirect can, in principle, be reclaimed if the old
+   name is ever registered by someone else under a different account -- unlikely here since
+   it is the same owner, but not a risk worth carrying for zero cost to fix). Found via
+   `grep -rl` across `*.md *.py *.json *.txt`: `README.md`, `docs/decisions.md`,
+   `docs/STATE.md`, `docs/AUDIT_20260815.md`, `docs/MORNING_REPORT.md`,
+   `docs/SUBMISSION_CHECKLIST.md`, `docs/DECK_CONTENT_FOR_PPT.md`,
+   `results/restored_test_outputs/{README.md,manifest.json}`,
+   `reviews/requirements-audit-1.md`, `scripts/{build_deck.py,verify_all.py,
+   dispatch_finetune_job.py,dispatch_finetune_structural.py}` -- 14 files, one literal
+   string replaced everywhere (`sahithsundarw/semicon-kla-image-restoration` ->
+   `sahithsundarw/bunker_backer`). `results/verification_report.json` deliberately excluded
+   (machine-generated, regenerates on the next verifier run).
+5. **`scripts/verify_all.py` is hash-pinned and its `V53_REPO_URL` constant (the exact string
+   the deck contract asserts against) was one of the 14 changed sites.** New sha256
+   `2b5c2d3bb9bd469196aed5cff1dbdd06cc74e3c1ab8d10265ed2d0f723161ddd`, logged in
+   `docs/VERIFIER_SHA256` per V00's own escape hatch. No check's assertion, threshold, or
+   tolerance changed -- only the literal URL being asserted against, which is the correct new
+   value for the same requirement.
+6. **The deck regenerated** (`scripts/build_deck.py` also hardcoded the old URL on its
+   "GitHub & Video Link" slide) so the shipped PDF states the new repository link, not a
+   now-stale one.
+7. **Deliberately NOT rewritten**: nothing else about the repository's history, commit SHAs,
+   or git object identity changes from a GitHub-side rename -- this is a metadata/URL change
+   only, verified end to end (see Verified below), not a re-architecting of anything.
+
+**Verified before considering this done:** the exact Release URL recorded in
+`results/restored_test_outputs/manifest.json` resolves (both old-redirects-to-new and the new
+URL directly), confirmed via `curl -sI` before any file was edited to depend on that
+assumption. Full `scripts/verify_all.py --strict` re-run after all of the above (see
+`docs/STATE.md` for the tally this run produced) to confirm nothing else broke.
+
+## D77 — End-to-end throughput measured for every baseline, not just the shipped model
+
+**The user asked directly: can the baseline comparison table's "not separately measured"
+throughput cells be filled in for real, with the same rigor as the shipped model's number?**
+Yes -- done for all four rows (three classical baselines, one U-Net), using the exact same
+external-process measurement methodology already used for the shipped model, not a
+different/looser one.
+
+**U-Net baseline: free, using existing tooling exactly as designed.** `run.py` loads its
+architecture from the checkpoint's own embedded config (V35), so it is already
+architecture-agnostic -- pointing `scripts/benchmark_runtime.py --weights
+weights/baseline_unet.pt` at it required zero code changes. Measured: median 17.19s (23.27
+img/s), n=5, RTX 4060, bf16, batch 4 (the same default), `results/runtime_report_unet.md`.
+
+**The three classical baselines (bicubic, median-then-bicubic, non-local-means-then-bicubic)
+needed one new script**, since they are plain numpy transforms with no checkpoint and no
+`run.py` CLI at all. `scripts/run_classical_baseline.py` was added: it imports
+`CLASSICAL_BASELINES` and `save_prediction` directly from `scripts/make_baselines.py` --
+**reusing, never reimplementing, the exact math already scored** in
+`results/baselines/{bicubic,median_bicubic,nlm_bicubic}/metrics.json` -- and wraps it in
+`run.py`'s own `--input_dir`/`--output_dir` contract plus a `run.py`-compatible summary line,
+so `scripts/benchmark_runtime.py`'s existing external-timing harness (subprocess wrapping the
+whole process, median of 5 repeats -- unchanged methodology) can measure it identically.
+`scripts/benchmark_runtime.py` gained a `--target_script` option (default `run.py`, so every
+existing invocation is unaffected) and an `--extra` passthrough for target-specific flags like
+`--method`.
+
+**Measured** (RTX 4060, CPU-only for the classical baselines since no GPU code path exists
+for plain numpy, n=5 medians, same 400-image input set as every other throughput number in
+this repo):
+
+| Method | median wall-clock | img/s |
+|---|---|---|
+| Bicubic ×2 | 1.58 s | 253.2 |
+| Median 3×3 → bicubic | 3.15 s | 127.0 |
+| Non-local means → bicubic | 11.14 s | 35.9 |
+| U-Net baseline | 17.19 s | 23.27 |
+
+Monotonic with each method's actual computational cost (non-local-means is the most expensive
+classical denoiser of the three, and it shows). Folded into `README.md`'s comparison table,
+replacing every "not separately measured" cell with a real, identically-methodologied number
+and a pointer to its own `results/runtime_report_*.md`.
+
+**Verified not to affect any check:** `V48` (results-table reconciliation) reads
+`results/metrics_summary.md`, not `README.md`, and only reconciles PSNR/SSIM/LPIPS floats --
+confirmed by reading its implementation before assuming, not after. No verifier change was
+needed or made.
+
+## D78 — V00 caught its own class of bug: a re-pin was missed after a cosmetic edit
+
+**A genuine, working example of the verifier catching a real mistake, not a false positive.**
+While removing internal-only files (D76's cleanup pass), `scripts/verify_all.py`'s module
+docstring had a dangling comment reference to `LOOP_PROMPT.md` ("Design rules (LOOP_PROMPT.md
+B3):") after that file was deleted. Fixed to "Design rules:" -- but this edit changed the
+pinned file's bytes, and the re-pin step was missed in the moment (attention was on the
+file-removal list, not on the fact that a pinned file had also been touched). The very next
+full `--strict` run correctly went `V00 FAIL: scripts/verify_all.py changed without a matching
+docs/decisions.md entry (computed 9cb33bd8c83663c4c2a8de75a3d3bb468f9311861d219cef8424b41f0a6e7d73)`.
+
+This is exactly the failure mode V00 exists to prevent -- an unlogged change to the file that
+defines correctness -- and it worked as designed: caught immediately, on the very next run,
+before any commit. Fixed properly here: new sha256
+`9cb33bd8c83663c4c2a8de75a3d3bb468f9311861d219cef8424b41f0a6e7d73` logged in
+`docs/VERIFIER_SHA256`, this entry contains the exact hash V00 needs to find, and no check's
+assertion, threshold, or tolerance was touched -- the change was cosmetic (a comment), and the
+process gap (forgetting to re-pin after a comment edit, not just a logic edit) is now recorded
+so it's recognised faster next time.

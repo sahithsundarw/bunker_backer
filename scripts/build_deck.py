@@ -163,10 +163,25 @@ class Deck:
         self.c.save()
 
 
+#: Generic role labels assigned in the order members are given -- adjust with --roles if a
+#: different assignment is wanted. Kept short and loosely matched to the actual work split
+#: this project's own docs/decisions.md records (modelling, data/augmentation, inference/
+#: throughput, evaluation/docs), not assigned arbitrarily.
+DEFAULT_ROLES = ["modelling", "data & augmentation", "inference optimization",
+                 "evaluation & docs"]
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--team", default="PLACEHOLDER_TEAM",
                      help="Team name; also becomes the output filename per SPEC F13")
+    ap.add_argument("--members", nargs="+", default=None,
+                     help="Member full names, space-separated (quote multi-word names)")
+    ap.add_argument("--roles", nargs="+", default=None,
+                     help="Optional per-member role labels, same order/count as --members; "
+                          "defaults to a generic modelling/data/inference/eval split")
+    ap.add_argument("--college", default=None, help="College/institution name")
+    ap.add_argument("--contact", default=None, help="Email and/or phone shown on the deck")
     args = ap.parse_args(argv)
 
     metrics_md = _read(ROOT / "results" / "metrics_summary.md")
@@ -180,18 +195,31 @@ def main(argv=None) -> int:
     out_path = ROOT / f"{args.team}_KLA_PS01.pdf"
     d = Deck(out_path)
 
-    # Slide 1 -- Team Details
+    # Slide 1 -- Team Details. Real team info (--members/--college/--contact all supplied)
+    # renders with no placeholder literal anywhere; omitting any of them falls back to the
+    # original bracketed placeholders so V53 continues to correctly FAIL on an incomplete
+    # deck rather than silently accepting one with a real team name but a fake roster.
     y = d.new_slide("Team Details")
-    y = d.body(y, [
-        f"Team name: {args.team}  [[ FILL IN BEFORE SUBMISSION ]]",
-        "Members (name -- role):",
-        "  [MEMBER 1] -- modelling",
-        "  [MEMBER 2] -- data & augmentation",
-        "  [MEMBER 3] -- inference optimization",
-        "  [MEMBER 4] -- evaluation & docs",
-        "College: [COLLEGE NAME]",
-        "Contact: [EMAIL] / [PHONE]",
-    ])
+    if args.members and args.college and args.contact:
+        roles = args.roles if args.roles and len(args.roles) == len(args.members) \
+            else DEFAULT_ROLES[:len(args.members)]
+        while len(roles) < len(args.members):
+            roles.append("contributor")
+        lines = [f"Team name: {args.team}", "Members (name -- role):"]
+        lines += [f"  {name} -- {role}" for name, role in zip(args.members, roles)]
+        lines += [f"College: {args.college}", f"Contact: {args.contact}"]
+    else:
+        lines = [
+            f"Team name: {args.team}  [[ FILL IN BEFORE SUBMISSION ]]",
+            "Members (name -- role):",
+            "  [MEMBER 1] -- modelling",
+            "  [MEMBER 2] -- data & augmentation",
+            "  [MEMBER 3] -- inference optimization",
+            "  [MEMBER 4] -- evaluation & docs",
+            "College: [COLLEGE NAME]",
+            "Contact: [EMAIL] / [PHONE]",
+        ]
+    y = d.body(y, lines)
 
     # Slide 2 -- Problem Statement Addressed
     y = d.new_slide("Problem Statement Addressed")
@@ -236,7 +264,9 @@ def main(argv=None) -> int:
                     "(channels_last) -> clip [0,1] -> save"])
     y -= 2 * mm
     y = d.body(y, ["Architecture: NAFSR -- NAFNet-style blocks (SimpleGate, SCA channel "
-                    "attention, LayerNorm) + x2 PixelShuffle head, width 48, 16 blocks"])
+                    "attention, LayerNorm) + x2 PixelShuffle head, width 64, 32 blocks, "
+                    "FiLM noise-level conditioning + heteroscedastic uncertainty head "
+                    "(1,393,938 params)"])
     y -= 2 * mm
     y = d.body(y, ["Loss: Charbonnier (fidelity) + SSIM (structure) + FFT (frequency) -- "
                     "balanced, no adversarial term (no hallucination risk for inspection use)"])
@@ -284,20 +314,21 @@ def main(argv=None) -> int:
                     size=9)
     y -= 4 * mm
     img_top = y
-    bottom1 = d.image_fit(ROOT / "results" / "qualitative" / "success_p50_001143_psnr28.82.png",
+    bottom1 = d.image_fit(ROOT / "results" / "qualitative" / "val_001682_typical_near_mean_psnr31.81.png",
                            MARGIN, img_top, max_w=58 * mm, max_h=38 * mm)
-    bottom2 = d.image_fit(ROOT / "results" / "qualitative" / "fail_worst_psnr_002041_psnr17.23.png",
+    bottom2 = d.image_fit(ROOT / "results" / "qualitative" / "val_002041_weak_worst_in_split_psnr17.91.png",
                            MARGIN + 64 * mm, img_top, max_w=58 * mm, max_h=38 * mm)
     y = min(bottom1, bottom2) - 4 * mm
     d.c.setFont("Helvetica-Oblique", 8)
-    d.c.drawString(MARGIN, y, "Success (median case) | Honest failure: worst-PSNR case,")
-    d.c.drawString(MARGIN, y - 4 * mm, "band-limited oracle ceiling caveat applies")
+    d.c.drawString(MARGIN, y, "Typical case (near-mean PSNR) | Honest failure: worst-PSNR case,")
+    d.c.drawString(MARGIN, y - 4 * mm, "fine broadband texture beyond LR recoverability (measured)")
 
     # Slide 7 -- Technology & Feasibility
     y = d.new_slide("Technology & Feasibility")
     y = d.body(y, [
-        "PyTorch 2.11.0+cu128, CUDA 12.8, trained on NVIDIA RTX 4060 Laptop GPU (8 GB)",
-        "Model: NAFSR, 388,225 params, checkpoint 3.14 MiB, trained 20,000 iterations",
+        "PyTorch 2.11.0+cu128, CUDA 12.8. Trained on cloud (HF Jobs A100-large GPU);",
+        "inference measured on an NVIDIA RTX 4060 Laptop GPU (8 GB), the dev machine.",
+        "Model: NAFSR, 1,393,938 params, checkpoint 11.0 MiB",
     ])
     y -= 1.5 * mm
     y = d.wrapped(y, f"Inference throughput (128->256, {rt['device']}, bf16, batch 32): "
@@ -318,7 +349,7 @@ def main(argv=None) -> int:
     # Slide 8 -- GitHub & Video Link
     y = d.new_slide("GitHub & Video Link")
     y = d.body(y, [
-        "Repository: https://github.com/sahithsundarw/semicon-kla-image-restoration",
+        "Repository: https://github.com/sahithsundarw/bunker_backer",
         "(public, verified in a logged-out window)",
         "Demo video: [[ OPTIONAL, <=5 min, link here if recorded ]]",
     ])

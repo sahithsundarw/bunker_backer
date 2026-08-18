@@ -37,7 +37,7 @@ SUMMARY_RE = re.compile(
 
 def _run_once(args: argparse.Namespace, output_dir: Path) -> dict[str, object]:
     cmd = [
-        args.python, str(REPO_ROOT / "run.py"),
+        args.python, str(REPO_ROOT / args.target_script),
         "--input_dir", str(Path(args.input_dir).resolve()),
         "--output_dir", str(output_dir),
         "--precision", args.precision,
@@ -50,6 +50,8 @@ def _run_once(args: argparse.Namespace, output_dir: Path) -> dict[str, object]:
         cmd.extend(["--device", args.device])
     if args.weights:
         cmd.extend(["--weights", str(Path(args.weights).resolve())])
+    if args.extra:
+        cmd.extend(shlex.split(args.extra))
 
     started = time.perf_counter()
     proc = subprocess.run(cmd, cwd=REPO_ROOT, text=True, capture_output=True,
@@ -159,6 +161,14 @@ def main(argv: list[str] | None = None) -> int:
                     choices=["auto", "bf16", "fp16", "fp32"])
     ap.add_argument("--timeout", type=float, default=1800.0,
                     help="per-repeat subprocess timeout in seconds")
+    ap.add_argument("--target_script", default="run.py",
+                    help="script to benchmark, relative to repo root (default run.py); "
+                         "e.g. scripts/run_classical_baseline.py to time a classical "
+                         "baseline with the exact same external-process methodology")
+    ap.add_argument("--extra", default=None,
+                    help="extra CLI args appended verbatim, as one shlex-quoted string, e.g. "
+                         "--extra \"--method bicubic\" when --target_script is "
+                         "scripts/run_classical_baseline.py")
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     args = ap.parse_args(raw_argv)
     if args.repeats < 1:

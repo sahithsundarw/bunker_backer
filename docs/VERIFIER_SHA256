@@ -14,10 +14,36 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-240c804524e6e7a5124ca48a752e09fe4bad61e94074c11f2ffa91959419796d  scripts/verify_all.py
+9cb33bd8c83663c4c2a8de75a3d3bb468f9311861d219cef8424b41f0a6e7d73  scripts/verify_all.py
 0bde203980d0892b939fc2a9e343f1cf55b2c8d2ec079897f1d36aa7cb5adf69  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-18  COSMETIC: removed a dangling comment reference to LOOP_PROMPT.md (module
+#             docstring, "Design rules (LOOP_PROMPT.md B3):" -> "Design rules:") after that
+#             file was removed from the repo as internal-only tooling (docs/decisions.md
+#             D76's file-cleanup pass). No check's assertion, logic, or tolerance changed --
+#             this is the exact class of self-inflicted V00 FAIL the pin exists to catch
+#             (an edit landed without a matching re-pin+decisions.md entry), caught by V00
+#             itself on the next full run, not missed. See docs/decisions.md D78.
+#             prior pin: 2b5c2d3bb9bd469196aed5cff1dbdd06cc74e3c1ab8d10265ed2d0f723161ddd (verify_all.py)
+# 2026-08-18  GITHUB REPO RENAMED semicon-kla-image-restoration -> bunker_backer, per the
+#             organizers' literal reading of the final-submission announcement's
+#             `team_name/{run.py, requirements.txt, README.md, models/}` folder shape (the
+#             human explicitly chose to rename the actual repository, not just package a
+#             separate submission zip, when asked directly which was intended).
+#             `V53_REPO_URL` (the literal URL the deck contract asserts) updated from
+#             `.../semicon-kla-image-restoration` to `.../bunker_backer` -- the only line in
+#             this pinned file referencing the repo name. Every other reference to the old
+#             URL across the repo (README, decisions.md, weights/README.md,
+#             results/restored_test_outputs/{README.md,manifest.json}, build_deck.py,
+#             dispatch_finetune_*.py) was updated in the same pass -- confirmed empirically,
+#             not assumed, that GitHub's rename redirect covers both the repo itself and
+#             Release asset download URLs (tested: old Release URL -> 301 -> new repo ->
+#             302 -> signed asset URL, both old and new URLs resolve), then updated the
+#             recorded links to the new canonical form regardless rather than depend on the
+#             redirect indefinitely. No check's assertion or tolerance changed -- only the
+#             literal URL string being asserted against. See docs/decisions.md D76.
+#             prior pin: 240c804524e6e7a5124ca48a752e09fe4bad61e94074c11f2ffa91959419796d (verify_all.py)
 # 2026-08-18  ENTRY POINT RENAMED inference.py -> run.py, per the organizers' official,
 #             track-specific final-submission announcement (requires the entry script be
 #             named run.py, invocation python run.py <input_dir> <output_dir>, submission
