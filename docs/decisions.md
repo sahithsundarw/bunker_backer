@@ -4178,3 +4178,33 @@ transcription.
 passing every one of its content assertions -- the only thing that changed is which filename
 pattern is treated as valid, corrected to match verified, primary-source reality rather than
 an earlier, apparently-mistaken transcription of it.
+
+## D81 — Real deck added (`bunker_backer_PS01.pdf`); `V53` disclosed-fails for a known, understood reason
+
+**The teammate-built PPT, exported to PDF, is now in the repo.** Content was reviewed
+page-by-page against the project's actual results before being accepted: correct team info,
+correct problem-statement description, the mandatory proxy-relationship disclosure ("natural
+photographs, not semiconductor imagery") is present on the Problem Statement slide, correct
+quantitative results, correct GPU disclosure (A100 training / RTX 4060 inference), and three
+real result images (the measured noise-variance plot, a typical-case and worst-case
+qualitative comparison, and a best-case static example in place of the optional demo video).
+
+**`V53` still FAILs, for a real, understood, and low-risk reason -- not a missing disclosure.**
+The design tool used to build this deck exports each slide's *edited* content boxes as
+rasterized images, not as a real PDF text layer (confirmed directly: `pypdf` extracts only
+50-213 characters per content slide -- just the template's own unedited instructional
+headers -- while the actual filled-in paragraphs, including the proxy-relationship sentence,
+live inside embedded `/Image` XObjects). `V53`'s `natural photograph` text-search, which exists
+as an automated proxy for "did a human actually write this disclosure," cannot read text baked
+into an image. **A human reading the PDF sees the disclosure exactly where it should be** --
+this is a tooling/export limitation of our own verification proxy, not evidence the actual
+requirement went unmet. Confirmed the same image-only pattern exists on multiple slides (2, 4,
+5, 9), so this is how the tool exports generally, not an isolated omission on one slide.
+
+**Decision, made under a hard deadline (<1 hour to submission): ship as-is.** Re-exporting for
+a real text layer would cost time not available, to satisfy an internal check whose failure
+mode here does not reflect a real gap in the submission -- organizers grade by reading the
+PDF, not by running this repo's `verify_all.py` against it. `V53`'s FAIL is disclosed here,
+with its exact, verified root cause, rather than hidden or the check loosened to hide it
+(Prime Directive 1 untouched -- the check's assertion is exactly what it always was; this
+entry documents why an otherwise-compliant deck still trips it).

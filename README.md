@@ -746,11 +746,16 @@ across 3 isolated re-checks) — the same known, pre-existing, load-dependent
 cross-process-determinism flake this project has documented before (`docs/BLOCKERS.md` B11,
 ~20% intermittent rate), unrelated to the rename (the check's assertion is unchanged; only its
 target filename moved from `inference.py` to `run.py`), and green again on this final run.
-**V53** (the deck contract) correctly FAILs: no `*_KLA_PS01.pdf` currently exists at the repo
-root by design, not by accident — `scripts/build_deck.py` was proven working with real team
-info (`docs/decisions.md` D76/D78), then the generated PDF was deliberately removed (D79) to
-make way for a hand-built PPT a teammate is producing; it will be added once ready. Not a
-check malfunction, and not a hidden gap. **V69 and V70 (new) both PASS** — automated proof
+**`bunker_backer_PS01.pdf` is the submitted deck** — team-built, reviewed page by page against
+the project's actual results before being added. **`V53` still FAILs, for a real but low-risk
+reason, not a missing disclosure**: the design tool used to build it exports each slide's
+edited content as a rasterized image rather than real PDF text, so `V53`'s automated
+text-search (a proxy for "was the mandatory proxy-relationship disclosure actually written")
+can't read text baked into an image — even though the disclosure is visually present exactly
+where required, and any human reading the PDF sees it. Confirmed directly (`pypdf` extraction:
+50-213 characters per content slide, just the template's own unedited headers) before deciding
+this, not assumed. Full root-cause and the reasoning for shipping as-is under deadline:
+`docs/decisions.md` D81. **V69 and V70 (new) both PASS** — automated proof
 the announced
 submission-folder shape exists and `models/best.pt` matches `weights/best.pt`.
 No check has ever been weakened, skipped,

@@ -133,10 +133,22 @@ verifier retarget). **All four plans are DONE.**
   expected, disclosed state until the human-built PPT is added. `scripts/build_deck.py`
   (updated with real team info, correct current-checkpoint numbers, and working image paths)
   stays in the repo as a fallback generator if needed.
-- **Still open:** the real PPT (a teammate is building it by hand; `run` `scripts/build_deck.py`
-  with the same `--team/--members/--college/--contact` args used before if a fallback is ever
-  needed) and demo video recording (script ready, `docs/DEMO_VIDEO_SCRIPT.md`) both need the
-  user/team. Everything else is closed out.
+- **Deck: DONE. `bunker_backer_PS01.pdf` (D80/D81) is the shipped deck** -- team-built by hand,
+  reviewed page by page against real project results before being added: correct team info,
+  correct problem statement (including the mandatory proxy-relationship disclosure), correct
+  metrics, correct A100/RTX-4060 GPU disclosure, 3 real result images added (measured
+  noise-variance plot, typical + worst-case qualitative panels, best-case static example
+  replacing the optional video). Filename corrected from the earlier, incorrectly-transcribed
+  `*_KLA_PS01.pdf` convention to the real, verified `*_PS01.pdf` convention (D80). **`V53`
+  still correctly FAILs**, but for a real, understood, low-risk reason, not a missing
+  disclosure: the design tool exports edited slide content as rasterized images, not real PDF
+  text, so `V53`'s automated text-search can't read the (visually present, human-readable)
+  disclosure sentence. Shipped as-is under a hard deadline rather than delay for a re-export
+  that would only satisfy this repo's own internal proxy check, not anything organizers
+  actually see. Full reasoning: `docs/decisions.md` D81.
+- **Still open:** demo video recording (optional per SPEC F18, script ready at
+  `docs/DEMO_VIDEO_SCRIPT.md`) -- not required, skip if out of time. Everything else is
+  closed out.
 
 **Everything below this point (including the next "RESUME HERE" heading) is archived history
 from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by
