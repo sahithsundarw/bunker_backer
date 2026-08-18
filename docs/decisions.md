@@ -4140,3 +4140,41 @@ hidden problem. This is not "papering over" or weakening the check (Prime Direct
 untouched: the check's assertion is exactly what it always was); it is the check correctly
 reporting a real, current, temporary gap that the human is actively closing through a
 different channel (a hand-built deck) than the one this repo automates.
+
+## D80 — Deck filename convention corrected: `*_PS01.pdf`, not `*_KLA_PS01.pdf` (verified against the real template, not our own transcription)
+
+**A teammate's hand-built PPT, exported to PDF, was the trigger for finding this.** Before
+adding it to the repo, its filename needed to match the portal's stated naming convention.
+`docs/SPEC.md`'s F13 row says the filename should be `TeamName_KLA_PS01.pdf`, and `V53`
+(the deck contract check) was written to match that. But this session also downloaded the
+**actual official Idea Submission Template** directly from `i4c.in` (to build a content
+mapping for the teammate) and inspected its literal instructions slide. It states, verbatim:
+
+> FILE NAMING CONVENTION: Team Name_PSNo (E.g. i4C_PS01)
+
+**No "KLA" anywhere in the real convention.** `docs/SPEC.md`'s F13 row appears to have been an
+incorrect elaboration made earlier without checking the real template file (KLA is the
+*sponsor* of this particular problem statement, not part of the file-naming code -- the
+example given, `i4C_PS01`, uses the *portal's own* name, not a sponsor's). This is a primary-
+source correction, not a matter of opinion: the actual template file is the ground truth for
+its own naming rule, and it was checked directly rather than trusted from an earlier
+transcription.
+
+**Fixed:**
+- The teammate's PPT was renamed to `bunker_backer_PS01.pdf` (previously downloaded as the
+  template's own generic filename) and added to the repo at that path.
+- `scripts/verify_all.py`'s `check_V53` glob corrected from `*_KLA_PS01.pdf` to `*_PS01.pdf`,
+  matching the verified real convention. Every other assertion `V53` makes (page count cap,
+  proxy-relationship sentence present, repo URL present, no banned phrases, no unfilled
+  placeholder literal) is unchanged -- only the filename pattern was wrong.
+- `docs/SPEC.md`'s own F13 text is **left unedited** -- it is append-only and is the historical
+  record of what this project originally believed the convention to be. This correction and
+  its evidence live here and in `docs/SPEC_ADDENDUM.md` instead, per that file's own
+  convention for updating the original spec without rewriting it.
+- Re-pinned: new sha256 `dfc780b657aa58b3d957589d55b0c360ae5800e4c91de034894197a955b67785`
+  for `scripts/verify_all.py`, logged in `docs/VERIFIER_SHA256`.
+
+**Not a weakening (Prime Directive 1).** The check still requires exactly one matching PDF
+passing every one of its content assertions -- the only thing that changed is which filename
+pattern is treated as valid, corrected to match verified, primary-source reality rather than
+an earlier, apparently-mistaken transcription of it.

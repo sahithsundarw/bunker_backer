@@ -480,3 +480,19 @@ Working interpretation, stated explicitly: the announced 4-item folder is the *m
 required, not an exhaustive listing — this repo's fuller structure (`src/`, `scripts/`,
 `docs/`, `train.py`, etc.) coexists with it, since the original spec's "public GitHub repo"
 requirement is still in force.
+
+## 14. NEW — deck filename convention corrected against the real template (2026-08-18)
+
+`docs/SPEC.md`'s F13 row states the deck filename should be `TeamName_KLA_PS01.pdf`. **This is
+superseded** by direct inspection of the actual official Idea Submission Template, downloaded
+from `i4c.in` and read this session, not assumed from the earlier transcription. Its own
+instructions slide states the naming convention verbatim:
+
+> FILE NAMING CONVENTION: Team Name_PSNo (E.g. i4C_PS01)
+
+No "KLA" anywhere in it — the example (`i4C_PS01`) uses the portal's own name, not a sponsor's.
+This project's shipped deck is named `bunker_backer_PS01.pdf` accordingly, and
+`scripts/verify_all.py`'s `V53` check was corrected from a `*_KLA_PS01.pdf` glob to
+`*_PS01.pdf` to match (`docs/decisions.md` D80). Do not edit `docs/SPEC.md`'s original F13
+text to match this — it is append-only and is the historical record of what was originally
+believed; this section is where the correction belongs.

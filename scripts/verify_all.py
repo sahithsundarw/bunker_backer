@@ -105,7 +105,7 @@ TIERS["V68"] = 2
 TIERS["V69"] = 0
 TIERS["V70"] = 0
 
-# V53 (docs/STATE.md U-5): the solution deck contract -- exactly one *_KLA_PS01.pdf, <=9
+# V53 (docs/STATE.md U-5): the solution deck contract -- exactly one *_PS01.pdf, <=9
 # pages, proxy relationship stated, repo URL present, no banned phrasing, no unfilled
 # placeholder literal (the last clause a strengthening beyond the original spec). Deliverable
 # band, same tier as V13/V55/V56/V59 (repo-presence/deliverable-shape checks).
@@ -3635,15 +3635,18 @@ def check_V53(ctx: Ctx) -> CheckResult:
     unfilled placeholder literal. docs/decisions.md records this strengthening; it does not
     weaken anything the original spec asked for (Prime Directive 1).
 
-    The portal's own naming convention (`TeamName_KLA_PS01.pdf`) means this check cannot know
-    the exact filename in advance -- it globs for exactly one match instead of a literal path.
+    The portal's own naming convention, verified directly against the actual official template
+    file (downloaded from i4c.in, docs/decisions.md D80 -- not assumed from an earlier
+    transcription of it): "Team Name_PSNo (E.g. i4C_PS01)" -- i.e. `TeamName_PS01.pdf`, with
+    no "KLA" in the pattern. This means the check cannot know the exact filename in advance --
+    it globs for exactly one match instead of a literal path.
     """
-    candidates = sorted(ctx.root.glob("*_KLA_PS01.pdf"))
+    candidates = sorted(ctx.root.glob("*_PS01.pdf"))
     if not candidates:
-        return not_impl("V53", "*_KLA_PS01.pdf at the repo root")
+        return not_impl("V53", "*_PS01.pdf at the repo root")
     if len(candidates) > 1:
         return CheckResult("V53", FAIL,
-                           f"{len(candidates)} files match *_KLA_PS01.pdf, expected exactly 1",
+                           f"{len(candidates)} files match *_PS01.pdf, expected exactly 1",
                            {"matches": [p.name for p in candidates]})
     pdf_path = candidates[0]
 
