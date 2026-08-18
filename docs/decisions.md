@@ -3869,3 +3869,128 @@ catch** — a tool whose default silently diverges from the thing it claims to m
 than no tool, since it would have kept reporting a stale, wrong number under the label "the
 default" indefinitely if the two changes (inference.py's default, and this bug) had not been
 made in the same session and cross-checked against each other.
+
+## D75 — Entry point renamed inference.py -> run.py, per an official, track-specific final-submission announcement
+
+**What changed and why.** The user forwarded an official hackathon announcement (confirmed,
+in conversation, as coming from the official portal/email and specific to KLA PS01 -- not
+generic boilerplate) laying out a final technical check for submission. It requires: (1) the
+entry script be named `run.py`, explicitly instructing teams whose script is `main.py`/
+`eval.py`/`evaluate.py` to rename it; (2) invocation `python run.py <input_dir> <output_dir>`;
+(3) a submission folder `team_name/{run.py, requirements.txt, README.md, models/}`; (4) the
+usual correctness bar (`.npy` in/out, shape, `[0,1]`, no NaN/Inf, no internet/API keys/model
+downloads/user interaction, GPU-runnable) -- all of which the former `inference.py` already
+satisfied, proven by 32 of the then-69 V-checks.
+
+This conflicts, on naming only, with the ORIGINAL official spec (`docs/SPEC.md`,
+`docs/VERIFICATION_CONTRACT.md`): entry point `inference.py`, `--input_dir/--output_dir`
+flags, weights under `weights/`. The user did not know whether `<input_dir> <output_dir>` in
+the new announcement is literally positional or just prose shorthand for the two directory
+arguments, and left that call to be made safely -- **the decision: support both**, so neither
+reading can fail. The user also explicitly confirmed (`AskUserQuestion`) that the announced
+`models/` folder should be a REAL directory with a byte-identical copy of the checkpoint,
+cross-checked against drift, rather than just a fallback resolution path.
+
+**Working interpretation, stated explicitly, not silently assumed:** the announced 4-item
+folder is read as the *minimum* required, not an exhaustive top-level listing -- this repo
+keeps `src/`, `scripts/`, `docs/`, `train.py`, etc. alongside `run.py`/`requirements.txt`/
+`README.md`/`models/`, since the original spec's "public GitHub repo" requirement is still in
+force and is not rescinded by this announcement. If this interpretation turns out to be wrong,
+it is cheap to correct: nothing about the technical implementation below depends on it.
+
+**Blast-radius mapping done before touching anything** (an `Explore` pass): 9 literal string
+sites in `scripts/verify_all.py` (`ctx.run_inference`, `ctx.inference_ast`, plus V01,
+`_fresh_clone_run` serving V04/V46, V13's required-files list, V23's importtime subprocess,
+V57's `spec_from_file_location`, V65's OOM-probe script arg) drive 32 of the 69 V-checks
+entirely through those two helpers. Both `scripts/verify_all.py` and
+`docs/VERIFICATION_CONTRACT.md` are hash-pinned (`V00`, `docs/VERIFIER_SHA256`); `run.py`,
+`models/`, `team_name` were confirmed genuinely novel strings (zero prior collisions) before
+being introduced.
+
+**Implementation, in order:**
+
+1. `git mv inference.py run.py`. Zero logic changes beyond the CLI (below) -- same import
+   allowlist, same OOM-halving, same output clipping, same everything else. `run.py`'s weights
+   resolution gained a fallback (`weights/best.pt` first, `models/best.pt` second), still
+   `Path(__file__)`-relative (V05-compliant).
+2. **Dual CLI, both forms genuinely required (not softly optional):**
+   `ap.add_argument("input_dir_pos", nargs="?", ...)` / `output_dir_pos` alongside
+   `--input_dir`/`--output_dir` (no longer `required=True` on the flags -- that would make the
+   positional form a parse-time error). `main()` resolves `args.input_dir or
+   args.input_dir_pos` (same for output), and exits 2 with a clear message if neither form
+   supplies both directories. Verified directly: `python run.py in out` exit 0,
+   `python run.py --input_dir in --output_dir out` exit 0, `python run.py` (nothing) exit 2.
+3. **A stale hardcoded literal caught in the same pass:** `_err()`'s messages were hardcoded
+   `f"inference.py: {msg}"` -- exactly the class of bug this session has hit repeatedly
+   (hardcoded filenames/hashes that don't track a rename). Fixed to `"run.py: {msg}"`, caught
+   by actually running the no-args case and reading the real stderr, not by inspection alone.
+4. `inference.py` becomes a 3-line back-compat shim (`from run import main; sys.exit(main())`)
+   -- deliberately not scanned by the verifier any more; a courtesy leftover for anything that
+   still expects the original name, not the graded file.
+5. **`scripts/verify_all.py` retargeted.** All 58 literal-string occurrences of
+   `"inference.py"` (code, not prose) replaced with `"run.py"` via the two helper functions
+   plus the 7 other literal sites -- this alone flips V01-V05, V07-V13, V15-V24, V36, V40-V42,
+   V47, V57, V60, V64, V65 onto the new file with no per-check logic change. 16 further prose
+   mentions in docstrings/comments (describing what a check does, not a code target) updated
+   for accuracy. `torch.inference_mode()` call sites were NOT touched -- that is a torch API
+   name, unrelated to the file rename, confirmed by regex boundary before the blanket replace.
+6. **V02 could not survive a literal swap and was rewritten instead.** Its old assertion was a
+   static AST check that `--input_dir`/`--output_dir` are `required=True` -- structurally
+   incompatible with also accepting positional args (argparse cannot make one form
+   `required=True` without the other becoming a parse error). Rewritten to a BEHAVIORAL test:
+   statically confirm both the two flags and two positional args exist as accepted arguments,
+   then run three real subprocess invocations (positional-only, flags-only, neither) and assert
+   the first two exit 0 and the third exits non-zero. This is strictly MORE coverage than the
+   check it replaces (it proves both invocation styles actually work, not just that one static
+   property holds), not a weakening -- consistent with Prime Directive 1's "may make checks
+   stricter" clause.
+7. **V13's required-files list**: `"inference.py"` -> `"run.py"` (kept `README.md`, `train.py`,
+   `requirements.txt` -- independent, still-valid requirements; `inference.py`'s presence is no
+   longer verifier-mandated since it is now an optional legacy shim, though it still exists).
+8. **Two new, strictly additive Tier-0 checks**, following the V63/V67 precedent (checks that
+   exist purely to prove a specific external requirement is met, not to gate quality):
+   - **V69**: asserts `run.py`, `requirements.txt`, `README.md` all exist at repo root and
+     `models/` exists as a directory -- automated, re-runnable proof of the announced
+     submission-folder shape, additive to V13, not a replacement for it.
+   - **V70**: if both `weights/best.pt` and `models/best.pt` exist, asserts their sha256 match
+     exactly -- the drift-prevention invariant for the duplicated checkpoint copy (§9 below).
+9. **Real `models/` folder created**: `models/best.pt` is a byte-for-byte copy of
+   `weights/best.pt`, sha256-verified equal immediately after copy
+   (`6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397`, both). `models/README.md`
+   added, pointing to `weights/README.md` for full provenance and explaining V70's invariant.
+   **Any future checkpoint promotion must copy the new checkpoint into `models/best.pt` too**
+   -- added to the promotion checklist in `docs/STATE.md`.
+10. **`scripts/benchmark_runtime.py` retargeted** (`REPO_ROOT / "inference.py"` ->
+    `REPO_ROOT / "run.py"`, plus 8 prose mentions) -- this is now the file KLA actually times.
+11. **`docs/VERIFICATION_CONTRACT.md` updated**: 16 `inference.py` mentions -> `run.py`, V02's
+    row rewritten to describe the dual-form behavioral contract (not the old static
+    `required=True` wording), two new rows added for V69/V70.
+12. **A real gap caught while staging: `models/best.pt` was gitignored.** `.gitignore`'s
+    blanket `*.pt` rule only carved out `!weights/best.pt`; without a matching
+    `!models/best.pt` line, the mirror would never actually reach a commit, a push, or a real
+    clone -- it would have silently existed only on this machine while `V69`/`V70` passed
+    locally and failed the moment anyone else cloned the repo. Added the missing negation
+    line. Separately, `V51`'s `CHECKPOINT_BLOB_EXEMPTION` (previously the single string
+    `"weights/best.pt"`) was extended to a tuple including `"models/best.pt"` -- the mirror is
+    now mandatory per `V69` the same way `weights/best.pt` is mandatory per `V59`, so the same
+    "sanctioned checkpoint, not an accidental blob" reasoning applies to both, not a second,
+    unaccounted-for exemption.
+13. **Re-pinned** (final, after the gitignore/V51 fix above changed `scripts/verify_all.py`
+    again). New sha256: `scripts/verify_all.py` =
+    `240c804524e6e7a5124ca48a752e09fe4bad61e94074c11f2ffa91959419796d`;
+    `docs/VERIFICATION_CONTRACT.md` = `0bde203980d0892b939fc2a9e343f1cf55b2c8d2ec079897f1d36aa7cb5adf69`.
+    `docs/VERIFIER_SHA256` updated with both, plus this decision referenced in its change log.
+
+**Verified before considering this done:** `python run.py --help` and `python inference.py
+--help` both exit 0 (guards against the exact argparse `%`-escaping crash class caught earlier
+this session -- checked directly, not assumed). Both invocation forms produce correct output
+on `tests/fixtures/single`. Full `scripts/verify_all.py --strict` re-run after all of the
+above, confirming zero previously-green checks went red and both new checks pass (full tally
+recorded in the same session's `docs/STATE.md` update).
+
+**Deliberately left untouched:** `results/restored_test_outputs/manifest.json`'s recorded
+`"command"` field still reads `python inference.py ...` -- historical provenance of an
+already-published artifact that genuinely was produced via `inference.py` at the time;
+rewriting it retroactively would be dishonest, not corrective. `docs/SPEC.md`'s own text is
+append-only and unedited; this update lives in `docs/SPEC_ADDENDUM.md` instead, per that file's
+own convention, so the original spec's historical record stays intact.

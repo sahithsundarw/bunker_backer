@@ -34,7 +34,7 @@ Project: **KLA PS01 — AI-Based Restoration of Degraded Images for Semiconducto
 
 **3. Never fabricate a fact about the dataset.** Anything marked UNVERIFIED in SPEC §2.2 must be derived from the actual data and recorded in `docs/dataset_findings.md` with the evidence (numbers, not prose). If the dataset is unavailable, say so in `docs/BLOCKERS.md` and build against synthetic stand-in data that is clearly labelled as such.
 
-**4. `inference.py` is the highest-value file in the repo.** KLA runs it as-is on an H100 to produce both your quality score and your throughput score. A repo with a mediocre model and a flawless inference script scores; a repo with a great model and a broken script scores zero. Prioritize accordingly.
+**4. `run.py` is the highest-value file in the repo.** KLA runs it as-is on an H100 to produce both your quality score and your throughput score. A repo with a mediocre model and a flawless inference script scores; a repo with a great model and a broken script scores zero. Prioritize accordingly. (Renamed from `inference.py` 2026-08-18 per an official, track-specific final-submission announcement — see `docs/decisions.md` D75. `inference.py` still exists as a 3-line back-compat shim, but `run.py` is the file that is graded, timed, and covered by the verifier.)
 
 **5. No hardcoded paths, ever.** Resolve weights relative to `Path(__file__).resolve().parent`. Never relative to CWD. Never absolute. Test from `/`.
 
@@ -56,8 +56,8 @@ Parallel agents must never write to the same file. When fanning out, assign by t
 | `model-core` | `src/model.py`, `src/blocks.py`, `configs/*.yaml` |
 | `data-pipeline` | `src/dataset.py`, `src/degrade.py`, `configs/split_val.txt` |
 | `loss-metrics` | `src/losses.py`, `src/metrics.py`, `scripts/evaluate.py`, `scripts/make_baselines.py` |
-| `inference-engineer` | `inference.py`, `src/io_utils.py` |
-| `throughput-optimizer` | `scripts/benchmark_runtime.py`, `results/runtime_report.md` — and may propose (not apply) diffs to `inference.py` |
+| `inference-engineer` | `run.py`, `src/io_utils.py` |
+| `throughput-optimizer` | `scripts/benchmark_runtime.py`, `results/runtime_report.md` — and may propose (not apply) diffs to `run.py` |
 | `trainer` | `train.py`, `src/utils.py`, `results/experiments.csv` |
 | `docs-scribe` | `README.md`, `docs/decisions.md`, `requirements.txt`, `weights/README.md` |
 | Read-only reviewers | Write **only** to `reviews/<agent>-<iteration>.md`. Never touch source. |
@@ -117,7 +117,7 @@ When done, print a final report and **stop looping**. Do not invent new work.
 ## STYLE
 
 - Python 3.10+, type hints on public functions, docstrings on modules.
-- `inference.py` module-level imports are **exactly** this allowlist, nothing else:
+- `run.py` module-level imports are **exactly** this allowlist, nothing else:
   `argparse os sys time pathlib concurrent.futures numpy torch`
   **No image IO library.** The dataset is `.npy` end to end (`np.load` / `np.save`), so
   `cv2`, `tifffile` and `PIL` are dead weight on a timed run and actively hazardous —

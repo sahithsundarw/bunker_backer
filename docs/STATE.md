@@ -2,17 +2,44 @@
 
 ---
 
-# ⚠ RESUME HERE — Phase 1 close-out + Round 2 OOD investigation + throughput/headroom audit, main session (Windows/RTX 4060), 2026-08-18
+# ⚠ RESUME HERE — Phase 1 close-out + Round 2 OOD investigation + throughput/headroom audit + run.py compliance, main session (Windows/RTX 4060), 2026-08-18
 
-**Deadline extended to 2026-08-18 night.** Three plans executed in sequence this session, all
+**Deadline extended to 2026-08-18 night.** Four plans executed in sequence this session, all
 at `C:\Users\sahit\.claude\plans\as-of-now-whatever-steady-lemur.md` (each overwrote the last
 once done): "Phase 1 close-out" (README truth pass, verifier hygiene, B1-B4/C1-C3), "Attack
 the real-SEM OOD gap — diagnose before training" (content-statistics diagnosis, weight
-interpolation, a targeted fine-tune — the Phase 3 checkpoint), then, after an honest standing
-assessment identified three weak points (raw metric, thin OOD statistics, unmeasured-on-H100
-throughput), "Attack the three named weak points — $0 budget, free levers only" (four parallel
-tracks: local-training-limit measurement, real-SEM OOD n=180 expansion, batch-size re-sweep,
-paired-test scoring). **All three plans are DONE.**
+interpolation, a targeted fine-tune — the Phase 3 checkpoint), "Attack the three named weak
+points — $0 budget, free levers only" (four parallel tracks: local-training-limit measurement,
+real-SEM OOD n=180 expansion, batch-size re-sweep, paired-test scoring), then, after the user
+forwarded an official, track-specific final-submission announcement, "Comply with the official
+'run.py' final-submission announcement" (entry point rename, dual CLI, `models/` folder,
+verifier retarget). **All four plans are DONE.**
+
+- **NEW THIS SESSION — entry point renamed `inference.py` -> `run.py`** (`docs/decisions.md`
+  D75), per an official hackathon announcement confirmed track-specific to KLA PS01 (not
+  generic boilerplate). `run.py` is now the graded, timed file — identical logic to the former
+  `inference.py` (`git mv`, zero behavioral change beyond the CLI), covered by the same 69
+  V-checks (32 of which were retargeted, none weakened) plus two new ones. `run.py` accepts
+  BOTH `python run.py <input_dir> <output_dir>` (positional, the announcement's wording) AND
+  `python run.py --input_dir X --output_dir Y` (flags, the original spec's wording) — the human
+  did not know which the announcement's notation meant, so both are supported rather than
+  guessing. `inference.py` kept as a 3-line back-compat shim (`from run import main`), no
+  longer scanned by the verifier. `V02` was rewritten from a static `required=True` AST check
+  (structurally incompatible with also accepting positional args) to a behavioral test proving
+  both invocation forms work and that omitting both correctly exits non-zero — strictly more
+  coverage, not less. Two new checks added: `V69` (the announced submission-folder shape —
+  `run.py`/`requirements.txt`/`README.md`/`models/` — exists) and `V70` (a real `models/best.pt`
+  mirror of `weights/best.pt` stays sha256-identical). A real stale-literal bug was caught in
+  the same pass: `run.py`'s `_err()` hardcoded `"inference.py: {msg}"` in its error prefix —
+  fixed to `"run.py: {msg}"`, caught by actually running the no-args case, not by inspection.
+  `scripts/verify_all.py` and `docs/VERIFICATION_CONTRACT.md` re-pinned (new sha256 in
+  `docs/VERIFIER_SHA256`, logged in D75 per V00's own escape hatch). Working interpretation,
+  stated explicitly: the announced 4-item folder is the *minimum* required, not an exhaustive
+  listing — this repo's fuller structure (`src/`, `scripts/`, `docs/`, `train.py`) coexists
+  with it, since the original spec's "public GitHub repo" requirement is still in force.
+  **Full `--strict` re-verify in progress as of this writing** — check
+  `results/verification_report.json`'s timestamp/commit before trusting any tally quoted
+  elsewhere in this file until it lands.
 
 - **CURRENT SHIPPED CHECKPOINT: unchanged this round — Phase 3 structural-content fine-tune**
   (`docs/decisions.md` D71/D72), sha256 `6d74ccfd...`, 29.5850 dB / 0.79460 SSIM / 0.25416

@@ -17,7 +17,7 @@ resolution and a single PixelShuffle ×2 head.
 > both enabled (1,393,938 params, unchanged), resumed and fine-tuned on an HF Jobs A100-large
 > GPU with 27.5% procedural structural content mixed into training
 > (`src/structural_content.py`), targeting a real-SEM OOD regression the prior checkpoint had
-> disclosed and accepted. `inference.py --require_weights` reloads it with strict state-dict
+> disclosed and accepted. `run.py --require_weights` reloads it with strict state-dict
 > validation and prefers the EMA weights.
 >
 > On the committed 400-pair validation split, saved-output evaluation measures
@@ -61,7 +61,7 @@ resolution and a single PixelShuffle ×2 head.
 > - **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 >   records an externally-timed (`subprocess`-wrapped, not an internal timer) full run of the
 >   same 400-image val-split input set on the **NVIDIA GeForce RTX 4060 Laptop GPU** (bf16,
->   batch 4 — `inference.py`'s current default, re-swept and changed from 32 this session
+>   batch 4 — `run.py`'s current default, re-swept and changed from 32 this session
 >   after batch 4 measurably beat 32 by 31.8%/18.1% at 128→256/256→512, see `docs/decisions.md`
 >   D74): total wall-clock **median 20.62 s (19.40 img/s)**, n=5, measured with **no
 >   `--batch_size` override** — the exact command KLA will actually run. No H100 number exists
@@ -129,9 +129,9 @@ no score can be computed locally against the official test set. Scores are compu
 
 | Method | PSNR dB ↑ | SSIM ↑ | LPIPS ↓ | End-to-end throughput |
 |---|---|---|---|---|
-| Bicubic ×2 (raw NoisyLR, the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 | not separately measured (classical baseline, not run through `inference.py`) |
-| Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not separately measured (classical baseline, not run through `inference.py`) |
-| Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not separately measured (classical baseline, not run through `inference.py`) |
+| Bicubic ×2 (raw NoisyLR, the floor) | 23.6524 ± 3.0236 | 0.54775 ± 0.19197 | 0.41206 ± 0.15407 | not separately measured (classical baseline, not run through `run.py`) |
+| Median 3×3 → bicubic ×2 | 25.5057 ± 3.8785 | 0.61317 ± 0.17232 | 0.40870 ± 0.15866 | not separately measured (classical baseline, not run through `run.py`) |
+| Non-local means → bicubic ×2 | 26.2722 ± 4.3037 | 0.65152 ± 0.19523 | 0.42586 ± 0.18627 | not separately measured (classical baseline, not run through `run.py`) |
 | U-Net baseline (UNetSR w32 L4, 2,970,401 params) | **28.8808 ± 4.5328** | 0.78273 ± 0.14245 | 0.26525 ± 0.14878 | not separately measured (`results/runtime_report.md` covers NAFSR only) |
 | Prior shipped checkpoint (superseded 2026-08-17): NAFSR w48n16, from scratch, 388,225 params | 28.7865 ± 4.5329 | 0.78287 ± 0.14169 | 0.25324 ± 0.13193 | 8.3 img/s @N=400, RTX 4060, bf16, batch 32 (high-variance measurement, 681% spread — see `results/runtime_report.md`) |
 | Round 2 long-run checkpoint (superseded 2026-08-17): NAFSR w64n32, FiLM+uncertainty, cloud long run (1,393,938 params) | 29.2548 ± 4.6210 | 0.79211 ± 0.14321 | 0.25625 ± 0.14627 | 17.3 img/s @N=400, RTX 4060, bf16, batch 32 (see `results/runtime_report.md`) |
@@ -290,7 +290,7 @@ Confirm you got a CUDA build — this matters, see the note below:
 ```
 
 On the reference machine this prints `2.11.0+cu128 12.8 True`. On a machine with no NVIDIA
-GPU the same wheels install and the last field is `False`; `inference.py` then runs on CPU
+GPU the same wheels install and the last field is `False`; `run.py` then runs on CPU
 without any change.
 
 Fresh-clone compatibility was re-confirmed 2026-08-18, against the current checkpoint
@@ -299,7 +299,7 @@ Python 3.12.13 matching this repo's pinned build environment, Docker `--gpus all
 of this dev machine's own RTX 4060 Laptop GPU, `nvidia-smi` confirmed the GPU visible inside
 the container): a fresh `git clone`, fresh venv, `pip install -r requirements.txt` (installing
 the real `torch==2.11.0+cu128` / `torchvision==0.26.0+cu128` CUDA wheels, no CPU fallback), and
-`inference.py` ran end-to-end against the fixture corpus — verifier checks V04 and V46 both
+`run.py` ran end-to-end against the fixture corpus — verifier checks V04 and V46 both
 PASS (`results/verification_report.json`). This supersedes an earlier, pre-Phase-3-checkpoint
 confirmation that used a plain `python:3.12-slim` container without GPU passthrough. This is
 still a target-platform compatibility check, **not** an H100 runtime measurement.
@@ -316,21 +316,51 @@ still a target-platform compatibility check, **not** an H100 runtime measurement
 ## Inference — the command KLA runs
 
 ```bash
-.venv/Scripts/python.exe inference.py --input_dir sample_inputs --output_dir results/sample_outputs
+.venv/Scripts/python.exe run.py sample_inputs results/sample_outputs
+```
+
+or, equivalently:
+
+```bash
+.venv/Scripts/python.exe run.py --input_dir sample_inputs --output_dir results/sample_outputs
 ```
 
 `sample_inputs/` holds 6 real degraded 128×128 inputs (394 KB total) so a reviewer can verify
-the script without downloading the dataset. Point `--input_dir` at any directory of degraded
-`.npy` files and `--output_dir` anywhere you like — those two arguments are the entire
-interface (SPEC F11). No other argument is required, no file needs editing, and weights are
-resolved relative to the script file, never to the working directory, so the script runs
-correctly from any CWD. The verified checkpoint is committed at `weights/best.pt`; a fresh
-clone needs no checkpoint download or manual placement.
+the script without downloading the dataset. Point the input argument at any directory of
+degraded `.npy` files and the output argument anywhere you like — those two directories are
+the entire interface (SPEC F11). No other argument is required, no file needs editing, and
+weights are resolved relative to the script file, never to the working directory, so the
+script runs correctly from any CWD. The verified checkpoint is committed at `weights/best.pt`
+(a byte-identical mirror also lives at `models/best.pt`, see below); a fresh clone needs no
+checkpoint download or manual placement.
 
 Normal submission inference requires that checkpoint. If it is missing or cannot be loaded,
-the two-argument command prints an explicit error and exits nonzero without writing bicubic
-outputs as though they were model predictions. `--require_weights` is retained as an explicit
-assertion and has the same strict behavior.
+the command prints an explicit error and exits nonzero without writing bicubic outputs as
+though they were model predictions. `--require_weights` is retained as an explicit assertion
+and has the same strict behavior. Omitting both directories (neither positional nor flag form)
+also exits nonzero with a clear message — both directories are always mandatory, just
+satisfiable two ways.
+
+> **Why two invocation forms.** The organizers issued an official, track-specific
+> final-submission announcement (2026-08-18, `docs/decisions.md` D75) requiring the entry
+> script be named `run.py` and invoked `python run.py <input_dir> <output_dir>` — a change
+> from this project's original spec, which named the script `inference.py` and used
+> `--input_dir/--output_dir` flags. Rather than guess which reading of `<input_dir>
+> <output_dir>` was meant (literally positional, or prose shorthand for the same two flags),
+> **`run.py` accepts both**, so neither reading can fail. `inference.py` (the original name)
+> still exists as a 3-line back-compat shim importing `run.py`'s `main()` — but `run.py` is
+> the file that is graded, timed, and covered by the verifier; `scripts/verify_all.py`'s `V02`
+> proves both invocation forms work end-to-end and that omitting both correctly fails.
+>
+> The announcement also specifies a submission folder shaped
+> `team_name/{run.py, requirements.txt, README.md, models/}`. This repo satisfies that as a
+> superset — the original spec's "public GitHub repo" requirement (with `src/`, `scripts/`,
+> `docs/`, `train.py`, etc.) is still in force and isn't rescinded by this announcement, so
+> nothing was removed; `run.py`/`requirements.txt`/`README.md` are all at repo root as
+> before, and a real `models/` directory now exists containing a byte-identical copy of
+> `weights/best.pt` (sha256-verified equal, and kept from silently diverging by the new `V70`
+> check — see `models/README.md`). `V69` (new) proves this shape automatically rather than
+> just claiming it in prose.
 
 For baseline demonstrations only, `--allow_bicubic_fallback` explicitly opts into a
 parameter-free bicubic result. Demo fallback output is never submission output and must not be
@@ -382,7 +412,7 @@ out (256, 256) float32 0.0 1.0
 **No image library is used anywhere in the inference path.** The data is `.npy` end to end, so
 `cv2`, `tifffile` and `PIL` are absent by design, not by oversight: they are dead weight on a
 timed run, and several `cv2` paths silently convert to 8-bit or clip to [0,1], which would
-corrupt inputs that legitimately reach 2.16. `inference.py`'s module-level imports are exactly
+corrupt inputs that legitimately reach 2.16. `run.py`'s module-level imports are exactly
 `argparse os sys time pathlib concurrent.futures numpy torch`, enforced statically by a
 submission-blocking check.
 
@@ -496,9 +526,11 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
 
 | Path | Contents |
 |---|---|
-| `inference.py` | the evaluation script KLA runs; standalone, two required arguments |
+| `run.py` | the evaluation script KLA runs; standalone, two mandatory directory args, satisfiable positionally or via `--input_dir/--output_dir` (docs/decisions.md D75) |
+| `inference.py` | 3-line back-compat shim (`from run import main`) — kept for the original spec's naming, not scanned by the verifier |
 | `train.py` | reproduces the checkpoint, including the CPU-feasible closed-form training mode |
 | `requirements.txt` | complete `pip freeze`, every line `==` pinned |
+| `models/` | byte-identical mirror of `weights/best.pt`, added solely to satisfy the organizers' announced submission-folder shape; kept in sync by `V70` — see `models/README.md` |
 | `sample_inputs/` | 6 real degraded inputs so inference can be verified without the dataset |
 | `src/` | `model.py` `blocks.py` `dataset.py` `degrade.py` `losses.py` `metrics.py` `io_utils.py` `utils.py` `unrolling.py` (stretch goal, not shipped — see Method summary) |
 | `configs/` | `final.yaml` (base recipe), `nafnet_x2.yaml`, `baseline_unet.yaml`, `long_run_e.yaml` (**shipped checkpoint's config**), `finetune_ood_wide.yaml`, 6 Pareto-sweep configs, `split_val.txt` |
@@ -507,7 +539,7 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
 | `results/eda/` | dataset figures, degradation fit, content contact sheets, Pareto frontier, calibration probes |
 | `results/metrics_summary.md` | machine-generated results table |
 | `results/restored_test_outputs/` | mandatory model outputs, generated from the current `weights/best.pt` (29.5850 dB). **Holds a manifest and hashes, not the output bytes** — the 400-file archive (90,929,851 B, sha256 `7c5a63ff8720bbbbf781891c6fdb1302bc925095806278766ad08ca2abe9c6ef`) is published as GitHub Release `artifacts-v3`, verified fetchable from a logged-out session; see that folder's own `README.md` |
-| `results/runtime_report.md` | externally-timed RTX 4060 CUDA runtime for the current checkpoint (400 images, median 28.43 s, 14.1 img/s) — explicitly not an H100 number; earlier checkpoints' figures are kept for the record |
+| `results/runtime_report.md` | externally-timed RTX 4060 CUDA runtime for the current checkpoint (400 images, median 20.62 s, 19.40 img/s, batch 4 — `run.py`'s real default, no override) — explicitly not an H100 number; earlier checkpoints' figures are kept for the record |
 | `weights/` | tracked `best.pt` checkpoint (SHA256 `6d74ccfdd72e1271a7de5fdede5c341b3cf18ca4294619dd90a97c0591f66397`) + provenance notes |
 
 ## Method summary
@@ -611,7 +643,7 @@ shapes, not an external source). Two external resources are used for *evaluation
 never for training: LPIPS (Zhang et al., CVPR 2018) with its standard AlexNet backbone, and a
 real-SEM image set used for an OOD robustness report (`docs/decisions.md` D53). Neither
 contributes a gradient to the shipped checkpoint and neither is required to run
-`inference.py`.
+`run.py`.
 
 | Resource | Role | Link | Licence (verified at source) | Paper / model card |
 |---|---|---|---|---|
@@ -641,7 +673,7 @@ ground truth of any kind.
 
 **Throughput is measured, on the dev machine, not on an H100.** `results/runtime_report.md`
 records the CURRENT shipped checkpoint: at the full 400-image test set (`configs/split_val.txt`),
-batch 4 (`inference.py`'s real default — no `--batch_size` override; re-swept and changed from
+batch 4 (`run.py`'s real default — no `--batch_size` override; re-swept and changed from
 32 this session, `docs/decisions.md` D74), precision bf16, on the **NVIDIA GeForce RTX 4060
 Laptop GPU**, total wall-clock **median 20.62 s (19.40 img/s)**, n=5 repeats. No H100 number
 exists or is claimed anywhere in this repository.
@@ -651,7 +683,7 @@ wall-clock at 128→256 and 18.1% at 256→512** (monotonic across {4,8,16,32,64
 resolutions, n=5 medians, one interleaved session — `results/runtime_report.md`), so the
 default was changed. A real bug was also found and fixed in the process:
 `scripts/benchmark_runtime.py` had its own hardcoded `--batch_size` default of 32 and always
-forwarded it explicitly, so it could never actually measure `inference.py`'s own default —
+forwarded it explicitly, so it could never actually measure `run.py`'s own default —
 every "no override" run silently pinned to 32 regardless. Fixed to only forward `--batch_size`
 when explicitly passed (`docs/decisions.md` D74).
 
@@ -672,7 +704,7 @@ directly to each other.
 Two commitments about how every measurement above was taken, both honoured:
 
 - timing was taken **externally around the whole process**
-  (`subprocess.run([sys.executable, "inference.py", ...])`), not by an internal timer around the
+  (`subprocess.run([sys.executable, "run.py", ...])`), not by an internal timer around the
   forward pass;
 - every number is labelled with the device it was measured on. Training happens on an HF Jobs
   A100 (see Cloud training pipeline above); every *timing* number in this repository is measured
@@ -687,29 +719,31 @@ re-measurement, not assumed to still hold.
 ## Verification
 
 Correctness for this project is defined by `docs/VERIFICATION_CONTRACT.md` (immutable) and
-executed by `scripts/verify_all.py`, which defines **68 checks** and writes
+executed by `scripts/verify_all.py`, which defines **71 checks** (69 plus `V69`/`V70`, added
+2026-08-18 for the `run.py` final-submission announcement, `docs/decisions.md` D75) and writes
 `results/verification_report.json`. Run it with
 `.venv/Scripts/python.exe scripts/verify_all.py --strict`, or add `--fresh-clone` for the
 clean-room checks. It is **not** listed as a fenced command here because it exits non-zero
 while the project is incomplete, and no command in this README exits non-zero.
 
 **The suite is not green, and this README does not claim it is.** Full fresh run after the
-Phase 3 checkpoint promotion, 2026-08-18: **64 PASS / 5 FAIL** (V04, V22, V25, V46, V53).
-V04 and V46 require `--fresh-clone` (not passed on this default `--strict` invocation, hence
-the FAIL here) but were independently re-verified **passing**, post-checkpoint, in a real
-Linux/CUDA container with this dev machine's own GPU passed through via Docker (`docs/STATE.md`
-"V04/V46 fresh-clone dry run"). **V22 is a disclosed, live fail, not a bug being chased** — see the status block at
-the top of this file and `docs/BLOCKERS.md` B12 for the bf16/fp32 divergence investigation and
-why the human accepted it as a trade-off rather than authorising a fix (the exact divergence
-magnitude shifted slightly with this checkpoint's weights — still fails the same cap either
-way, disclosed in the status block above). **V21/V24/V25/V65** have each, on different runs
-this session, shown a genuine but isolated subprocess timeout under heavy system load after a
-long single-session day of GPU work — every single occurrence was confirmed harmless by an
-immediate isolated re-test (`docs/BLOCKERS.md` B11), none was a repeat, and none reflects a
-regression from the checkpoint promotion (architecture is byte-identical to its predecessor).
+`inference.py` -> `run.py` rename and verifier retarget, 2026-08-18: **67 PASS / 4 FAIL**
+(V04, V22, V46, V53) — the exact same known/expected/disclosed set as before this rename,
+confirming zero regressions from it. V04 and V46 require `--fresh-clone` (not passed on this
+default `--strict` invocation, hence the FAIL here) — re-confirmed passing post-rename against
+the new entry point, see below. **V22 is a disclosed, live fail, not a bug being chased** —
+see the status block at the top of this file and `docs/BLOCKERS.md` B12 for the bf16/fp32
+divergence investigation and why the human accepted it as a trade-off rather than authorising
+a fix. **V21 flaked once on an earlier run during this session's changes** (2 PASS, 1 FAIL
+across 3 isolated re-checks) — the same known, pre-existing, load-dependent
+cross-process-determinism flake this project has documented before (`docs/BLOCKERS.md` B11,
+~20% intermittent rate), unrelated to the rename (the check's assertion is unchanged; only its
+target filename moved from `inference.py` to `run.py`), and green again on this final run.
 **V53** (the deck contract) correctly FAILs: the deck at the repo root is still
 `PLACEHOLDER_TEAM_KLA_PS01.pdf` with unfilled team-info placeholders, a real, not-yet-closed
-gap, not a check malfunction. No check has ever been weakened, skipped,
+gap, not a check malfunction. **V69 and V70 (new) both PASS** — automated proof the announced
+submission-folder shape exists and `models/best.pt` matches `weights/best.pt`.
+No check has ever been weakened, skipped,
 or had its tolerance widened to turn a FAIL green (Prime Directive 1) — every V-check addition
 in this project's history was a strengthening, negative-controlled before being trusted. The
 authoritative per-check status is always `results/verification_report.json`, regenerated on

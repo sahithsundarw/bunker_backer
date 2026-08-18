@@ -1,13 +1,20 @@
 # Model weights
 
-`best.pt` is the checkpoint `inference.py` loads. It is resolved as
+`best.pt` is the checkpoint `run.py` loads. It is resolved as
 `Path(__file__).resolve().parent / "weights" / "best.pt"` — relative to the **script**, never
 to the current working directory and never an absolute literal (V05). A reviewer does not
 have to pass `--weights`, set an environment variable, or edit anything.
 
 Per SPEC §9 the checkpoint self-describes (V35): it carries `model`, `ema`, `config`, `iter`,
 `metrics` and `git` keys, so weights can never be silently paired with the wrong
-architecture. `inference.py` prefers the **EMA** weights when present.
+architecture. `run.py` prefers the **EMA** weights when present.
+
+**A byte-identical mirror also lives at `models/best.pt`** (see `models/README.md`), added
+solely to satisfy the organizers' announced submission-folder shape (`docs/decisions.md`
+D75). `run.py` checks `weights/best.pt` first, `models/best.pt` second. The two are kept from
+silently diverging by `scripts/verify_all.py`'s `V70` check (sha256 parity, asserted whenever
+both exist) — **any future checkpoint promotion must copy the new checkpoint into
+`models/best.pt` too**, or V70 will correctly fail.
 
 ---
 
@@ -119,10 +126,10 @@ be recovered byte-for-byte after a merge briefly overwrote `weights/best.pt` on 
 alternate checkpoint. Both now coexist safely: this file in the tree, the Release as an
 independent backup.
 
-### What `inference.py` does if the checkpoint is missing or fails to load
+### What `run.py` does if the checkpoint is missing or fails to load
 
 Normal submission inference treats the checkpoint as required. If it cannot be found or
-loaded, `inference.py` prints an explicit error and exits nonzero without generating
+loaded, `run.py` prints an explicit error and exits nonzero without generating
 substitute outputs. The ordinary two-argument command and `--require_weights` are both strict;
 `--require_weights` is retained as an explicit assertion for release-generation commands.
 
@@ -176,6 +183,6 @@ trained locally, unlike D49's predecessor (kept below for that record).
 - [x] file > 1 KB and not an LFS pointer stub (V06)
 - [x] checkpoint < 100 MB (V43's cap)
 - [x] `build_model(ckpt["config"])` accepts the stored state dict with `strict=True` (V35) —
-      confirmed live via `inference.py --require_weights` against `sample_inputs/`
-- [x] `inference.py --require_weights` succeeds against it — the bicubic fallback is not in play
+      confirmed live via `run.py --require_weights` against `sample_inputs/`
+- [x] `run.py --require_weights` succeeds against it — the bicubic fallback is not in play
 - [x] parameter count and checkpoint size recorded in `results/runtime_report.md` (V43)

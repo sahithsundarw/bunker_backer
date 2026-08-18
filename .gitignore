@@ -36,6 +36,10 @@ results/*
 # Submission Route A: the verified 3.14 MiB default checkpoint must be present in a clone.
 !weights/best.pt
 
+# Byte-identical mirror added for the organizers' announced submission-folder shape
+# (docs/decisions.md D75) -- must be present in a clone the same way weights/best.pt is.
+!models/best.pt
+
 # --- Dataset: lives at C:\kla-data, OUTSIDE this repo. Never commit image data. ---
 # Belt-and-braces in case anything is ever copied or symlinked in.
 /kla-data/

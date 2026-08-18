@@ -83,7 +83,7 @@ violations = 0
 2. **Keep a 256→512 fixture.** SPEC T6's acceptance criterion already demands a forward pass
    on `(1,1,256,256) → (1,1,512,512)`. No such sample exists in the data, so this synthetic
    fixture is the *only* guard against silently baking in 128→256. Keep it in the test suite.
-3. **Keep shape-grouped batching in `inference.py`** (SPEC §7.3, §11.2, §18 pitfall 10) even
+3. **Keep shape-grouped batching in `run.py`** (SPEC §7.3, §11.2, §18 pitfall 10) even
    though the released test set is single-resolution. It costs nothing on uniform input and
    is the difference between working and throwing if the hidden or Round-2 set differs. Keep
    the mixed-resolution test from SPEC §11.4 step 4.
@@ -143,7 +143,7 @@ Observed range **[-0.28, 2.16]**.
 
 **~3% of input pixels exceed 1.0.** Never clamp the input (F5, §18 pitfall 2).
 
-## 5. Consequence — `inference.py` needs NO image library at all
+## 5. Consequence — `run.py` needs NO image library at all
 
 The data is `.npy` end to end: `np.load` in, `np.save` out.
 
@@ -345,7 +345,7 @@ of actual compute. **Startup is on the order of 85–95% of the measured wall-cl
    (25 MB fits trivially in RAM) and skip the DataLoader entirely. Measure before assuming
    otherwise.
 6. **V37/V38 must time the whole process externally**, including interpreter start — which
-   the contract already requires (`time python inference.py ...`, not an internal timer).
+   the contract already requires (`time python run.py ...`, not an internal timer).
    That requirement is doing more work than it appears to; an internal timer around the
    forward pass would report ~0.4 s and hide 90% of the real cost.
 
@@ -441,3 +441,42 @@ parameters** is stricter than F17's literal text. It is retained deliberately: f
 degradation parameters on test inputs is a form of adaptation to the test set, and all
 degradation fitting in this repo is done on `train/` pairs only, where GT is available to
 fit against anyway.
+
+## 13. NEW — official final-submission announcement supersedes the entry-point naming (2026-08-18)
+
+The original spec text at the top of this project (`docs/SPEC.md`) states the deliverable is
+"a public GitHub repo whose inference script runs as-is with `--input_dir/--output_dir`" and
+names the script `inference.py` throughout. **This is now superseded, on naming only,** by an
+official, track-specific final-submission announcement (confirmed in conversation with the
+human as coming from the official portal/email for KLA PS01, not generic cross-track
+boilerplate) that requires:
+
+- The entry script be named **`run.py`** (the announcement explicitly instructs teams whose
+  script is `main.py`/`eval.py`/`evaluate.py` to rename it; ours was `inference.py`, not
+  named in that list, but the instruction to use `run.py` is unambiguous).
+- Invocation `python run.py <input_dir> <output_dir>`.
+- A submission folder shaped `team_name/{run.py, requirements.txt, README.md, models/}`.
+
+**Do not edit `docs/SPEC.md`'s original text to match this** — it is append-only and is the
+historical record of what was originally specified; this section is where the update belongs.
+
+**What did NOT change:** every correctness requirement `docs/SPEC.md` states for the script
+(`.npy` in/out, shape, `[0,1]` clipping, no NaN/Inf, no internet/API keys/model downloads/user
+interaction, GPU-runnable, weights resolved relative to the script) is identical — the former
+`inference.py` already satisfied all of it, proven by 32 of the then-69 V-checks, and `run.py`
+(the renamed file, identical logic) still does.
+
+**Resolution, in full, with rationale:** `docs/decisions.md` D75. Summary: `inference.py`
+renamed to `run.py` (`git mv`, zero logic change beyond the CLI); `run.py` accepts BOTH
+`python run.py <input_dir> <output_dir>` (positional, the announcement's literal wording) AND
+`python run.py --input_dir X --output_dir Y` (flags, the original spec's wording), since the
+human did not know which reading the announcement's `<input_dir> <output_dir>` notation
+intended and the safe choice is to support both; `inference.py` kept as a 3-line back-compat
+shim (`from run import main`); a real `models/` directory created containing a byte-identical
+mirror of `weights/best.pt`; `scripts/verify_all.py` retargeted (32 checks now validate
+`run.py`, the file actually graded) and extended with two new checks (`V69`: the announced
+folder shape exists; `V70`: `weights/best.pt` and `models/best.pt` stay sha256-identical).
+Working interpretation, stated explicitly: the announced 4-item folder is the *minimum*
+required, not an exhaustive listing — this repo's fuller structure (`src/`, `scripts/`,
+`docs/`, `train.py`, etc.) coexists with it, since the original spec's "public GitHub repo"
+requirement is still in force.

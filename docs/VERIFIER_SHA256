@@ -14,10 +14,48 @@
 # A CRLF working copy will NOT match. That is a checkout artifact, not tampering.
 # See docs/BLOCKERS.md B3.
 
-373a3759dbcdb94c84c96b9923e088aec8efb48b5bb4f4467db8eff85a4176ab  scripts/verify_all.py
-b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332  docs/VERIFICATION_CONTRACT.md
+240c804524e6e7a5124ca48a752e09fe4bad61e94074c11f2ffa91959419796d  scripts/verify_all.py
+0bde203980d0892b939fc2a9e343f1cf55b2c8d2ec079897f1d36aa7cb5adf69  docs/VERIFICATION_CONTRACT.md
 
 # --- change log ---
+# 2026-08-18  ENTRY POINT RENAMED inference.py -> run.py, per the organizers' official,
+#             track-specific final-submission announcement (requires the entry script be
+#             named run.py, invocation python run.py <input_dir> <output_dir>, submission
+#             folder containing run.py/requirements.txt/README.md/models/). run.py is now
+#             the graded, timed file (identical logic to the former inference.py, git-mv'd,
+#             plus a strictly-additive dual positional+flag CLI); inference.py is kept as a
+#             3-line back-compat shim importing run.main(), no longer scanned by the suite.
+#             9 literal string sites retargeted from "inference.py" to "run.py"
+#             (ctx.run_inference, ctx.inference_ast, V01, _fresh_clone_run [V04/V46], V13's
+#             required-files list, V23's importtime subprocess, V57's spec_from_file_location,
+#             V65's OOM-probe script arg) -- flipping 32 dependent checks onto the new file
+#             with no other change to what each check asserts.
+#             V02 REWRITTEN from a static `required=True` AST inspection (impossible to keep
+#             once BOTH a positional and a flag form must be accepted -- required=True on
+#             --input_dir/--output_dir would make the positional form a parse-time error) to a
+#             BEHAVIORAL test: three real subprocess invocations proving the positional form
+#             works, the flag form works, and omitting both correctly exits non-zero. Strictly
+#             more coverage than the check it replaces, not less.
+#             TWO CHECKS ADDED: V69 asserts run.py/requirements.txt/README.md/models/ all exist
+#             at repo root (automated proof of the announced submission-folder shape). V70
+#             asserts weights/best.pt and models/best.pt (a byte-identical mirror added solely
+#             to satisfy the announcement's models/ folder) stay sha256-identical whenever both
+#             exist -- the exact drift-prevention this project needed once already
+#             (make_qualitative_examples.py's hardcoded CKPT_SHA going stale across two prior
+#             promotions).
+#             ALSO: V51's CHECKPOINT_BLOB_EXEMPTION (previously the single string
+#             "weights/best.pt") extended to a tuple including "models/best.pt" -- the new
+#             mirror is mandatory per V69 the same way weights/best.pt is per V59, so the same
+#             "sanctioned checkpoint, not an accidental blob" exemption applies; .gitignore's
+#             `!weights/best.pt` negation likewise gained a `!models/best.pt` line, without
+#             which the mirror would silently never reach a real clone at all.
+#             Net effect: 32 checks retargeted (same assertions, correct file), 1 check
+#             (V02) strengthened from static to behavioral, 2 checks added, 1 check (V51)
+#             extended to a second, equally-sanctioned exempt path. Nothing deleted, skipped,
+#             or loosened. See docs/decisions.md D75.
+#             prior pin: 373a3759dbcdb94c84c96b9923e088aec8efb48b5bb4f4467db8eff85a4176ab (verify_all.py, before this entire D75 change)
+#             prior pin: 312ab7526eba1a8ff492ca08ee46cc9417a2199dd3e5057ff37cc11c06607e9b (verify_all.py, before the CHECKPOINT_BLOB_EXEMPTION fix)
+#             prior pin: b1fc9e7b9fda3d78924433e7d8ff7c5a03e647e03894e5262ba94850d72c8332 (contract)
 # 2026-08-17  V53 IMPLEMENTED (docs/STATE.md U-5's original spec, never previously coded):
 #             the solution-deck contract -- exactly one *_KLA_PS01.pdf at repo root, <=9
 #             pages, states the proxy relationship ("natural photograph"/"proxy"), carries

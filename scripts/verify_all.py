@@ -63,7 +63,7 @@ for _i in range(44, 53):
     TIERS[f"V{_i:02d}"] = 4
 
 # Checks added from iteration-1 reviewer findings. Adding checks is a strengthening.
-# V54 F17 training-side (V36 covered inference.py only)  — disqualifying if violated
+# V54 F17 training-side (V36 covered run.py only)  — disqualifying if violated
 # V55 repo is genuinely PUBLIC, proven with credentials stripped (V13 accepted any remote)
 # V56 restored outputs are ACTUAL outputs, not documentation (V13 accepted any file)
 # V59 the checkpoint is genuinely obtainable, not silently ignored-and-untracked
@@ -98,6 +98,13 @@ TIERS["V66"] = 2
 TIERS["V67"] = 4
 TIERS["V68"] = 2
 
+# Organizers' final-submission announcement (docs/decisions.md D75): entry point renamed
+# inference.py -> run.py, submission-folder shape (run.py/requirements.txt/README.md/models/),
+# and a models/ mirror of weights/. V69 mirrors V13's "required files present" band; V70
+# mirrors V06's "checkpoint present" band with an added parity requirement.
+TIERS["V69"] = 0
+TIERS["V70"] = 0
+
 # V53 (docs/STATE.md U-5): the solution deck contract -- exactly one *_KLA_PS01.pdf, <=9
 # pages, proxy relationship stated, repo URL present, no banned phrasing, no unfilled
 # placeholder literal (the last clause a strengthening beyond the original spec). Deliverable
@@ -112,7 +119,7 @@ SKIP_WHITELIST: dict[str, str] = {
     "V65": "No CUDA device available -- cannot force a real CUDA OOM to test the recovery path.",
 }
 
-# inference.py module-level import allowlist (CLAUDE.md §STYLE, tightened 2026-08-15).
+# run.py module-level import allowlist (CLAUDE.md §STYLE, tightened 2026-08-15).
 IMPORT_ALLOWLIST = {
     "argparse", "os", "sys", "time", "pathlib", "concurrent", "concurrent.futures",
     "numpy", "torch", "__future__",
@@ -161,14 +168,17 @@ class Ctx:
     def run_inference(self, in_dir: Path, out_dir: Path, extra: list[str] | None = None,
                       cwd: Path | None = None, timeout: int = 300,
                       env: dict[str, str] | None = None) -> tuple[int, str, str]:
-        cmd = [sys.executable, str(self.p("inference.py")),
+        # Targets run.py (not inference.py) -- the graded, timed entry point per the
+        # organizers' final-submission announcement (docs/decisions.md D75). inference.py
+        # is kept only as a back-compat shim and is deliberately not exercised by the suite.
+        cmd = [sys.executable, str(self.p("run.py")),
                "--input_dir", str(in_dir), "--output_dir", str(out_dir)]
         if extra:
             cmd += extra
         return self.run(cmd, cwd=cwd, timeout=timeout, env=env)
 
     def inference_ast(self) -> ast.Module | None:
-        f = self.p("inference.py")
+        f = self.p("run.py")
         if not f.exists():
             return None
         try:
@@ -479,9 +489,9 @@ def check_V00(ctx: Ctx) -> CheckResult:
 
 
 def check_V01(ctx: Ctx) -> CheckResult:
-    f = ctx.p("inference.py")
+    f = ctx.p("run.py")
     if not f.exists():
-        return not_impl("V01", "inference.py")
+        return not_impl("V01", "run.py")
     if list(ctx.root.glob("*.ipynb")):
         return CheckResult("V01", FAIL, "a notebook is present at repo root",
                            {"notebooks": [p.name for p in ctx.root.glob("*.ipynb")]})
@@ -489,44 +499,74 @@ def check_V01(ctx: Ctx) -> CheckResult:
         ast.parse(f.read_text(encoding="utf-8"))
     except SyntaxError as e:
         return CheckResult("V01", FAIL, f"ast.parse failed: {e}")
-    return CheckResult("V01", PASS, "inference.py exists and parses", {"path": str(f)})
+    return CheckResult("V01", PASS, "run.py exists and parses", {"path": str(f)})
 
 
 def check_V02(ctx: Ctx) -> CheckResult:
+    """Two mandatory directory args, satisfiable two ways (docs/decisions.md D75).
+
+    The organizers' final-submission announcement specifies `python run.py <in> <out>`
+    (positional); the original spec specifies `--input_dir/--output_dir` (flags). Neither can
+    be `required=True` at the argparse level without making the other form a parse-time
+    error, so this check is behavioral rather than a static required= inspection: it proves
+    BOTH invocation styles actually work end-to-end, AND that omitting both still exits
+    non-zero -- strictly more coverage than the prior static-only check, not less.
+    """
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V02", "inference.py")
-    required: list[str] = []
-    optional: list[str] = []
+        return not_impl("V02", "run.py")
+    flags: list[str] = []
+    positionals: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr == "add_argument":
-            name = None
             for a in node.args:
-                if isinstance(a, ast.Constant) and isinstance(a.value, str) \
-                        and a.value.startswith("--"):
-                    name = a.value
-            if name is None:
-                continue
-            req = any(k.arg == "required" and isinstance(k.value, ast.Constant)
-                      and k.value.value is True for k in node.keywords)
-            (required if req else optional).append(name)
-    if sorted(required) != ["--input_dir", "--output_dir"]:
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    if a.value.startswith("--"):
+                        flags.append(a.value)
+                    elif a.value.isidentifier():
+                        positionals.append(a.value)
+    ev = {"flags": sorted(flags), "positionals": sorted(positionals)}
+    if sorted(f for f in flags if f in ("--input_dir", "--output_dir")) != \
+            ["--input_dir", "--output_dir"]:
         return CheckResult("V02", FAIL,
-                           f"required args are {sorted(required)}, expected ['--input_dir', '--output_dir']",
-                           {"required": sorted(required), "optional": sorted(optional)})
-    out = ctx.tmpdir("v02")
-    rc, so, se = ctx.run_inference(ctx.fixtures / "single", out / "o")
-    if rc != 0:
-        d = NOT_IMPL if "NotImplementedError" in se else f"exit {rc}: {se.strip()[-300:]}"
-        return CheckResult("V02", FAIL, d, {"required": sorted(required)})
-    return CheckResult("V02", PASS, "two required args, exit 0",
-                       {"required": sorted(required), "optional": sorted(optional)})
+                           f"expected both --input_dir and --output_dir flags to exist, "
+                           f"found {sorted(flags)}", ev)
+    if len(positionals) < 2:
+        return CheckResult("V02", FAIL,
+                           f"expected 2 positional directory args (the organizers' "
+                           f"'python run.py <input_dir> <output_dir>' form), found "
+                           f"{positionals}", ev)
+
+    out_pos = ctx.tmpdir("v02_pos")
+    rc_pos, _, se_pos = ctx.run([sys.executable, str(ctx.p("run.py")),
+                                str(ctx.fixtures / "single"), str(out_pos / "o")], timeout=300)
+    if rc_pos != 0:
+        d = NOT_IMPL if "NotImplementedError" in se_pos \
+            else f"positional form exit {rc_pos}: {se_pos.strip()[-300:]}"
+        return CheckResult("V02", FAIL, d, ev)
+
+    out_flag = ctx.tmpdir("v02_flag")
+    rc_flag, _, se_flag = ctx.run_inference(ctx.fixtures / "single", out_flag / "o")
+    if rc_flag != 0:
+        d = NOT_IMPL if "NotImplementedError" in se_flag \
+            else f"flag form exit {rc_flag}: {se_flag.strip()[-300:]}"
+        return CheckResult("V02", FAIL, d, ev)
+
+    rc_none, _, _ = ctx.run([sys.executable, str(ctx.p("run.py"))], timeout=60)
+    if rc_none == 0:
+        return CheckResult("V02", FAIL,
+                           "running with NEITHER positional args NOR --input_dir/--output_dir "
+                           "flags exited 0; both directories must be mandatory", ev)
+
+    return CheckResult("V02", PASS,
+                       "both invocation forms (positional and --input_dir/--output_dir) work "
+                       "and exit 0; omitting both directories correctly exits non-zero", ev)
 
 
 def check_V03(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V03", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V03", "run.py")
     results = {}
     for label, cwd in (("root", Path(ctx.root.anchor)), ("tmp", ctx.tmpdir("v03cwd"))):
         out = ctx.tmpdir(f"v03_{label}")
@@ -564,7 +604,7 @@ def _fresh_clone_run(ctx: Ctx, cid: str) -> CheckResult:
     fx = repo / "tests" / "fixtures" / "single"
     if not fx.exists():
         build_fixtures(repo)
-    rc, _, se = ctx.run([str(py), str(repo / "inference.py"),
+    rc, _, se = ctx.run([str(py), str(repo / "run.py"),
                          "--input_dir", str(repo / "tests" / "fixtures" / "single"),
                          "--output_dir", str(work / "out")], cwd=repo, timeout=900)
     if rc != 0:
@@ -576,8 +616,8 @@ def _fresh_clone_run(ctx: Ctx, cid: str) -> CheckResult:
 def check_V05(ctx: Ctx) -> CheckResult:
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V05", "inference.py")
-    src = ctx.read("inference.py")
+        return not_impl("V05", "run.py")
+    src = ctx.read("run.py")
     if "Path(__file__)" not in src:
         return CheckResult("V05", FAIL, "weight path is not derived from Path(__file__)")
     if "os.getcwd()" in src:
@@ -666,8 +706,8 @@ def _io_roundtrip(ctx: Ctx, src_dir: Path, cid: str) -> tuple[CheckResult | None
 
 
 def check_V07(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V07", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V07", "run.py")
     src = ctx.fixtures / "mixed"
     early, ind, out = _io_roundtrip(ctx, src, "V07")
     if early:
@@ -681,8 +721,8 @@ def check_V07(ctx: Ctx) -> CheckResult:
 
 
 def check_V08(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V08", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V08", "run.py")
     src = ctx.fixtures / "mixed"
     early, ind, out = _io_roundtrip(ctx, src, "V08")
     if early:
@@ -696,8 +736,8 @@ def check_V08(ctx: Ctx) -> CheckResult:
 
 
 def check_V09(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V09", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V09", "run.py")
     bad: list[dict[str, Any]] = []
     unreadable: list[str] = []
     checked = 0
@@ -740,8 +780,8 @@ def check_V09(ctx: Ctx) -> CheckResult:
 
 
 def check_V10(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V10", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V10", "run.py")
     import numpy as np
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "mixed", "V10")
     if early:
@@ -772,8 +812,8 @@ def check_V10(ctx: Ctx) -> CheckResult:
 
 
 def check_V11(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V11", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V11", "run.py")
     import numpy as np
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "extreme", "V11")
     if early:
@@ -792,7 +832,7 @@ def check_V11(ctx: Ctx) -> CheckResult:
 
 def check_V12(ctx: Ctx) -> CheckResult:
     """Input must NOT be clipped — out-of-range values are intentional (SPEC F5)."""
-    if _is_stub(ctx.p("src", "io_utils.py")) and _is_stub(ctx.p("inference.py")):
+    if _is_stub(ctx.p("src", "io_utils.py")) and _is_stub(ctx.p("run.py")):
         return not_impl("V12", "src/io_utils.py load path")
     import numpy as np
     probe = ctx.tmpdir("v12") / "in"
@@ -819,7 +859,7 @@ def check_V12(ctx: Ctx) -> CheckResult:
 
 
 def check_V13(ctx: Ctx) -> CheckResult:
-    required = ["README.md", "inference.py", "train.py", "requirements.txt"]
+    required = ["README.md", "run.py", "train.py", "requirements.txt"]
     missing = [r for r in required if not ctx.exists(r)]
     rto = ctx.p("results", "restored_test_outputs")
     real = [p for p in rto.glob("*") if p.is_file() and p.name != ".gitkeep"] if rto.exists() else []
@@ -880,8 +920,8 @@ def check_V14(ctx: Ctx) -> CheckResult:
 # TIER 1
 # ======================================================================================
 def check_V15(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V15", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V15", "run.py")
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "mixed", "V15")
     if early:
         return early
@@ -894,8 +934,8 @@ def check_V15(ctx: Ctx) -> CheckResult:
 
 
 def check_V16(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V16", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V16", "run.py")
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "single", "V16")
     if early:
         return early
@@ -906,8 +946,8 @@ def check_V16(ctx: Ctx) -> CheckResult:
 
 
 def check_V17(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V17", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V17", "run.py")
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "large", "V17")
     if early:
         return early
@@ -918,8 +958,8 @@ def check_V17(ctx: Ctx) -> CheckResult:
 
 
 def check_V18(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V18", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V18", "run.py")
     early, ind, out = _io_roundtrip(ctx, ctx.fixtures / "mixed", "V18")
     if early:
         return early
@@ -929,8 +969,8 @@ def check_V18(ctx: Ctx) -> CheckResult:
 
 
 def check_V19(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V19", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V19", "run.py")
     out = ctx.tmpdir("v19")
     rc, _, se = ctx.run_inference(ctx.fixtures / "single", out / "o",
                                   env={"CUDA_VISIBLE_DEVICES": ""})
@@ -941,8 +981,8 @@ def check_V19(ctx: Ctx) -> CheckResult:
 
 
 def check_V20(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V20", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V20", "run.py")
     src = ctx.fixtures / "mixed"  # contains corrupt.npy and notes.txt
     early, ind, out = _io_roundtrip(ctx, src, "V20")
     if early:
@@ -955,8 +995,8 @@ def check_V20(ctx: Ctx) -> CheckResult:
 
 
 def check_V21(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V21", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V21", "run.py")
     import numpy as np
     out = ctx.tmpdir("v21") / "o"
     for _ in range(2):
@@ -978,8 +1018,8 @@ def check_V21(ctx: Ctx) -> CheckResult:
 
 
 def check_V22(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V22", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V22", "run.py")
     import numpy as np
     o1, o2 = ctx.tmpdir("v22a") / "o", ctx.tmpdir("v22b") / "o"
     rc1, _, se1 = ctx.run_inference(ctx.fixtures / "single", o1, ["--precision", "bf16"])
@@ -1001,7 +1041,7 @@ def check_V23(ctx: Ctx) -> CheckResult:
     """TIER 0 (promoted; docs/decisions.md D6). Module-level imports + import time."""
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V23", "inference.py")
+        return not_impl("V23", "run.py")
     offenders: list[str] = []
     for node in tree.body:  # module level only
         if isinstance(node, ast.Import):
@@ -1016,7 +1056,7 @@ def check_V23(ctx: Ctx) -> CheckResult:
     if offenders:
         return CheckResult("V23", FAIL, f"non-allowlisted module-level imports: {offenders}",
                            {"offenders": offenders, "allowlist": sorted(IMPORT_ALLOWLIST)})
-    rc, so, se = ctx.run([sys.executable, "-X", "importtime", str(ctx.p("inference.py")), "--help"],
+    rc, so, se = ctx.run([sys.executable, "-X", "importtime", str(ctx.p("run.py")), "--help"],
                          timeout=180)
     total_us = 0
     for line in (se or "").splitlines():
@@ -1032,8 +1072,8 @@ def check_V23(ctx: Ctx) -> CheckResult:
 
 
 def check_V24(ctx: Ctx) -> CheckResult:
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V24", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V24", "run.py")
     import numpy as np
     outs = []
     for i in range(2):
@@ -1045,7 +1085,7 @@ def check_V24(ctx: Ctx) -> CheckResult:
         outs.append(np.load(sorted(o.rglob("*.npy"))[0], allow_pickle=False))
     if not np.array_equal(outs[0], outs[1]):
         return CheckResult("V24", FAIL, "separate processes give different outputs")
-    src = ctx.read("inference.py")
+    src = ctx.read("run.py")
     if ".train()" in src:
         return CheckResult("V24", FAIL, "model.train() called in inference path")
     return CheckResult("V24", PASS, "deterministic across processes")
@@ -1785,7 +1825,7 @@ def check_V35(ctx: Ctx) -> CheckResult:
         return not_impl("V35", "src/model.py")
     import torch  # local: the verifier's own import cost is not scored
 
-    # weights_only=True deliberately: it is what inference.py uses, so a checkpoint that
+    # weights_only=True deliberately: it is what run.py uses, so a checkpoint that
     # required arbitrary unpickling would pass a lax V35 and then break the shipped script.
     # It is also the safe load path -- torch.load with weights_only=False executes pickle.
     d = torch.load(ck, map_location="cpu", weights_only=True)
@@ -1814,12 +1854,12 @@ def check_V35(ctx: Ctx) -> CheckResult:
 def check_V36(ctx: Ctx) -> CheckResult:
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V36", "inference.py")
-    src = ctx.read("inference.py")
+        return not_impl("V36", "run.py")
+    src = ctx.read("run.py")
     bad = [t for t in (".backward(", "requires_grad_(True)", "optim.", "Optimizer(") if t in src]
     if bad:
-        return CheckResult("V36", FAIL, f"training constructs in inference.py: {bad}", {"found": bad})
-    return CheckResult("V36", PASS, "no optimizer, backward, or grad enabling in inference.py")
+        return CheckResult("V36", FAIL, f"training constructs in run.py: {bad}", {"found": bad})
+    return CheckResult("V36", PASS, "no optimizer, backward, or grad enabling in run.py")
 
 
 # ======================================================================================
@@ -1872,8 +1912,8 @@ def check_V39(ctx: Ctx) -> CheckResult:
 def check_V40(ctx: Ctx) -> CheckResult:
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V40", "inference.py")
-    src = ctx.read("inference.py")
+        return not_impl("V40", "run.py")
+    src = ctx.read("run.py")
     need = {
         "channels_last": "channels_last",
         "inference_mode": "inference_mode",
@@ -1892,8 +1932,8 @@ def check_V40(ctx: Ctx) -> CheckResult:
 def check_V41(ctx: Ctx) -> CheckResult:
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V41", "inference.py")
-    src = ctx.read("inference.py")
+        return not_impl("V41", "run.py")
+    src = ctx.read("run.py")
     if "torch.compile" not in src:
         return CheckResult("V41", PASS, "torch.compile not used at all")
     if 'action="store_true"' not in src and "action='store_true'" not in src:
@@ -1906,8 +1946,8 @@ def check_V41(ctx: Ctx) -> CheckResult:
 def check_V42(ctx: Ctx) -> CheckResult:
     tree = ctx.inference_ast()
     if tree is None:
-        return not_impl("V42", "inference.py")
-    src = ctx.read("inference.py")
+        return not_impl("V42", "run.py")
+    src = ctx.read("run.py")
     if "tta" not in src.lower():
         return CheckResult("V42", PASS, "no TTA implemented")
     if re.search(r'--tta["\'].*default\s*=\s*True', src):
@@ -1972,8 +2012,8 @@ def check_V47(ctx: Ctx) -> CheckResult:
     files = [p for p in si.glob("*") if p.is_file() and p.name != ".gitkeep"] if si.exists() else []
     if not files:
         return not_impl("V47", "sample_inputs/ (4-6 small degraded images)")
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V47", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V47", "run.py")
     import time as _t
     out = ctx.tmpdir("v47") / "o"
     t0 = _t.perf_counter()
@@ -2095,8 +2135,12 @@ BLOB_EXTS = (".npz", ".pt", ".pth", ".zip", ".env", ".tar", ".gz", ".7z", ".ckpt
 #: directly, since it is 1.97 MiB -- far under MAX_TRACKED_FILE_BYTES) is the mechanism this
 #: repo uses. Mirrors .gitignore's own `!weights/best.pt` carve-out of its blanket `*.pt`
 #: rule. Deliberately narrow, same pattern as the sample_inputs/*.npy exemption below:
-#: exactly one path, no glob, no directory. See docs/decisions.md D41.
-CHECKPOINT_BLOB_EXEMPTION = "weights/best.pt"
+#: exact paths only, no glob, no directory. See docs/decisions.md D41.
+#: `models/best.pt` added D75: a byte-identical mirror of weights/best.pt, mandatory per the
+#: new V69 (organizers' announced submission-folder shape), same "sanctioned, mandatory,
+#: separately size-capped" reasoning as the original exemption -- not a second, independent
+#: blob nobody accounted for.
+CHECKPOINT_BLOB_EXEMPTION = ("weights/best.pt", "models/best.pt")
 
 #: Path segments that would mean a slice of the dataset tree got committed.
 DATASET_DIR_TOKENS = ("/gt/", "/noisylr/", "/ground_truth/", "/test_noisylr/")
@@ -2117,7 +2161,7 @@ def check_V51(ctx: Ctx) -> CheckResult:
             if f.endswith(BLOB_EXTS) or "__pycache__" in f or ".ipynb_checkpoints" in f
             or f.endswith(".DS_Store")]
     # The mandatory checkpoint is the one path exempt from the blob-extension ban.
-    junk = [f for f in junk if f != CHECKPOINT_BLOB_EXEMPTION]
+    junk = [f for f in junk if f not in CHECKPOINT_BLOB_EXEMPTION]
     # .npy is banned everywhere EXCEPT the bounded sample_inputs/ exemption below.
     junk += [f for f in tracked
              if f.endswith(".npy") and not f.startswith("sample_inputs/")]
@@ -2167,7 +2211,7 @@ def check_V51(ctx: Ctx) -> CheckResult:
     total = 0
     oversized = []
     for f in tracked:
-        if f == CHECKPOINT_BLOB_EXEMPTION:
+        if f in CHECKPOINT_BLOB_EXEMPTION:
             continue
         p = ctx.p(*f.split("/"))
         if not p.exists():
@@ -2243,7 +2287,7 @@ _FS_CALLS = frozenset({
 def check_V54(ctx: Ctx) -> CheckResult:
     """F17: nothing in the TRAINING path may read the hidden test inputs.
 
-    V36 only scans inference.py. The training side — the side that could actually fit on
+    V36 only scans run.py. The training side — the side that could actually fit on
     test data — was covered by no check at all (requirements-auditor U-2/H-1). This is the
     one rule whose violation is disqualifying, so it gets a real check.
 
@@ -2547,17 +2591,17 @@ def check_V59(ctx: Ctx) -> CheckResult:
 
 
 def check_V57(ctx: Ctx) -> CheckResult:
-    """The tensor ENTERING THE MODEL is unclipped -- tested on the real inference.py path.
+    """The tensor ENTERING THE MODEL is unclipped -- tested on the real run.py path.
 
     V12 tests a helper (src.io_utils.load_array), not the model input; the contract's exact
     wording is "the tensor entering the model" (requirements-auditor U-6). A clamp_ anywhere
-    in inference.py's stack/H2D/channels_last/autocast pipeline would leave V12 green. This
-    imports inference.py's own load_net() and infer_chunk() -- not a reimplementation of the
+    in run.py's stack/H2D/channels_last/autocast pipeline would leave V12 green. This
+    imports run.py's own load_net() and infer_chunk() -- not a reimplementation of the
     pipeline -- and attaches a forward pre-hook to the REAL net to capture exactly what it
     receives, forcing --device cpu so it never contends for the GPU.
     """
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V57", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V57", "run.py")
     ck = ctx.p("weights", "best.pt")
     if not ck.exists():
         return not_impl("V57", "weights/best.pt (no trained checkpoint to test the real path)")
@@ -2565,9 +2609,9 @@ def check_V57(ctx: Ctx) -> CheckResult:
 
     import numpy as np
 
-    spec = importlib.util.spec_from_file_location("_v57_inference", ctx.p("inference.py"))
+    spec = importlib.util.spec_from_file_location("_v57_inference", ctx.p("run.py"))
     if spec is None or spec.loader is None:
-        return CheckResult("V57", FAIL, "could not load inference.py as a module")
+        return CheckResult("V57", FAIL, "could not load run.py as a module")
     # load_net() below does `from src.model import build_model` -- a deferred import that
     # fires when load_net() is CALLED, not at exec_module time -- so the repo root has to
     # stay on sys.path for the rest of this check, matching V22/V61/V62's convention of
@@ -2579,7 +2623,7 @@ def check_V57(ctx: Ctx) -> CheckResult:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     except Exception as exc:  # noqa: BLE001
-        return CheckResult("V57", FAIL, f"inference.py failed to import: {type(exc).__name__}: {exc}")
+        return CheckResult("V57", FAIL, f"run.py failed to import: {type(exc).__name__}: {exc}")
 
     try:
         import torch
@@ -2604,7 +2648,7 @@ def check_V57(ctx: Ctx) -> CheckResult:
         try:
             # SAME extreme-value construction V12 already uses (observed real range
             # [-0.28, 2.16], SPEC_ADDENDUM section 4), routed through the ACTUAL pipeline
-            # function that every real inference.py run calls.
+            # function that every real run.py run calls.
             arr = np.array([[-0.28, 2.16], [0.5, 1.5]], dtype=np.float32)
             arr = np.pad(arr, ((0, 126), (0, 126)), mode="wrap").astype(np.float32)
             mod.infer_chunk(net, [arr], dev, use_amp, amp_dtype, False)
@@ -2708,8 +2752,8 @@ def check_V60(ctx: Ctx) -> CheckResult:
     (adversarial review findings H2, H3). The guard fires before the model loads, so this
     needs no checkpoint and no GPU -- forced to --device cpu regardless.
     """
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V60", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V60", "run.py")
     import numpy as np
 
     src_fixture = ctx.fixtures / "single"
@@ -2761,8 +2805,8 @@ def check_V64(ctx: Ctx) -> CheckResult:
     finding H4). Forces --device cpu; no checkpoint needed since the bicubic fallback still
     exercises the exact write path under test.
     """
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V64", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V64", "run.py")
 
     src_fixture = ctx.fixtures / "mixed"
     if not src_fixture.exists():
@@ -2949,11 +2993,11 @@ mod._is_oom = _counting_is_oom
 rng = np.random.default_rng(20260816)
 arrays = [(rng.random((256, 256)).astype(np.float32) * 1.4 - 0.2) for _ in range(N)]
 try:
-    with torch.inference_mode():  # matches inference.py main()'s real wrapping (line ~468)
+    with torch.inference_mode():  # matches run.py main()'s real wrapping (line ~468)
         # allow_bicubic_fallback=True: this check's whole point is that a genuine CUDA OOM
         # degrades to CPU bicubic for the one image that cannot fit, rather than aborting the
         # run -- that is legitimate resource-exhaustion recovery (D46), not a quality
-        # violation, and inference.py now requires this explicit opt-in for ANY bicubic
+        # violation, and run.py now requires this explicit opt-in for ANY bicubic
         # substitution (D51/D48's --allow_bicubic_fallback flag). Without it, this same
         # recovery path now raises _ModelOutputViolation instead of degrading.
         y = mod.infer_chunk(net, arrays, dev, use_amp, amp_dtype, False,
@@ -2978,16 +3022,16 @@ def check_V65(ctx: Ctx) -> CheckResult:
 
     KLA's brief says eval images are expected around 256x256 or 512x512; the released data is
     128->256 only (docs/SPEC_ADDENDUM.md section 1), so 256->512 is exercised only by V61's
-    single-pixel shape fixture today, never a real batch through the actual inference.py CLI,
-    and the recursive OOM-halving in infer_chunk (inference.py lines ~340-355) is exercised by
+    single-pixel shape fixture today, never a real batch through the actual run.py CLI,
+    and the recursive OOM-halving in infer_chunk (run.py lines ~340-355) is exercised by
     no check at all. This closes both gaps in one check: part A runs a real N-image 256x256
     batch through the real CLI end to end; part B constrains a CHILD process's CUDA memory
     with torch.cuda.set_per_process_memory_fraction() so a real allocation genuinely exhausts,
     forcing infer_chunk's actual except-OutOfMemoryError branch to fire, and counts how many
     times it fired via a wrapper around the real _is_oom (never bypassing or faking it).
     """
-    if _is_stub(ctx.p("inference.py")):
-        return not_impl("V65", "inference.py")
+    if _is_stub(ctx.p("run.py")):
+        return not_impl("V65", "run.py")
     ck = ctx.p("weights", "best.pt")
     if not ck.exists():
         return not_impl("V65", "weights/best.pt (no trained checkpoint to test the real path)")
@@ -3028,7 +3072,7 @@ def check_V65(ctx: Ctx) -> CheckResult:
     script_path = ctx.tmpdir("v65_script") / "oom_probe.py"
     script_path.write_text(V65_OOM_SCRIPT, encoding="utf-8")
     rc2, so2, se2 = ctx.run([sys.executable, str(script_path), "0.03", str(ck),
-                            str(ctx.p("inference.py")), "16"], timeout=120)
+                            str(ctx.p("run.py")), "16"], timeout=120)
     if rc2 != 0:
         return CheckResult("V65", FAIL,
                            f"OOM-recovery subprocess exited {rc2}: {se2.strip()[-400:]}",
@@ -3526,6 +3570,50 @@ def check_V68(ctx: Ctx) -> CheckResult:
                        f"UnrolledSR yields exactly (1,1,2H,2W), finite, for {ran} sizes; "
                        f"eval-mode determinism holds",
                        {"sizes": [list(s) for s in V68_SIZES]})
+
+
+def check_V69(ctx: Ctx) -> CheckResult:
+    """The organizers' final-submission announcement (docs/decisions.md D75) requires a
+    submission folder containing run.py, requirements.txt, README.md, and a models/
+    directory. This repo is a strict superset of that (src/, scripts/, docs/, train.py etc.
+    also present, per the original spec's "public GitHub repo" requirement, which this
+    announcement does not rescind) -- this check proves the announced minimum is genuinely
+    satisfied here, automated rather than just claimed in prose.
+    """
+    required = ["run.py", "requirements.txt", "README.md"]
+    missing = [r for r in required if not ctx.exists(r)]
+    if not ctx.p("models").is_dir():
+        missing.append("models/ (directory)")
+    if missing:
+        return CheckResult("V69", FAIL, f"missing: {missing}", {"missing": missing})
+    return CheckResult("V69", PASS,
+                       "run.py, requirements.txt, README.md and models/ all present at repo "
+                       "root (docs/decisions.md D75)", {"required": required})
+
+
+def check_V70(ctx: Ctx) -> CheckResult:
+    """models/best.pt is required to be a byte-identical mirror of weights/best.pt
+    (docs/decisions.md D75) -- a duplicated binary with no automated parity check is exactly
+    the class of drift bug this project has hit before (scripts/make_qualitative_examples.py's
+    hardcoded CKPT_SHA went stale across two prior checkpoint promotions before being fixed to
+    read the file at run time). If both copies exist, their sha256 must match exactly.
+    """
+    w = ctx.p("weights", "best.pt")
+    m = ctx.p("models", "best.pt")
+    if not w.exists() or not m.exists():
+        return CheckResult("V70", FAIL,
+                           f"expected both weights/best.pt and models/best.pt to exist "
+                           f"(weights exists={w.exists()}, models exists={m.exists()})",
+                           {"weights_exists": w.exists(), "models_exists": m.exists()})
+    hw = hashlib.sha256(w.read_bytes()).hexdigest()
+    hm = hashlib.sha256(m.read_bytes()).hexdigest()
+    if hw != hm:
+        return CheckResult("V70", FAIL,
+                           f"weights/best.pt ({hw[:12]}...) and models/best.pt ({hm[:12]}...) "
+                           f"diverge -- models/best.pt must be updated on every checkpoint "
+                           f"promotion", {"weights_sha256": hw, "models_sha256": hm})
+    return CheckResult("V70", PASS, "weights/best.pt and models/best.pt are byte-identical",
+                       {"sha256": hw})
 
 
 #: Literal fragments that must never survive into a submitted deck (Phase 1 close-out plan,
