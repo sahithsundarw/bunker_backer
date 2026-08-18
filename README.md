@@ -260,7 +260,8 @@ genuinely noisy. That is expected, not a bug.
 | Python | 3.12.10 |
 | PyTorch | 2.11.0+cu128 (`torch.version.cuda == '12.8'`) |
 | torchvision | 0.26.0+cu128 |
-| GPU (closed-form LS-5 stage, superseded checkpoint) | NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB |
+| GPU (dev machine — inference, all timing, runtime measurement) | NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB |
+| GPU (training — the shipped checkpoint) | **NVIDIA A100 (HF Jobs cloud, A100-large)** — training and the architecture/hyperparameter sweep that selected this configuration both ran here, not on the dev machine |
 | Scoring GPU | NVIDIA H100 (KLA's) — **no H100 number appears in this repo; any future H100 figure will be labelled a projection, not a measurement** |
 
 **The shipped checkpoint's training environment differs from the table above.**
@@ -745,9 +746,12 @@ across 3 isolated re-checks) — the same known, pre-existing, load-dependent
 cross-process-determinism flake this project has documented before (`docs/BLOCKERS.md` B11,
 ~20% intermittent rate), unrelated to the rename (the check's assertion is unchanged; only its
 target filename moved from `inference.py` to `run.py`), and green again on this final run.
-**V53** (the deck contract) correctly FAILs: the deck at the repo root is still
-`PLACEHOLDER_TEAM_KLA_PS01.pdf` with unfilled team-info placeholders, a real, not-yet-closed
-gap, not a check malfunction. **V69 and V70 (new) both PASS** — automated proof the announced
+**V53** (the deck contract) correctly FAILs: no `*_KLA_PS01.pdf` currently exists at the repo
+root by design, not by accident — `scripts/build_deck.py` was proven working with real team
+info (`docs/decisions.md` D76/D78), then the generated PDF was deliberately removed (D79) to
+make way for a hand-built PPT a teammate is producing; it will be added once ready. Not a
+check malfunction, and not a hidden gap. **V69 and V70 (new) both PASS** — automated proof
+the announced
 submission-folder shape exists and `models/best.pt` matches `weights/best.pt`.
 No check has ever been weakened, skipped,
 or had its tolerance widened to turn a FAIL green (Prime Directive 1) — every V-check addition

@@ -4119,3 +4119,24 @@ before any commit. Fixed properly here: new sha256
 assertion, threshold, or tolerance was touched -- the change was cosmetic (a comment), and the
 process gap (forgetting to re-pin after a comment edit, not just a logic edit) is now recorded
 so it's recognised faster next time.
+
+## D79 — Auto-generated deck removed again, deliberately, to make way for a hand-built PPT
+
+**Not a regression -- an explicit user decision.** The auto-generated deck
+(`bunker_backer_KLA_PS01.pdf`) was built with real team info (D76/D78: team `bunker_backer`,
+4 named members, VNR Vignana Jyothi Institute of Engineering and Technology, contact), and
+`V53` passed against it. The user then asked for it to be removed: a teammate is building
+the actual submission PPT by hand, and will add it to the repo once ready.
+
+Removed via `git rm bunker_backer_KLA_PS01.pdf`. `scripts/build_deck.py` itself was left
+exactly as it was fixed for D76/D78 (real member names, correct current-checkpoint
+architecture/throughput numbers, working qualitative-panel image paths) -- it remains a
+correct, working fallback generator if the hand-built PPT is ever not ready in time; only the
+generated PDF artifact was removed, not the tooling that produces it.
+
+**`V53` now correctly FAILs again** (no `*_KLA_PS01.pdf` exists) -- the same disclosed,
+expected state the project was in before real team info was ever supplied, not a new or
+hidden problem. This is not "papering over" or weakening the check (Prime Directive 1 is
+untouched: the check's assertion is exactly what it always was); it is the check correctly
+reporting a real, current, temporary gap that the human is actively closing through a
+different channel (a hand-built deck) than the one this repo automates.

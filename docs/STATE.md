@@ -123,10 +123,20 @@ verifier retarget). **All four plans are DONE.**
 - **Phases A, B1, B2, B3, B4, C1, C2, C3 all DONE**, superseded where the Phase 3 promotion
   required regenerating them again (qualitative, metrics_summary, runtime_report, restored
   outputs, ledger — all done a second time for the new checkpoint).
-- **Still open:** deck/team info and demo video recording both need the user (plan Phase E).
-  V53 will continue to correctly FAIL until the deck is filled in with real team info.
-  Everything else in the plan's Hours 0-4 is closed out. Remaining runway before the T-12h
-  gate (2026-08-18 12:00) can go to Phase E and final verification/consolidation.
+- **Deck: built with real info, then deliberately removed again, on purpose (D79).** The
+  user supplied real team info (team `bunker_backer`, 4 named members, college, contact);
+  `bunker_backer_KLA_PS01.pdf` was generated via `scripts/build_deck.py`, self-checked (9
+  pages, no banned phrases), and V53 passed. The user then asked for it to be removed --
+  a teammate is building the actual submission PPT by hand and will add it once ready. This
+  is intentional, not a regression: **V53 correctly FAILs again right now** (no
+  `*_KLA_PS01.pdf` exists), same as before real team info was ever supplied, and that is the
+  expected, disclosed state until the human-built PPT is added. `scripts/build_deck.py`
+  (updated with real team info, correct current-checkpoint numbers, and working image paths)
+  stays in the repo as a fallback generator if needed.
+- **Still open:** the real PPT (a teammate is building it by hand; `run` `scripts/build_deck.py`
+  with the same `--team/--members/--college/--contact` args used before if a fallback is ever
+  needed) and demo video recording (script ready, `docs/DEMO_VIDEO_SCRIPT.md`) both need the
+  user/team. Everything else is closed out.
 
 **Everything below this point (including the next "RESUME HERE" heading) is archived history
 from the merge reconciliation and earlier sessions.** Kept for the audit trail; superseded by
