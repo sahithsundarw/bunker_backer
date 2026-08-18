@@ -17,27 +17,27 @@ no-third-split structural gap) remain marked.
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
-| 1 | Take degraded noisy, low-resolution images as input | Y | `inference.py:315-339` loads `.npy`, no clip, stacks by shape | V02, V12, V57 |
+| 1 | Take degraded noisy, low-resolution images as input | Y | `run.py:487-497` loads `.npy`, no clip, stacks by shape | V02, V12, V57 |
 | 2 | Handle speckle noise | Y | `src/degrade.py` speckle term `v*x^2`, fitted v=0.015745 (D12) | V33 |
 | 3 | Handle additive Gaussian noise | Y | `src/degrade.py` sigma term, D2/D12 | V33 |
 | 4 | Handle downsampling | Y | recovered 4x4 kernel, D1; V09 asserts exact x2 | V09, V33 |
 | 5 | Handle degradations even when applied in any order | **Y** | `src/degrade.py:degrade()` now permutes {D,S,G}, all 3!=6 orderings reachable (measured 20,000 trials: DSG 64.71% modal, others 1.1-13.4%), canonical order preserved as modal per D2's measurement. Old fixed-order guard removed | V62 (strengthened, D43) |
 | 6 | Restore to expected GT resolution | Y | exact x2 enforced, bicubic-fallback substituted on any shape mismatch | V09, V61, V65 |
-| 7 | Generalize to familiar and unfamiliar content | **P** | Familiar (in-distribution): Y, 400-image val split. Unfamiliar (OOD): proxy-OOD set (40 procedural geometric images, `results/eda/proxy_ood/`) scored: PSNR 27.32dB (-1.47 vs in-dist), SSIM 0.965 (+0.182), LPIPS 0.038 (-0.215) -- real, honestly-mixed evidence, not prose. Still **P** not **Y**: this is procedural geometric content, not real semiconductor/SEM imagery, which does not exist anywhere in this project | V63 (implemented, D44) |
-| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 14.1 img/s end-to-end at N=400, 128->256, RTX 4060, externally timed (current shipped checkpoint; earlier checkpoints' own figures kept for the record, one flagged with a 681% measurement spread) | V37, V38, V39, V43 |
+| 7 | Generalize to familiar and unfamiliar content | **P** | Familiar (in-distribution): Y, 400-image val split (29.5850dB/0.79460/0.25416). Unfamiliar (OOD), two sets: (a) proxy-OOD (40 procedural geometric images, `results/eda/proxy_ood/`) scores PSNR 41.44dB (+11.86 vs in-dist), SSIM 0.9969 (+0.2023), LPIPS 0.00169 (-0.25247) -- honestly caveated in README as likely content-distribution overlap (both are now procedural shapes), not generalisation evidence; (b) real-SEM OOD (45 genuine electron-microscopy images, Zenodo CC-BY, re-checked at n=180/tile-clustered-n=45 for statistical power) wins LPIPS significantly (t=-4.10), PSNR/SSIM ties -- the only real, non-procedural OOD evidence in this project. Still **P** not **Y**: neither set is semiconductor/SEM imagery from KLA's own domain, which does not exist anywhere in this project | V63, V67 (implemented, D44, D53) |
+| 8 | Run efficiently as a complete NVIDIA GPU inference pipeline | Y | `results/runtime_report.md`: 19.40 img/s end-to-end at N=400, 128->256, RTX 4060, batch 4 (`run.py`'s real default, no override -- re-swept and changed from 32, D74), externally timed (current shipped checkpoint; earlier checkpoints' own figures kept for the record, one flagged with a 681% measurement spread) | V37, V38, V39, V43 |
 
 ## Dataset Rules
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
 | 1 | Paired GT/NoisyLR training data | Y | `docs/DATA_LOCATION.md`, 3200 pairs, block-of-4 alignment verified | V26 |
-| 2 | Hidden test provides degraded inputs only, GT withheld | Y | `docs/DATA_LOCATION.md`: "no test_GT"; `inference.py` never reads GT | V54 |
+| 2 | Hidden test provides degraded inputs only, GT withheld | Y | `docs/DATA_LOCATION.md`: "no test_GT"; `run.py` never reads GT | V54 |
 | 3 | GT normalized to [0,1] | Y | measured, `docs/SPEC_ADDENDUM.md` section 3 | V29 (split), metrics protocol |
 | 4 | NoisyLR may go outside [0,1]; code must handle intentionally | Y | `src/io_utils.py:25-50` no clip on load; measured range [-0.28, 2.16] | V12, V57 |
 | 5 | Official dataset dimensions; eval ~256x256 or 512x512 | **Y** | Released data is 128->256 only (no 512 GT exists, `docs/SPEC_ADDENDUM.md:57-64`), so 256->512 is exercised with synthetic real-degraded inputs: shape-forwarded (V61), real timing measured (`results/runtime_report_512.md`, D45: fixed-cost share 34.3% at N=400, does not collapse), real batch + OOM-recovery exercised (V65, D46) | V61, V65 |
 | 6 | Test data includes in-distribution and OOD content | **P** | Same as Main Task #7 | V63 |
 | 7 | Noise mechanisms same, sampled levels may vary | Y | `src/degrade.py` a/v randomised +/-120% per sample (widened from +/-30% to close F1 tail-coverage gap, D43): synthetic max 2.0869 vs real train max 2.0735 (was 1.7177) | V62 (strengthened) |
-| 8 | KLA scores outputs exactly as saved -- clip/normalize inside solution | Y | `inference.py:366` + `src/io_utils.py:73-76`, double clip to [0,1] float32; no renorm (measured -4.66dB rejected, D3) | V11 |
+| 8 | KLA scores outputs exactly as saved -- clip/normalize inside solution | Y | `run.py:421` + `src/io_utils.py:73-76`, double clip to [0,1] float32; no renorm (measured -4.66dB rejected, D3) | V11 |
 | 9 | Grayscale/single-channel only | Y | `src/model.py` in_ch=out_ch=1; V32 asserts 3-channel input rejected | V32 |
 
 ## Model Development
@@ -50,14 +50,14 @@ no-third-split structural gap) remain marked.
 | 4 | Synthetic degraded pairs from GT allowed | Y | `src/dataset.py` synth_ratio 0.5, on-the-fly via `src/degrade.py` | -- |
 | 5 | Justify preprocessing, augmentation, architecture, losses | Y | README Method summary, `docs/decisions.md` D1/D2/D9/D12/D13/D21 | -- |
 | 6 | Frequency-domain methods allowed, not mandatory | Y | FFT loss term used (justified, not mandatory) | -- |
-| 7 | No fixed param limit; large models may lose throughput marks | Y (policy, not a check) | Shipped NAFSR is now 1,393,938 params (up from the original 388,225, chosen via a measured params-vs-quality Pareto sweep on cloud A100 hardware rather than the dev-GPU wall-clock constraint that bounded the original choice, `docs/decisions.md` D55) -- still within SPEC 7.1's 1-3M band, and throughput was re-measured at this size (17.3 img/s), not assumed unchanged | -- |
+| 7 | No fixed param limit; large models may lose throughput marks | Y (policy, not a check) | Shipped NAFSR is now 1,393,938 params (up from the original 388,225, chosen via a measured params-vs-quality Pareto sweep on cloud A100 hardware rather than the dev-GPU wall-clock constraint that bounded the original choice, `docs/decisions.md` D55) -- still within SPEC 7.1's 1-3M band, and throughput was re-measured at this size (19.40 img/s, `run.py`'s real default batch 4, D74), not assumed unchanged | -- |
 
 ## Inference Requirements
 
 | # | Requirement | Sat. | Evidence | Check |
 |---|---|---|---|---|
-| 1 | Standalone Python inference script | Y | `inference.py`, single file | V01 |
-| 2 | Accepts input-dir / output-dir args | Y | `--input_dir` / `--output_dir`, exactly 2 required | V02 |
+| 1 | Standalone Python inference script | Y | `run.py`, single file | V01 |
+| 2 | Accepts input-dir / output-dir args | Y | both positional (`run.py <in> <out>`, per the organizers' announcement) and `--input_dir`/`--output_dir` flags (per the original spec) work; omitting both correctly exits non-zero, D75 | V02 |
 | 3 | Loads every degraded image, restores, saves every output | Y | N-in produces N-out | V07 |
 | 4 | Preserve official filename and format | Y | byte-identical filenames | V08 |
 | 5 | Support NVIDIA GPU execution | Y | CUDA path default, `--device` override | V03, V19 (CPU fallback) |
@@ -85,7 +85,7 @@ no-third-split structural gap) remain marked.
 |---|---|---|---|---|
 | 1 | Solution PPT/PDF | **P** | Deck built via `scripts/build_deck.py`, data-driven, 9 pages, self-checked. Still needs: regeneration against the current checkpoint's numbers, real team name/members/college (placeholder, user to fill), V53 (deck placeholder-literal check) not yet implemented | pending V53 |
 | 2 | Accessible GitHub repo link | Y | public, confirmed `private: false` via API | V13, V55 |
-| 3 | Standalone inference script | Y | `inference.py` | V01 |
+| 3 | Standalone inference script | Y | `run.py` | V01 |
 | 4 | Training code reproducing submitted checkpoint | Y | `train.py --config configs/long_run_e.yaml --seed 42 --hub_repo <repo>`, documented in README's rewritten Training section (2026-08-17; the previously-documented `configs/final.yaml --closed_form_linear` command reproduced a DIFFERENT, non-shipped checkpoint -- a real gap, now fixed) | -- |
 | 5 | Final model weights/config + download instructions | Y | `weights/README.md`, checkpoint tracked directly (V51/V59), test outputs published as Release `artifacts-v2`, sha256 published and fetch-verified from a logged-out session | V06, V35, V51, V59 |
 | 6 | README with exact setup, commands, I/O contract, assumptions | Y | verified present; 3 stale claims fixed this session (throughput-exists claims, committed-artifact claims) | V46 (partial -- doesn't literally exec fenced commands) |
@@ -99,7 +99,7 @@ no-third-split structural gap) remain marked.
 | 1 | README.md | Y | present, truthed-up this session | V46 |
 | 2 | requirements.txt | Y | present | V14 |
 | 3 | train.py | Y | present | -- |
-| 4 | inference.py | Y | present | V01 |
+| 4 | run.py | Y | present | V01 |
 | 5 | configs/ | Y | `baseline_unet.yaml`, `final.yaml`, `nafnet_x2.yaml`, `split_val.txt` | -- |
 | 6 | src/ | Y | 8 modules | -- |
 | 7 | weights/ | Y | gitignored `*.pt` + `weights/README.md` with Release download instructions (deliberate, per B9) | V06, V59 |
@@ -163,5 +163,5 @@ permutation, 256/512 dual-res timing, tail coverage.
 ## Reconciliation note
 
 Not yet diffed against `docs/SPEC_VCHECK_MAP.md`, and that map itself is stale (covers V01-V52
-only; the verifier now implements 68 checks, V53-V68 unmapped). Both are tracked as open items,
+only; the verifier now implements 71 checks, V53-V70 unmapped). Both are tracked as open items,
 not yet actioned as of this writing.

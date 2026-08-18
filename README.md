@@ -603,8 +603,9 @@ blanket `results/*` rule for it specifically (`!results/experiments.csv`).
    loss** — hallucinating a structure that is not there is the worst possible failure in an
    inspection context.
 9. **Throughput** is measured over the whole process, not inferred from kernel timings. The
-   current 400-image external run (`results/runtime_report.md`) measures a median 28.43 s
-   total (14.1 img/s) on the RTX 4060, n=5. The detailed profiler breakdown
+   current 400-image external run (`results/runtime_report.md`), with `run.py`'s real
+   default (batch 4, no override), measures a median 20.62 s total (19.40 img/s) on the RTX
+   4060, n=5. The detailed profiler breakdown
    (import overhead share, layer-norm/conv time share) was measured at the prior, smaller
    checkpoint's size and has not yet been re-run at the current 1,393,938-param size
    (`results/runtime_report.md`'s own stated follow-up) — NAFSR's identified
