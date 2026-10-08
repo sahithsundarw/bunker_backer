@@ -274,7 +274,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/sahithsundarw/bunker_backer.git
-cd semicon-kla-image-restoration
+cd bunker_backer
 ```
 
 Create the environment and install the pinned dependencies:
